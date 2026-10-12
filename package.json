@@ -1,0 +1,12 @@
+{
+  "name": "easypos",
+  "version": "1.0.0",
+  "description": "Easy Restaurant POS System",
+  "private": true,
+  "scripts": {
+    "dev": "node start.js",
+    "start": "node start.js",
+    "server": "node server/index.js",
+    "client": "npm --prefix client run dev"
+  }
+}

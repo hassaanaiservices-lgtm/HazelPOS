@@ -1,0 +1,23 @@
+# Dependencies
+node_modules/
+*/node_modules/
+
+# Production build
+client/dist/
+dist/
+
+# SQLite databases & temp lock files
+*.db
+*.db-journal
+*.db-wal
+*.sqlite
+
+# Environment & Logs
+.env
+.env.local
+*.log
+npm-debug.log*
+
+# OS Files
+.DS_Store
+Thumbs.db
