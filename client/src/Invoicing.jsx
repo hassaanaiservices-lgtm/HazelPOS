@@ -1,5 +1,7 @@
-import { useEffect, useState, useContext } from 'react'
+import { useEffect, useState } from 'react'
 import { api, rs, localDate, TYPES } from './lib'
+import { Icon } from './ui'
+import { toastError, confirmBox } from './notify'
 
 const EXP_CATEGORIES = ['Ingredients', 'Packaging', 'Utilities', 'Salaries', 'Rent', 'Maintenance', 'Marketing', 'Miscellaneous']
 
@@ -16,7 +18,7 @@ export default function Invoicing({ user, notify }) {
   const loadData = () => {
     api('/invoicing/summary').then(setSummary)
     api('/expenses').then(setExpenses)
-    api('/orders').then(setOrders)
+    api('/orders?status=paid').then(setOrders)
     api('/settings').then(setSettings)
   }
 
@@ -28,12 +30,12 @@ export default function Invoicing({ user, notify }) {
     setShowAddExpense(false)
     setNewExp({ title: '', category: 'Ingredients', amount: '', payment_method: 'cash', date: localDate() })
     loadData()
-    notify('Expense recorded ✔')
+    notify('Expense recorded')
   }
 
   const deleteExpense = async id => {
-    if (confirm('Delete this expense?')) {
-      await api(`/expenses/${id}/delete`, {})
+    if (await confirmBox('Delete this expense?')) {
+      try { await api(`/expenses/${id}/delete`, {}) } catch (e) { return toastError(e.message) }
       loadData()
       notify('Expense deleted')
     }
@@ -105,7 +107,7 @@ export default function Invoicing({ user, notify }) {
                   <div className="hbar-track">
                     <div style={{
                       width: summary.expenses > 0 ? `${(c.amount / summary.expenses) * 100}%` : '0%',
-                      background: 'linear-gradient(90deg, #ff5470, #ff8e71)'
+                      background: 'var(--danger)'
                     }} />
                   </div>
                 </div>
@@ -115,7 +117,7 @@ export default function Invoicing({ user, notify }) {
             <div className="card">
               <h3>Bank & Electronic Invoicing Details</h3>
               <div className="bank-info-box">
-                <div className="bank-logo">🏛️</div>
+                <div className="bank-logo"><Icon name="bank" size={28} /></div>
                 <div className="bank-details">
                   <b>{settings.bank_name || 'Bank Account'}</b>
                   <div>Title: <span>{settings.bank_title || settings.name}</span></div>
@@ -158,7 +160,7 @@ export default function Invoicing({ user, notify }) {
                   <td className="muted">{e.user_name || '—'}</td>
                   <td style={{ fontWeight: 700, color: 'var(--red)' }}>-{rs(e.amount)}</td>
                   <td style={{ textAlign: 'right' }}>
-                    <button className="ghost sm danger" onClick={() => deleteExpense(e.id)}>✕</button>
+                    <button className="ghost sm danger" onClick={() => deleteExpense(e.id)} aria-label="Remove"><Icon name="x" size={16} /></button>
                   </td>
                 </tr>
               ))}
@@ -191,7 +193,7 @@ export default function Invoicing({ user, notify }) {
                 <tr key={o.id}>
                   <td><b>{o.invoice_no || `INV-${o.id}`}</b></td>
                   <td>{new Date(o.created_at).toLocaleDateString()}</td>
-                  <td><span className="pill">{TYPES.find(t => t.id === o.type)?.icon} {o.type}</span></td>
+                  <td><span className="pill"><Icon name={TYPES.find(t => t.id === o.type)?.icon} size={15} />{o.type}</span></td>
                   <td>{o.customer || 'Walk-in Customer'}</td>
                   <td>{o.items.reduce((s, i) => s + i.qty, 0)} items</td>
                   <td>{rs(o.tax)}</td>
@@ -202,7 +204,7 @@ export default function Invoicing({ user, notify }) {
                   </td>
                   <td>
                     <button className="ghost sm" onClick={() => setSelectedInvoice(o)}>
-                      📄 View Tax Invoice
+                      <Icon name="receipt" size={15} />View invoice
                     </button>
                   </td>
                 </tr>
@@ -329,7 +331,10 @@ function TaxInvoiceModal({ order, settings, onClose }) {
             <div className="inv-summary-rows">
               <div><span>Subtotal:</span> <b>{rs(order.subtotal)}</b></div>
               {order.discount > 0 && <div><span>Discount:</span> <b>-{rs(order.discount)}</b></div>}
+              {order.promo_amount > 0 && <div><span>Promo {order.promo_code}:</span> <b>-{rs(order.promo_amount)}</b></div>}
+              {order.points_amount > 0 && <div><span>Points used ({order.points_used}):</span> <b>-{rs(order.points_amount)}</b></div>}
               <div><span>GST / Sales Tax:</span> <b>{rs(order.tax)}</b></div>
+              {order.delivery_fee > 0 && <div><span>Delivery{order.zone ? ` (${order.zone})` : ''}:</span> <b>{rs(order.delivery_fee)}</b></div>}
               <div className="inv-grand"><span>Total Due:</span> <b>{rs(order.total)}</b></div>
             </div>
           </div>
@@ -342,7 +347,7 @@ function TaxInvoiceModal({ order, settings, onClose }) {
 
         <div className="actions no-print" style={{ marginTop: 16 }}>
           <button className="ghost" onClick={onClose}>Close</button>
-          <button className="primary" onClick={() => window.print()}>🖨️ Print Tax Invoice</button>
+          <button className="primary" onClick={() => window.print()}><Icon name="print" size={16} />Print tax invoice</button>
         </div>
       </div>
     </div>

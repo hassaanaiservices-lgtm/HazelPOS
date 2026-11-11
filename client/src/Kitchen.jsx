@@ -1,14 +1,16 @@
 import { useEffect, useRef, useState } from 'react'
-import { api, TYPES } from './lib'
+import { api, TYPES, modsText } from './lib'
+import { Icon } from './ui'
 
 const COLS = [
-  { id: 'new', label: 'New', next: 'preparing', btn: 'Start cooking 🔥' },
-  { id: 'preparing', label: 'Preparing', next: 'ready', btn: 'Mark ready ✅' },
+  { id: 'new', label: 'New', next: 'preparing', btn: 'Start cooking' },
+  { id: 'preparing', label: 'Preparing', next: 'ready', btn: 'Mark ready' },
   { id: 'ready', label: 'Ready', next: 'done', btn: 'Served / Picked up' },
 ]
 const mins = t => Math.floor((Date.now() - new Date(t)) / 60000)
+const since = m => m < 60 ? `${m}m` : `${Math.floor(m / 60)}h ${m % 60}m`
 
-export default function Kitchen() {
+export default function Kitchen({ readOnly = false }) {
   const [tickets, setTickets] = useState([])
   const [, tick] = useState(0)
   const known = useRef(null)
@@ -16,7 +18,7 @@ export default function Kitchen() {
   const load = async () => {
     const list = await api('/kitchen')
     const ids = new Set(list.filter(t => t.kitchen_status === 'new').map(t => t.id + t.kitchen_at))
-    if (known.current && [...ids].some(id => !known.current.has(id))) beep()
+    if (!readOnly && known.current && [...ids].some(id => !known.current.has(id))) beep()
     known.current = ids
     setTickets(list)
   }
@@ -43,15 +45,15 @@ export default function Kitchen() {
                   <div key={t.id} className={'ticket' + (m >= 15 ? ' late' : m >= 8 ? ' warn' : '')}>
                     <div className="t-head">
                       <b>#{t.id}</b>
-                      <span className="pill">{type?.icon} {t.tableName || type?.label}</span>
-                      <span className="timer">{m}m</span>
+                      <span className="pill"><Icon name={type?.icon} size={15} />{t.tableName || type?.label}</span>
+                      <span className="timer">{since(m)}</span>
                     </div>
                     {t.customer && <div className="muted">{t.customer}</div>}
-                    <ul>{t.items.map(i => <li key={i.id}><b>{i.qty}×</b> {i.name}{i.note && <em> — {i.note}</em>}</li>)}</ul>
-                    <div className="t-actions">
-                      {c.id !== 'new' && <button className="ghost" onClick={() => move(t, COLS[COLS.indexOf(c) - 1].id)}>↩</button>}
+                    <ul>{t.items.map(i => <li key={i.id}><b>{i.qty}×</b> {i.name}{i.mods?.length > 0 && <small className="mods"> + {modsText(i.mods)}</small>}{i.note && <em>, {i.note}</em>}</li>)}</ul>
+                    {!readOnly && <div className="t-actions">
+                      {c.id !== 'new' && <button className="ghost" aria-label="Move back" title="Move back" onClick={() => move(t, COLS[COLS.indexOf(c) - 1].id)}><Icon name="back" size={16} /></button>}
                       <button className="primary" onClick={() => move(t, c.next)}>{c.btn}</button>
-                    </div>
+                    </div>}
                   </div>
                 )
               })}

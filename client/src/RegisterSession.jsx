@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api, rs } from './lib'
+import { Icon } from './ui'
 
 export default function RegisterSession({ user, notify }) {
   const [session, setSession] = useState(null)
@@ -23,7 +24,7 @@ export default function RegisterSession({ user, notify }) {
 
   const openRegister = async () => {
     await api('/register/open', { opening_cash: +openingCash, opened_by: user.name })
-    notify('Register opened ✔')
+    notify('Register opened')
     load()
   }
 
@@ -31,7 +32,7 @@ export default function RegisterSession({ user, notify }) {
     if (!cashMove.amount) return
     await api('/register/cash-move', { ...cashMove, amount: +cashMove.amount, user_name: user.name })
     setCashMove(null)
-    notify(`Cash ${cashMove.type === 'in' ? 'deposit' : 'withdrawal'} recorded ✔`)
+    notify(`Cash ${cashMove.type === 'in' ? 'deposit' : 'withdrawal'} recorded`)
     load()
   }
 
@@ -59,7 +60,7 @@ export default function RegisterSession({ user, notify }) {
         <>
           {!session ? (
             <div className="open-register-card">
-              <div className="open-icon">💰</div>
+              <div className="open-icon"><Icon name="wallet" size={40} /></div>
               <h2>Register is Closed</h2>
               <p className="muted">Enter your starting cash float to open the till for orders.</p>
               <div className="open-form">
@@ -78,7 +79,7 @@ export default function RegisterSession({ user, notify }) {
             <div className="session-dashboard">
               <div className="session-header-card">
                 <div>
-                  <span className="dot free" /> <b style={{ fontSize: 18 }}>Shift Active</b>
+                  <b style={{ fontSize: 18 }}>Shift open</b>
                   <div className="muted" style={{ fontSize: 13 }}>
                     Opened by <b>{session.opened_by}</b> on {new Date(session.opened_at).toLocaleString()}
                   </div>
@@ -123,7 +124,7 @@ export default function RegisterSession({ user, notify }) {
               {session.otherSales?.length > 0 && (
                 <div className="card" style={{ marginTop: 14 }}>
                   <h3>Digital / Card Payments in this shift</h3>
-                  <div style={{ display: 'flex', gap: 16, marginTop: 8 }}>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
                     {session.otherSales.map(s => (
                       <div key={s.m} className="pill" style={{ padding: '8px 16px', fontSize: 14 }}>
                         <span style={{ textTransform: 'capitalize' }}>{s.m}</span>: <b>{rs(s.s)}</b> ({s.c} orders)
@@ -144,7 +145,7 @@ export default function RegisterSession({ user, notify }) {
                           <td>{new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</td>
                           <td>
                             <span className={'pill ' + (m.type === 'in' ? 'pill-in' : 'pill-out')}>
-                              {m.type === 'in' ? '+ CASH IN' : '− CASH OUT'}
+                              {m.type === 'in' ? 'Cash in' : 'Cash out'}
                             </span>
                           </td>
                           <td>{m.reason || '—'}</td>
@@ -197,11 +198,11 @@ export default function RegisterSession({ user, notify }) {
                       fontWeight: 700,
                       color: h.difference === 0 ? 'var(--green)' : h.difference > 0 ? 'var(--accent2)' : 'var(--red)'
                     }}>
-                      {h.difference > 0 ? `+${rs(h.difference)} (Over)` : h.difference < 0 ? `${rs(h.difference)} (Short)` : 'Balanced ✔'}
+                      {h.difference > 0 ? `+${rs(h.difference)} (Over)` : h.difference < 0 ? `${rs(h.difference)} (Short)` : 'Balanced'}
                     </span>
                   </td>
                   <td>
-                    <button className="ghost sm" onClick={() => setZReport(h)}>📄 Z-Report</button>
+                    <button className="ghost sm" onClick={() => setZReport(h)}><Icon name="receipt" size={15} />Z-report</button>
                   </td>
                 </tr>
               ))}
@@ -244,7 +245,7 @@ export default function RegisterSession({ user, notify }) {
               <input type="number" autoFocus value={closingCash} onChange={e => setClosingCash(e.target.value)} />
             </label>
             <div className={'diff-badge ' + (diff === 0 ? 'good' : diff > 0 ? 'over' : 'short')}>
-              Variance: <b>{diff > 0 ? `+${rs(diff)} (Surplus)` : diff < 0 ? `${rs(diff)} (Shortage)` : 'Exact Match (Balanced) ✔'}</b>
+              Variance: <b>{diff > 0 ? `+${rs(diff)} (Surplus)` : diff < 0 ? `${rs(diff)} (Shortage)` : 'Exact Match (Balanced)'}</b>
             </div>
             <label>Closing Notes (optional)
               <input placeholder="Remarks / discrepancies" value={notes} onChange={e => setNotes(e.target.value)} />
@@ -297,7 +298,7 @@ function ZReportModal({ session, onClose }) {
         </div>
         <div className="actions no-print" style={{ marginTop: 12 }}>
           <button className="ghost" onClick={onClose}>Close</button>
-          <button className="primary" onClick={() => window.print()}>🖨️ Print Z-Report</button>
+          <button className="primary" onClick={() => window.print()}><Icon name="print" size={16} />Print Z-report</button>
         </div>
       </div>
     </div>

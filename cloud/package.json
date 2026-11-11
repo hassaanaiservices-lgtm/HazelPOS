@@ -1,0 +1,14 @@
+{
+  "name": "hazelpos-cloud",
+  "version": "1.0.0",
+  "description": "HazelPOS cloud: owner dashboard, multi-branch sync and backups",
+  "main": "index.js",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "express": "^5.3.0"
+  }
+}

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import { api, rs, localDate } from './lib'
+import { api, rs, localDate, downloadCsv } from './lib'
+import { Icon } from './ui'
 
 const RANGES = {
   Today: () => [localDate(), localDate()],
@@ -28,7 +29,14 @@ export default function Reports() {
         </div>
         <input type="date" value={range[0]} onChange={e => { setLabel(''); setRange([e.target.value, range[1]]) }} />
         <input type="date" value={range[1]} onChange={e => { setLabel(''); setRange([range[0], e.target.value]) }} />
-        <button className="ghost" onClick={() => window.print()}>🖨️</button>
+        <button className="ghost" aria-label="Print report" onClick={() => window.print()}><Icon name="print" size={16} />Print</button>
+      </div>
+      <div className="export-row no-print">
+        {[['sales', 'Sales'], ['items', 'Items sold'], ['expenses', 'Expenses']].map(([k, l]) => (
+          <button key={k} className="ghost sm" onClick={async () => downloadCsv(`${k}_${range[0]}_to_${range[1]}.csv`, await api(`/export/${k}?from=${range[0]}&to=${range[1]}`))}>
+            <Icon name="download" size={15} />{l} (Excel)
+          </button>
+        ))}
       </div>
 
       <div className="kpis">

@@ -1,0 +1,517 @@
+[
+  {
+    "id": 1,
+    "name": "Margherita",
+    "category_id": 1,
+    "active": true,
+    "price": 1200,
+    "subtitle": "Pizza · Serves 1–3 depending on size",
+    "description": "Classic hand-stretched pizza with slow-cooked tomato sauce, fresh mozzarella and basil, baked in a stone oven.",
+    "ingredients": [
+      "Mozzarella",
+      "Tomato sauce",
+      "Fresh basil",
+      "Olive oil"
+    ],
+    "sizes": [
+      {
+        "name": "Small",
+        "detail": "8 inch",
+        "price": 800
+      },
+      {
+        "name": "Medium",
+        "detail": "10 inch",
+        "price": 1200
+      },
+      {
+        "name": "Large",
+        "detail": "12 inch",
+        "price": 1600
+      }
+    ],
+    "modifiers": []
+  },
+  {
+    "id": 2,
+    "name": "Pepperoni",
+    "category_id": 1,
+    "active": true,
+    "price": 1500,
+    "subtitle": "Pizza · Serves 1–3 depending on size",
+    "description": "Rich marinara, melted mozzarella cheese, and crispy beef pepperoni slices with Italian herb seasoning.",
+    "ingredients": [
+      "Beef Pepperoni",
+      "Mozzarella",
+      "Marinara",
+      "Oregano"
+    ],
+    "sizes": [
+      {
+        "name": "Small",
+        "detail": "8 inch",
+        "price": 1000
+      },
+      {
+        "name": "Medium",
+        "detail": "10 inch",
+        "price": 1500
+      },
+      {
+        "name": "Large",
+        "detail": "12 inch",
+        "price": 1950
+      }
+    ],
+    "modifiers": []
+  },
+  {
+    "id": 3,
+    "name": "Chicken Tikka",
+    "category_id": 1,
+    "active": true,
+    "price": 1600,
+    "subtitle": "Pizza · Serves 1–3 depending on size",
+    "description": "Spiced char-grilled chicken tikka chunks, red onions, bell peppers, mozzarella, and special herbs.",
+    "ingredients": [
+      "Tikka Chicken",
+      "Mozzarella",
+      "Onions",
+      "Bell Peppers"
+    ],
+    "sizes": [
+      {
+        "name": "Small",
+        "detail": "8 inch",
+        "price": 1100
+      },
+      {
+        "name": "Medium",
+        "detail": "10 inch",
+        "price": 1600
+      },
+      {
+        "name": "Large",
+        "detail": "12 inch",
+        "price": 2100
+      }
+    ],
+    "modifiers": []
+  },
+  {
+    "id": 4,
+    "name": "Fajita",
+    "category_id": 1,
+    "active": true,
+    "price": 1550,
+    "subtitle": "Pizza · Serves 1–3 depending on size",
+    "description": "Mexican-style fajita chicken, sautéed bell peppers, sweet corn, melted mozzarella, and spicy jalapeños.",
+    "ingredients": [
+      "Fajita Chicken",
+      "Mozzarella",
+      "Jalapeños",
+      "Capsicum"
+    ],
+    "sizes": [
+      {
+        "name": "Small",
+        "detail": "8 inch",
+        "price": 1050
+      },
+      {
+        "name": "Medium",
+        "detail": "10 inch",
+        "price": 1550
+      },
+      {
+        "name": "Large",
+        "detail": "12 inch",
+        "price": 2050
+      }
+    ],
+    "modifiers": []
+  },
+  {
+    "id": 5,
+    "name": "Veggie Supreme",
+    "category_id": 1,
+    "active": true,
+    "price": 1350,
+    "subtitle": "Pizza · Serves 1–3 depending on size",
+    "description": "Loaded with black olives, button mushrooms, bell peppers, sweet corn, onions, and premium mozzarella.",
+    "ingredients": [
+      "Mushrooms",
+      "Black Olives",
+      "Sweet Corn",
+      "Mozzarella"
+    ],
+    "sizes": [
+      {
+        "name": "Small",
+        "detail": "8 inch",
+        "price": 900
+      },
+      {
+        "name": "Medium",
+        "detail": "10 inch",
+        "price": 1350
+      },
+      {
+        "name": "Large",
+        "detail": "12 inch",
+        "price": 1800
+      }
+    ],
+    "modifiers": []
+  },
+  {
+    "id": 6,
+    "name": "Zinger Burger",
+    "category_id": 2,
+    "active": true,
+    "price": 650,
+    "subtitle": "Burgers · Crispy & Juicy",
+    "description": "Golden fried crispy chicken fillet topped with spicy mayo and shredded lettuce on a toasted sesame bun.",
+    "ingredients": [
+      "Crispy Fillet",
+      "Spicy Mayo",
+      "Iceberg Lettuce",
+      "Brioche Bun"
+    ],
+    "sizes": [
+      {
+        "name": "Single",
+        "detail": "Regular patty",
+        "price": 650
+      },
+      {
+        "name": "Double",
+        "detail": "Double crispy patty",
+        "price": 950
+      },
+      {
+        "name": "Combo",
+        "detail": "With fries & drink",
+        "price": 1100
+      }
+    ],
+    "modifiers": []
+  },
+  {
+    "id": 7,
+    "name": "Beef Burger",
+    "category_id": 2,
+    "active": true,
+    "price": 800,
+    "subtitle": "Burgers · 100% Prime Beef",
+    "description": "Flame-grilled seasoned beef patty with melted cheddar cheese, caramelized onions, pickles, and secret sauce.",
+    "ingredients": [
+      "Beef Patty",
+      "Cheddar Cheese",
+      "Pickles",
+      "Caramelized Onions"
+    ],
+    "sizes": [
+      {
+        "name": "Single",
+        "detail": "150g patty",
+        "price": 800
+      },
+      {
+        "name": "Double",
+        "detail": "300g patties",
+        "price": 1150
+      },
+      {
+        "name": "Combo",
+        "detail": "With fries & drink",
+        "price": 1300
+      }
+    ],
+    "modifiers": []
+  },
+  {
+    "id": 8,
+    "name": "Double Patty",
+    "category_id": 2,
+    "active": true,
+    "price": 1100,
+    "subtitle": "Burgers · Extra Large",
+    "description": "Two smashed prime beef patties, double cheddar cheese slices, smokey BBQ mayo, and crisp lettuce.",
+    "ingredients": [
+      "Double Beef",
+      "Double Cheddar",
+      "BBQ Sauce",
+      "Sesame Bun"
+    ],
+    "sizes": [
+      {
+        "name": "Regular",
+        "detail": "Two patties",
+        "price": 1100
+      },
+      {
+        "name": "Monster",
+        "detail": "Triple patties",
+        "price": 1450
+      },
+      {
+        "name": "Combo",
+        "detail": "With fries & drink",
+        "price": 1600
+      }
+    ],
+    "modifiers": []
+  },
+  {
+    "id": 9,
+    "name": "Fries",
+    "category_id": 3,
+    "active": true,
+    "price": 300,
+    "subtitle": "Sides · Crispy Golden",
+    "description": "Freshly cut skin-on potatoes deep fried to golden crispiness and dusted with special salt seasoning.",
+    "ingredients": [
+      "Potato",
+      "Sea Salt",
+      "Vegetable Oil"
+    ],
+    "sizes": [
+      {
+        "name": "Regular",
+        "detail": "Single portion",
+        "price": 300
+      },
+      {
+        "name": "Large",
+        "detail": "Sharing portion",
+        "price": 450
+      },
+      {
+        "name": "Jumbo",
+        "detail": "Family bucket",
+        "price": 600
+      }
+    ],
+    "modifiers": []
+  },
+  {
+    "id": 10,
+    "name": "Loaded Fries",
+    "category_id": 3,
+    "active": true,
+    "price": 550,
+    "subtitle": "Sides · Cheesy & Saucy",
+    "description": "Golden fries smothered in warm cheddar cheese sauce, crispy jalapeno bites, and chipotle garlic drizzle.",
+    "ingredients": [
+      "Fries",
+      "Cheddar Sauce",
+      "Jalapeños",
+      "Chipotle Mayo"
+    ],
+    "sizes": [
+      {
+        "name": "Regular",
+        "detail": "Single bowl",
+        "price": 550
+      },
+      {
+        "name": "Large",
+        "detail": "Party platter",
+        "price": 800
+      }
+    ],
+    "modifiers": []
+  },
+  {
+    "id": 11,
+    "name": "Garlic Bread",
+    "category_id": 3,
+    "active": true,
+    "price": 400,
+    "subtitle": "Sides · Warm & Buttery",
+    "description": "Crispy baguette slices toasted with roasted garlic herb butter and fresh Italian parsley.",
+    "ingredients": [
+      "French Baguette",
+      "Garlic Butter",
+      "Parsley",
+      "Oregano"
+    ],
+    "sizes": [
+      {
+        "name": "Plain",
+        "detail": "4 slices",
+        "price": 400
+      },
+      {
+        "name": "Cheesy",
+        "detail": "4 slices with mozzarella",
+        "price": 550
+      }
+    ],
+    "modifiers": []
+  },
+  {
+    "id": 12,
+    "name": "Nuggets (6)",
+    "category_id": 3,
+    "active": true,
+    "price": 450,
+    "subtitle": "Sides · Tender Bites",
+    "description": "Bite-sized tender all-white chicken breast nuggets battered and fried golden brown with dipping sauce.",
+    "ingredients": [
+      "Chicken Breast",
+      "Crispy Breading",
+      "Dip Sauce"
+    ],
+    "sizes": [
+      {
+        "name": "6 Pcs",
+        "detail": "Single box",
+        "price": 450
+      },
+      {
+        "name": "12 Pcs",
+        "detail": "Sharing box",
+        "price": 800
+      }
+    ],
+    "modifiers": []
+  },
+  {
+    "id": 13,
+    "name": "Coke 500ml",
+    "category_id": 4,
+    "active": true,
+    "price": 150,
+    "subtitle": "Drinks · Chilled Refreshment",
+    "description": "Classic Coca-Cola served ice cold.",
+    "ingredients": [
+      "Carbonated Water",
+      "Cola Syrup",
+      "Caramel Color"
+    ],
+    "sizes": [
+      {
+        "name": "500ml",
+        "detail": "Bottle",
+        "price": 150
+      },
+      {
+        "name": "1.5L",
+        "detail": "Large bottle",
+        "price": 280
+      }
+    ],
+    "modifiers": []
+  },
+  {
+    "id": 14,
+    "name": "Mineral Water",
+    "category_id": 4,
+    "active": true,
+    "price": 80,
+    "subtitle": "Drinks · Pure Hydration",
+    "description": "Pure natural mineral drinking water, chilled.",
+    "ingredients": [
+      "Natural Mineral Water"
+    ],
+    "sizes": [
+      {
+        "name": "Small",
+        "detail": "500ml",
+        "price": 80
+      },
+      {
+        "name": "Large",
+        "detail": "1.5L",
+        "price": 140
+      }
+    ],
+    "modifiers": []
+  },
+  {
+    "id": 15,
+    "name": "Mint Margarita",
+    "category_id": 4,
+    "active": true,
+    "price": 350,
+    "subtitle": "Drinks · Freshly Blended",
+    "description": "Refreshing mocktail blended with fresh mint leaves, lemon juice, ice, and fizzy soda.",
+    "ingredients": [
+      "Fresh Mint",
+      "Lemon Juice",
+      "Soda",
+      "Black Salt"
+    ],
+    "sizes": [
+      {
+        "name": "Regular",
+        "detail": "350ml glass",
+        "price": 350
+      }
+    ],
+    "modifiers": []
+  },
+  {
+    "id": 16,
+    "name": "Lava Cake",
+    "category_id": 5,
+    "active": true,
+    "price": 450,
+    "subtitle": "Desserts · Warm & Decadent",
+    "description": "Warm dark chocolate sponge cake with a rich molten Belgian chocolate center, dusted with icing sugar.",
+    "ingredients": [
+      "Dark Chocolate",
+      "Belgian Cocoa",
+      "Butter",
+      "Eggs"
+    ],
+    "sizes": [
+      {
+        "name": "Standard",
+        "detail": "Warm cake",
+        "price": 450
+      },
+      {
+        "name": "With Ice Cream",
+        "detail": "With vanilla scoop",
+        "price": 600
+      }
+    ],
+    "modifiers": []
+  },
+  {
+    "id": 17,
+    "name": "Ice Cream",
+    "category_id": 5,
+    "active": true,
+    "price": 250,
+    "subtitle": "Desserts · Creamy Scoops",
+    "description": "Artisanal creamy ice cream served chilled in your choice of flavors with chocolate drizzle.",
+    "ingredients": [
+      "Fresh Cream",
+      "Milk",
+      "Natural Flavors",
+      "Chocolate Sauce"
+    ],
+    "sizes": [
+      {
+        "name": "Single Scoop",
+        "detail": "1 scoop cup",
+        "price": 250
+      },
+      {
+        "name": "Double Scoop",
+        "detail": "2 scoops cup",
+        "price": 420
+      },
+      {
+        "name": "Sundae Bowl",
+        "detail": "With nuts & syrup",
+        "price": 550
+      }
+    ],
+    "modifiers": []
+  }
+]

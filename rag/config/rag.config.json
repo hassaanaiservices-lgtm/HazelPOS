@@ -1,0 +1,91 @@
+{
+  "llm": {
+    "provider": "deepseek",
+    "base_url": "https://api.deepseek.com",
+    "model": "deepseek-flash",
+    "thinking": "disabled",
+    "timeout_ms": 15000,
+    "max_retries": 1,
+    "max_llm_calls_per_message": 2,
+    "max_reply_tokens": 400,
+    "price_usd_per_million": {
+      "peak": {
+        "input_miss": 0.3,
+        "input_hit": 0.006,
+        "output": 1.2
+      },
+      "off_peak": {
+        "input_miss": 0.15,
+        "input_hit": 0.003,
+        "output": 0.6
+      },
+      "_note": "DeepSeek pricing page, checked 2026-11-09"
+    },
+    "hedge_after_ms": 4000,
+    "_hedge_note": "If DeepSeek hasn't answered after hedge_after_ms, the same request is sent again and the first answer wins (cuts rare 5-13 s waits; costs ~a few % more calls). 0 = off."
+  },
+  "data": {
+    "pos_db": "../server/pos.db",
+    "restaurant_fields": [
+      "name",
+      "address",
+      "phone"
+    ],
+    "include_promo_codes": false,
+    "_note": "Promo codes are off by default: many are given to specific customers. Discounts are always applied by the POS, never by the assistant."
+  },
+  "context": {
+    "currency": "Rs",
+    "warn_tokens": 40000,
+    "_note": "The whole live menu, FAQ and delivery areas go into the prompt with every message (decided 2026-11-09, replaces vector search for the menu)."
+  },
+  "chunking": {
+    "whole_document_types": [
+      "product",
+      "category",
+      "delivery_zone",
+      "restaurant",
+      "promo"
+    ],
+    "max_chars": 1500,
+    "overlap_chars": 200,
+    "_note": "Types in whole_document_types are always one chunk. Longer text (FAQ answers) is split on paragraphs/sentences into pieces of at most max_chars, each starting with its question, with overlap_chars carried over from the previous piece."
+  },
+  "assistant": {
+    "enabled_by_default": false,
+    "business_hours": null,
+    "_hours_note": "null = always on. Example: {\"open\": \"12:00\", \"close\": \"02:00\"} (closing after midnight is fine). Outside hours the assistant stays quiet; staff see the messages.",
+    "merge_wait_ms": 2500,
+    "min_reply_delay_ms": 1500,
+    "max_bot_replies_per_chat_per_5_min": 30,
+    "max_parallel_chats": 3,
+    "order_confirm_window_minutes": 60,
+    "daily_cost_cap_usd": 2,
+    "auto_confirm_orders": false,
+    "_enabled_note": "Starts OFF so a newly linked number never auto-replies by surprise. Switch it on with the 🤖 Auto-reply button in the Cashier WhatsApp screen (the choice is remembered)."
+  },
+  "embedding": {
+    "model": "Xenova/bge-m3",
+    "status": "not used for now: the menu fits in the prompt. Kept as the option if FAQs grow very large"
+  },
+  "vectorstore": {
+    "type": "sqlite-vec",
+    "status": "not used for now (see embedding)"
+  },
+  "retrieval": {
+    "status": "not used for now (see embedding)"
+  },
+  "stt": {
+    "enabled": true,
+    "provider": "groq",
+    "model": "whisper-large-v3",
+    "language": "ur",
+    "max_seconds": 120,
+    "timeout_ms": 20000,
+    "ack_after_ms": 4000,
+    "keep_audio_days": 14,
+    "_note": "Voice notes are transcribed by Groq's hosted Whisper large-v3 (needs GROQ_API_KEY in .env; about $0.11 per hour of audio, 10 s minimum per note). Whisper's language auto-detect is unreliable for Urdu, so the language is fixed.",
+    "cleanup": true,
+    "_cleanup_note": "After transcription, DeepSeek rewrites the whole transcript into what the customer most likely said (Roman Urdu), using the menu (rag/prompts/voice-cleanup.md). Tested on real notes: recovers 'order', 'menu', 'Double Patty', 'discount' from garbled text. Falls back to the raw transcript if it fails."
+  }
+}

@@ -1,7 +1,7 @@
 const { spawn } = require('child_process');
 const path = require('path');
 
-console.log('🚀 Starting EasyPOS Server & Client...');
+console.log('🚀 Starting HazelPOS server & client...');
 
 const server = spawn('node', ['index.js'], {
   cwd: path.join(__dirname, 'server'),

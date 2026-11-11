@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HazelPOS Cloud</title>
+<style>
+  :root { --bg: #0f1117; --panel: #181b24; --panel2: #20242f; --line: #2b3040; --text: #eef0f6; --muted: #8b91a5; --accent: #ff6b35; --accent2: #ffb347; --green: #2ecc8f; --red: #ff5470; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.45 system-ui, -apple-system, 'Segoe UI', sans-serif; }
+  button, input { font: inherit; color: inherit; }
+  button { cursor: pointer; border: 1px solid var(--line); background: var(--panel2); border-radius: 10px; padding: 8px 14px; }
+  button.primary { background: linear-gradient(135deg, var(--accent), var(--accent2)); border: 0; color: #111; font-weight: 700; }
+  button.active { background: var(--accent); color: #111; border-color: var(--accent); }
+  input { background: var(--panel2); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; width: 100%; }
+  header { display: flex; align-items: center; gap: 12px; padding: 14px 16px; border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--bg); z-index: 2; }
+  header b { font-size: 18px; } header .sp { flex: 1; }
+  main { max-width: 1100px; margin: 0 auto; padding: 16px; }
+  .muted { color: var(--muted); } .red { color: var(--red); } .green { color: var(--green); } .warn { color: var(--accent2); }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 14px; }
+  .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 14px; }
+  .kpi, .card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 14px; }
+  .kpi span { color: var(--muted); font-size: 13px; display: block; } .kpi b { font-size: 22px; }
+  .card { margin-bottom: 12px; } .card h3 { margin: 0 0 10px; font-size: 15px; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  table { width: 100%; border-collapse: collapse; } th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  th { color: var(--muted); font-weight: 600; font-size: 13px; } .scroll { overflow-x: auto; }
+  tr.click { cursor: pointer; } tr.click:hover td { background: var(--panel2); }
+  .bars { display: flex; align-items: flex-end; gap: 4px; height: 140px; }
+  .bars div { flex: 1; background: linear-gradient(var(--accent2), var(--accent)); border-radius: 4px 4px 0 0; min-height: 2px; position: relative; }
+  .auth { max-width: 380px; margin: 10vh auto; } .auth input { margin-bottom: 10px; } .auth button { width: 100%; margin-top: 4px; }
+  .key { font-family: monospace; background: var(--panel2); padding: 10px; border-radius: 8px; word-break: break-all; user-select: all; }
+  .err { color: var(--red); min-height: 20px; }
+  @media (max-width: 700px) { .grid2 { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+const $ = s => document.querySelector(s)
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
+const rs = n => 'Rs ' + Math.round(n || 0).toLocaleString('en-PK')
+const day = d => d.toLocaleDateString('en-CA')
+const ago = iso => { if (!iso) return 'never'; const m = Math.round((Date.now() - Date.parse(iso)) / 60000); return m < 1 ? 'just now' : m < 60 ? m + ' min ago' : m < 1440 ? Math.round(m / 60) + ' h ago' : Math.round(m / 1440) + ' days ago' }
+const RANGES = {
+  Today: () => [day(new Date()), day(new Date())],
+  Yesterday: () => { const d = new Date(Date.now() - 864e5); return [day(d), day(d)] },
+  '7 days': () => [day(new Date(Date.now() - 6 * 864e5)), day(new Date())],
+  'This month': () => { const d = new Date(); return [day(new Date(d.getFullYear(), d.getMonth(), 1)), day(d)] },
+}
+let state = { token: localStorage.getItem('cloud_token'), range: 'Today', branch: null }
+
+async function api(url, body) {
+  const r = await fetch('/api' + url, { method: body ? 'POST' : 'GET', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + (state.token || '') }, body: body && JSON.stringify(body) })
+  const data = await r.json().catch(() => ({}))
+  if (r.status === 401 && !url.startsWith('/owner/')) { logout(); throw new Error('Please log in again') }
+  if (!r.ok) throw new Error(data.error || 'Request failed')
+  return data
+}
+function logout() { if (state.token) api('/owner/logout', {}).catch(() => {}); localStorage.removeItem('cloud_token'); state.token = null; render() }
+
+function authView(mode = 'login') {
+  $('#app').innerHTML = `<div class="auth card">
+    <h2>🍕 HazelPOS Cloud</h2><p class="muted">${mode === 'login' ? 'Log in to see all your branches' : 'Create the owner account'}</p>
+    ${mode === 'signup' ? '<input id="name" placeholder="Your name">' : ''}
+    <input id="email" type="email" placeholder="Email" autocomplete="username">
+    <input id="pass" type="password" placeholder="Password" autocomplete="${mode === 'login' ? 'current-password' : 'new-password'}">
+    <div class="err" id="err"></div>
+    <button class="primary" id="go">${mode === 'login' ? 'Log in' : 'Create account'}</button>
+    <p class="muted" style="text-align:center"><a href="#" id="switch" style="color:var(--accent2)">${mode === 'login' ? 'New here? Create an account' : 'Have an account? Log in'}</a></p>
+  </div>`
+  $('#switch').onclick = e => { e.preventDefault(); authView(mode === 'login' ? 'signup' : 'login') }
+  const go = async () => {
+    try {
+      const r = await api('/owner/' + mode, { email: $('#email').value, password: $('#pass').value, name: $('#name')?.value })
+      state.token = r.token; localStorage.setItem('cloud_token', r.token); render()
+    } catch (e) { $('#err').textContent = e.message }
+  }
+  $('#go').onclick = go; $('#pass').onkeydown = e => e.key === 'Enter' && go()
+}
+
+function shell(inner) {
+  $('#app').innerHTML = `<header><b>🍕 HazelPOS Cloud</b><span class="sp"></span>
+    ${state.branch ? '<button id="back">← All branches</button>' : ''}<button id="logout">Log out</button></header>
+    <main><div class="row">${Object.keys(RANGES).map(k => `<button class="${state.range === k ? 'active' : ''}" data-range="${k}">${k}</button>`).join('')}</div>${inner}</main>`
+  $('#logout').onclick = logout
+  if ($('#back')) $('#back').onclick = () => { state.branch = null; render() }
+  document.querySelectorAll('[data-range]').forEach(b => b.onclick = () => { state.range = b.dataset.range; render() })
+}
+
+async function overview() {
+  const [from, to] = RANGES[state.range]()
+  const d = await api(`/dashboard?from=${from}&to=${to}`)
+  const sum = k => d.branches.reduce((s, b) => s + (b[k] || 0), 0)
+  const days = [...new Set(d.byDay.map(x => x.day))]
+  const perDay = days.map(dd => d.byDay.filter(x => x.day === dd).reduce((s, x) => s + x.revenue, 0))
+  const max = Math.max(1, ...perDay)
+  shell(`
+    <div class="kpis">
+      <div class="kpi"><span>Revenue</span><b>${rs(sum('revenue'))}</b></div>
+      <div class="kpi"><span>Orders</span><b>${sum('orders')}</b></div>
+      <div class="kpi"><span>Expenses</span><b class="red">${rs(sum('expenses'))}</b></div>
+      <div class="kpi"><span>Net</span><b class="${sum('revenue') - sum('expenses') >= 0 ? 'green' : 'red'}">${rs(sum('revenue') - sum('expenses'))}</b></div>
+      <div class="kpi"><span>Cash short / over</span><b class="${sum('cash_difference') < 0 ? 'red' : ''}">${rs(sum('cash_difference'))}</b></div>
+    </div>
+    <div class="card"><h3>Branches</h3><div class="scroll"><table>
+      <tr><th>Branch</th><th>Revenue</th><th>Orders</th><th>Avg</th><th>Expenses</th><th>Cash diff.</th><th>Low stock</th><th>Last sync</th></tr>
+      ${d.branches.map(b => {
+        const stale = !b.last_sync || Date.now() - Date.parse(b.last_sync) > 15 * 60000
+        return `<tr class="click" data-branch="${b.id}"><td><b>${esc(b.name)}</b></td><td>${rs(b.revenue)}</td><td>${b.orders}</td><td>${rs(b.orders ? b.revenue / b.orders : 0)}</td>
+          <td>${rs(b.expenses)}</td><td class="${b.cash_difference < 0 ? 'red' : ''}">${rs(b.cash_difference)}</td>
+          <td class="${b.low_stock ? 'red' : 'muted'}">${b.low_stock || '—'}</td><td class="${stale ? 'warn' : 'muted'}">${ago(b.last_sync)}${stale ? ' ⚠' : ''}</td></tr>`
+      }).join('') || '<tr><td colspan="8" class="muted">No branches yet. Add your first branch below.</td></tr>'}
+    </table></div></div>
+    <div class="grid2">
+      <div class="card"><h3>Sales by day</h3>${days.length > 1 ? `<div class="bars">${perDay.map((v, i) => `<div title="${days[i]}: ${rs(v)}" style="height:${v / max * 100}%"></div>`).join('')}</div>
+        <div class="row muted" style="justify-content:space-between;margin:6px 0 0"><small>${days[0]}</small><small>${days.at(-1)}</small></div>` : '<p class="muted">Pick a longer range to see the trend.</p>'}</div>
+      <div class="card"><h3>Top items (all branches)</h3><table>${d.topItems.map(i => `<tr><td>${esc(i.name)}</td><td class="muted">${i.qty} sold</td><td>${rs(i.revenue)}</td></tr>`).join('') || '<tr><td class="muted">No sales in this period</td></tr>'}</table></div>
+    </div>
+    <div class="card"><h3>Add a branch</h3><div class="row"><input id="bname" placeholder="Branch name, e.g. Gulberg" style="max-width:320px"><button class="primary" id="addb">Create branch key</button></div><div id="newkey"></div></div>`)
+  document.querySelectorAll('[data-branch]').forEach(r => r.onclick = () => { state.branch = +r.dataset.branch; render() })
+  $('#addb').onclick = async () => {
+    try {
+      const b = await api('/branches', { name: $('#bname').value })
+      $('#newkey').innerHTML = keyBox(b)
+    } catch (e) { alert(e.message) }
+  }
+}
+const keyBox = b => `<p>Branch <b>${esc(b.name)}</b> created. On that branch's POS go to <b>Settings → Cloud</b> and enter:</p>
+  <p class="muted">Cloud address</p><div class="key">${esc(location.origin)}</div>
+  <p class="muted">Branch key (shown only once — copy it now)</p><div class="key">${esc(b.key)}</div>`
+
+async function branchView() {
+  const [from, to] = RANGES[state.range]()
+  const b = await api(`/branches/${state.branch}?from=${from}&to=${to}`)
+  const split = rows => rows.map(r => `<tr><td>${esc(r.k || '—')}</td><td class="muted">${r.orders} orders</td><td>${rs(r.revenue)}</td></tr>`).join('') || '<tr><td class="muted">—</td></tr>'
+  shell(`
+    <div class="row"><h2 style="margin:0">${esc(b.name)}</h2><span class="muted">Last sync ${ago(b.last_sync)}</span><span class="sp" style="flex:1"></span>
+      <button id="rename">Rename</button><button id="rekey">New branch key</button></div>
+    <div id="newkey"></div>
+    <div class="grid2">
+      <div class="card"><h3>Payment methods</h3><table>${split(b.byMethod)}</table><h3 style="margin-top:14px">Order types</h3><table>${split(b.byType)}</table></div>
+      <div class="card"><h3>Staff sales</h3><table>${split(b.byStaff)}</table></div>
+      <div class="card"><h3>Top items</h3><table>${b.topItems.map(i => `<tr><td>${esc(i.name)}</td><td class="muted">${i.qty}</td><td>${rs(i.revenue)}</td></tr>`).join('') || '<tr><td class="muted">No sales</td></tr>'}</table></div>
+      <div class="card"><h3>Expenses</h3><table>${b.expenses.map(e => `<tr><td>${esc(e.category)}</td><td>${rs(e.amount)}</td></tr>`).join('') || '<tr><td class="muted">None</td></tr>'}</table></div>
+    </div>
+    <div class="card"><h3>Cash drawer shifts</h3><div class="scroll"><table><tr><th>Closed</th><th>Opened by</th><th>Closed by</th><th>Expected</th><th>Counted</th><th>Difference</th></tr>
+      ${b.shifts.map(s => `<tr><td>${new Date(s.closed_at).toLocaleString()}</td><td>${esc(s.opened_by)}</td><td>${esc(s.closed_by)}</td><td>${rs(s.expected_cash)}</td><td>${rs(s.closing_cash)}</td>
+        <td class="${s.difference < 0 ? 'red' : s.difference > 0 ? 'warn' : 'green'}">${rs(s.difference)}</td></tr>`).join('') || '<tr><td colspan="6" class="muted">No closed shifts yet</td></tr>'}</table></div></div>
+    <div class="grid2">
+      <div class="card"><h3>Low stock</h3><table>${b.lowStock.map(s => `<tr><td>${esc(s.name)}</td><td class="red">${+s.stock.toFixed(3)} ${esc(s.unit)}</td><td class="muted">alert at ${s.low_level}</td></tr>`).join('') || '<tr><td class="muted">All good</td></tr>'}</table></div>
+      <div class="card"><h3>Backups</h3><table>${b.backups.map(k => `<tr><td>${new Date(k.at).toLocaleString()}</td><td class="muted">${(k.size / 1048576).toFixed(1)} MB</td><td><button data-bk="${k.id}">Download</button></td></tr>`).join('') || '<tr><td class="muted">No backups yet (the branch sends one daily)</td></tr>'}</table></div>
+    </div>`)
+  $('#rename').onclick = async () => { const n = prompt('Branch name', b.name); if (n) { await api(`/branches/${b.id}/rename`, { name: n }); render() } }
+  $('#rekey').onclick = async () => {
+    if (!confirm('Make a new key? The branch stops syncing until the new key is entered in its Settings → Cloud.')) return
+    $('#newkey').innerHTML = `<div class="card">${keyBox(await api(`/branches/${b.id}/rekey`, {}))}</div>`
+  }
+  document.querySelectorAll('[data-bk]').forEach(btn => btn.onclick = async () => {
+    const r = await fetch(`/api/backups/${btn.dataset.bk}/download`, { headers: { Authorization: 'Bearer ' + state.token } })
+    if (!r.ok) return alert('Download failed')
+    const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(await r.blob()), download: `${b.name}-backup.db` })
+    a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000)
+  })
+}
+
+async function render() {
+  if (!state.token) return authView()
+  try { await (state.branch ? branchView() : overview()) } catch (e) { if (state.token) alert(e.message) }
+}
+render()
+// Live refresh, but never while a one-time key is on screen or the owner is typing
+setInterval(() => { if (state.token && !document.hidden && !$('#newkey')?.innerHTML && document.activeElement?.tagName !== 'INPUT') render() }, 60000)
+</script>
+</body>
+</html>

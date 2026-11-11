@@ -1,0 +1,26 @@
+{
+  "exported_at": "2026-11-09T16:18:08.039Z",
+  "source": "/home/hassaan/Downloads/HazelPOS-main/server/pos.db",
+  "files": {
+    "menu.json": {
+      "count": 17,
+      "sha256": "a5332acbfdc5568e"
+    },
+    "categories.json": {
+      "count": 5,
+      "sha256": "8680ba7861efb2cd"
+    },
+    "delivery_zones.json": {
+      "count": 0,
+      "sha256": "37517e5f3dc66819"
+    },
+    "restaurant.json": {
+      "count": 3,
+      "sha256": "c6607e30f0c633e2"
+    },
+    "promos.json": {
+      "count": 0,
+      "sha256": "37517e5f3dc66819"
+    }
+  }
+}

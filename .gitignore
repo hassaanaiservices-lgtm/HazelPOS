@@ -10,6 +10,8 @@ dist/
 *.db
 *.db-journal
 *.db-wal
+*.db.backup*
+*.db.bak
 *.sqlite
 
 # Environment & Logs
@@ -21,3 +23,13 @@ npm-debug.log*
 # OS Files
 .DS_Store
 Thumbs.db
+
+# HazelPOS Cloud data (owner accounts, synced data, backups)
+cloud/data/
+
+# RAG: generated vector index; WhatsApp login (private!)
+rag/data/index/*
+!rag/data/index/.gitkeep
+server/whatsapp/auth/
+
+server/whatsapp/media/

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
-import { api, rs } from './lib'
+import { api, rs, parseModifiers, modsText } from './lib'
 import './CustomerOrder.css'
+import { toastError } from './notify'
 
 // Mobile ordering page opened by scanning a table's QR code
 export default function CustomerOrder({ token }) {
@@ -13,6 +14,7 @@ export default function CustomerOrder({ token }) {
   const [name, setName] = useState('')
   const [sending, setSending] = useState(false)
   const [placed, setPlaced] = useState(null) // { id, status }
+  const [choosing, setChoosing] = useState(null) // product whose size/options sheet is open
 
   useEffect(() => {
     api('/qr/' + token).then(d => { setData(d); document.title = `${d.restaurant.name} · ${d.table.name}` })
@@ -29,12 +31,18 @@ export default function CustomerOrder({ token }) {
   if (error) return <div className="co-center"><div className="co-big">⚠️</div><h2>{error}</h2><p>Please ask the staff for help.</p></div>
   if (!data) return <div className="co-center"><div className="co-spinner" /></div>
 
-  const qtyOf = id => cart.find(i => i.product_id === id)?.qty || 0
-  const change = (p, d) => setCart(c => {
-    const ex = c.find(i => i.product_id === p.id)
-    if (!ex) return d > 0 ? [...c, { product_id: p.id, name: p.name, price: p.price, emoji: p.emoji, qty: 1, note: '' }] : c
-    return c.map(i => i === ex ? { ...i, qty: i.qty + d } : i).filter(i => i.qty > 0)
+  const qtyOf = id => cart.filter(i => i.product_id === id).reduce((s, i) => s + i.qty, 0)
+  // One cart line per product + size + options; prices here are a preview, the server prices the order
+  const addLine = (p, size, mods = []) => setCart(c => {
+    const key = JSON.stringify([p.id, size?.name, mods.map(m => m.name)])
+    const ex = c.find(i => i.key === key)
+    if (ex) return c.map(i => i === ex ? { ...i, qty: i.qty + 1 } : i)
+    const name = p.name + (size && (sizesOf(p).length > 1 || size.name !== 'Regular') ? ` (${size.name})` : '')
+    const price = (size ? +size.price : p.price) + mods.reduce((s, m) => s + m.price, 0)
+    return [...c, { key, product_id: p.id, size: size?.name, mods, name, price, emoji: p.emoji, qty: 1, note: '' }]
   })
+  const change = (line, d) => setCart(c => c.map(i => i.key === line.key ? { ...i, qty: i.qty + d } : i).filter(i => i.qty > 0))
+  const simple = p => sizesOf(p).length <= 1 && !parseModifiers(p).length
   const count = cart.reduce((s, i) => s + i.qty, 0)
   const subtotal = cart.reduce((s, i) => s + i.qty * i.price, 0)
   const tax = Math.round(subtotal * data.taxRate)
@@ -42,9 +50,10 @@ export default function CustomerOrder({ token }) {
   const submit = async () => {
     setSending(true)
     try {
-      const r = await api(`/qr/${token}/order`, { items: cart, note, customer: name })
+      const items = cart.map(i => ({ product_id: i.product_id, size: i.size, mods: i.mods, qty: i.qty, note: i.note }))
+      const r = await api(`/qr/${token}/order`, { items, note, customer: name })
       setPlaced(r); setCart([]); setNote(''); setShowCart(false)
-    } catch (e) { alert(e.message) }
+    } catch (e) { toastError(e.message) }
     setSending(false)
   }
 
@@ -83,16 +92,17 @@ export default function CustomerOrder({ token }) {
 
       <div className="co-list">
         {products.map(p => {
-          const q = qtyOf(p.id)
+          const q = qtyOf(p.id), line = simple(p) && cart.find(i => i.product_id === p.id)
+          const from = Math.min(...sizesOf(p).map(z => +z.price), p.price)
           return (
             <div key={p.id} className={'co-item ' + (q ? 'in' : '')}>
               <span className="co-emoji">{p.emoji}</span>
-              <div className="co-info"><b>{p.name}</b><span>{rs(p.price)}</span></div>
-              {q ? (
+              <div className="co-info"><b>{p.name}</b><span>{simple(p) ? rs(sizesOf(p)[0]?.price ?? p.price) : 'from ' + rs(from)}</span></div>
+              {line ? (
                 <div className="co-qty">
-                  <button onClick={() => change(p, -1)}>−</button><span>{q}</span><button onClick={() => change(p, 1)}>+</button>
+                  <button onClick={() => change(line, -1)}>−</button><span>{q}</span><button onClick={() => change(line, 1)}>+</button>
                 </div>
-              ) : <button className="co-add" onClick={() => change(p, 1)}>Add</button>}
+              ) : <button className="co-add" onClick={() => simple(p) ? addLine(p, sizesOf(p)[0]) : setChoosing(p)}>{q ? `Add more (${q})` : simple(p) ? 'Add' : 'Choose'}</button>}
             </div>
           )
         })}
@@ -104,19 +114,22 @@ export default function CustomerOrder({ token }) {
         </button>
       )}
 
+      {choosing && <OptionSheet product={choosing} onClose={() => setChoosing(null)}
+        onAdd={(size, mods) => { addLine(choosing, size, mods); setChoosing(null) }} />}
+
       {showCart && (
         <div className="co-sheet-bg" onClick={() => setShowCart(false)}>
           <div className="co-sheet" onClick={e => e.stopPropagation()}>
             <div className="co-sheet-head"><h3>Your order · {data.table.name}</h3><button onClick={() => setShowCart(false)}>✕</button></div>
             {cart.map(i => (
-              <div key={i.product_id} className="co-line">
+              <div key={i.key} className="co-line">
                 <span>{i.emoji}</span>
-                <div className="co-info"><b>{i.name}</b>
+                <div className="co-info"><b>{i.name}</b>{i.mods.length > 0 && <small>+ {modsText(i.mods)}</small>}
                   <input placeholder="+ note (e.g. extra spicy)" value={i.note}
                     onChange={e => setCart(c => c.map(x => x === i ? { ...x, note: e.target.value } : x))} />
                 </div>
                 <div className="co-qty">
-                  <button onClick={() => change({ id: i.product_id }, -1)}>−</button><span>{i.qty}</span><button onClick={() => change({ id: i.product_id }, 1)}>+</button>
+                  <button onClick={() => change(i, -1)}>−</button><span>{i.qty}</span><button onClick={() => change(i, 1)}>+</button>
                 </div>
               </div>
             ))}
@@ -132,6 +145,51 @@ export default function CustomerOrder({ token }) {
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+function sizesOf(p) {
+  try { const z = typeof p.sizes === 'string' ? JSON.parse(p.sizes) : p.sizes; return Array.isArray(z) ? z : [] } catch { return [] }
+}
+
+// Bottom sheet: pick a size and any option groups, then add to the cart
+function OptionSheet({ product: p, onAdd, onClose }) {
+  const sizes = sizesOf(p), groups = parseModifiers(p)
+  const [size, setSize] = useState(sizes.length > 1 ? null : sizes[0])
+  const [mods, setMods] = useState([])
+  const toggle = (g, o) => setMods(list => {
+    const entry = { group: g.name, name: o.name, price: +o.price || 0 }
+    if (list.some(m => m.group === g.name && m.name === o.name)) return list.filter(m => !(m.group === g.name && m.name === o.name))
+    if (+g.max === 1) return [...list.filter(m => m.group !== g.name), entry]
+    if (+g.max && list.filter(m => m.group === g.name).length >= +g.max) return list
+    return [...list, entry]
+  })
+  const missing = sizes.length > 1 && !size ? 'a size' : groups.find(g => mods.filter(m => m.group === g.name).length < (+g.min || 0))?.name
+  const price = (size ? +size.price : p.price) + mods.reduce((s, m) => s + m.price, 0)
+  return (
+    <div className="co-sheet-bg" onClick={onClose}>
+      <div className="co-sheet" onClick={e => e.stopPropagation()}>
+        <div className="co-sheet-head"><h3>{p.emoji} {p.name}</h3><button onClick={onClose}>✕</button></div>
+        {p.description && <p className="co-muted">{p.description}</p>}
+        {sizes.length > 1 && <>
+          <h4>Size</h4>
+          <div className="co-cats">{sizes.map(z => (
+            <button key={z.name} className={size?.name === z.name ? 'active' : ''} onClick={() => setSize(z)}>{z.name} · {rs(z.price)}</button>
+          ))}</div>
+        </>}
+        {groups.map(g => <div key={g.name}>
+          <h4>{g.name} <small className="co-muted">{+g.min ? 'required' : 'optional'}{+g.max > 1 ? ` · up to ${g.max}` : ''}</small></h4>
+          <div className="co-cats">{g.options.map(o => (
+            <button key={o.name} className={mods.some(m => m.group === g.name && m.name === o.name) ? 'active' : ''} onClick={() => toggle(g, o)}>
+              {o.name}{+o.price ? ` +${rs(o.price)}` : ''}
+            </button>
+          ))}</div>
+        </div>)}
+        <button className="co-primary full" disabled={!!missing} onClick={() => onAdd(size, mods)}>
+          {missing ? `Choose ${missing}` : `Add · ${rs(price)}`}
+        </button>
+      </div>
     </div>
   )
 }

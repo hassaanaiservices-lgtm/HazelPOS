@@ -1,12 +1,15 @@
 {
-  "name": "easypos",
+  "name": "hazelpos",
   "version": "1.0.0",
-  "description": "Easy Restaurant POS System",
+  "description": "HazelPOS restaurant point of sale",
   "private": true,
   "scripts": {
     "dev": "node start.js",
     "start": "node start.js",
     "server": "node server/index.js",
-    "client": "npm --prefix client run dev"
+    "client": "npm --prefix client run dev",
+    "cloud": "node cloud/index.js",
+    "demo": "node demo/start.js",
+    "demo:seed": "node demo/seed.js"
   }
 }

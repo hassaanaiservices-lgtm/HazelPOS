@@ -1,0 +1,91 @@
+## RESTAURANT
+Name: Pizza Venu
+Address: Commercial Market, Block B, Main Boulevard
+Phone: +92 300 1234567
+
+## FREQUENTLY ASKED
+(no answers written yet)
+
+## DELIVERY AREAS
+(no delivery areas listed)
+
+## MENU: PIZZA
+- Margherita [#1]: Small (8 inch) Rs 800 | Medium (10 inch) Rs 1,200 | Large (12 inch) Rs 1,600
+  Pizza · Serves 1–3 depending on size
+  Classic hand-stretched pizza with slow-cooked tomato sauce, fresh mozzarella and basil, baked in a stone oven.
+  Ingredients: Mozzarella, Tomato sauce, Fresh basil, Olive oil
+- Pepperoni [#2]: Small (8 inch) Rs 1,000 | Medium (10 inch) Rs 1,500 | Large (12 inch) Rs 1,950
+  Pizza · Serves 1–3 depending on size
+  Rich marinara, melted mozzarella cheese, and crispy beef pepperoni slices with Italian herb seasoning.
+  Ingredients: Beef Pepperoni, Mozzarella, Marinara, Oregano
+- Chicken Tikka [#3]: Small (8 inch) Rs 1,100 | Medium (10 inch) Rs 1,600 | Large (12 inch) Rs 2,100
+  Pizza · Serves 1–3 depending on size
+  Spiced char-grilled chicken tikka chunks, red onions, bell peppers, mozzarella, and special herbs.
+  Ingredients: Tikka Chicken, Mozzarella, Onions, Bell Peppers
+- Fajita [#4]: Small (8 inch) Rs 1,050 | Medium (10 inch) Rs 1,550 | Large (12 inch) Rs 2,050
+  Pizza · Serves 1–3 depending on size
+  Mexican-style fajita chicken, sautéed bell peppers, sweet corn, melted mozzarella, and spicy jalapeños.
+  Ingredients: Fajita Chicken, Mozzarella, Jalapeños, Capsicum
+- Veggie Supreme [#5]: Small (8 inch) Rs 900 | Medium (10 inch) Rs 1,350 | Large (12 inch) Rs 1,800
+  Pizza · Serves 1–3 depending on size
+  Loaded with black olives, button mushrooms, bell peppers, sweet corn, onions, and premium mozzarella.
+  Ingredients: Mushrooms, Black Olives, Sweet Corn, Mozzarella
+
+## MENU: BURGERS
+- Zinger Burger [#6]: Single (Regular patty) Rs 650 | Double (Double crispy patty) Rs 950 | Combo (With fries & drink) Rs 1,100
+  Burgers · Crispy & Juicy
+  Golden fried crispy chicken fillet topped with spicy mayo and shredded lettuce on a toasted sesame bun.
+  Ingredients: Crispy Fillet, Spicy Mayo, Iceberg Lettuce, Brioche Bun
+- Beef Burger [#7]: Single (150g patty) Rs 800 | Double (300g patties) Rs 1,150 | Combo (With fries & drink) Rs 1,300
+  Burgers · 100% Prime Beef
+  Flame-grilled seasoned beef patty with melted cheddar cheese, caramelized onions, pickles, and secret sauce.
+  Ingredients: Beef Patty, Cheddar Cheese, Pickles, Caramelized Onions
+- Double Patty [#8]: Regular (Two patties) Rs 1,100 | Monster (Triple patties) Rs 1,450 | Combo (With fries & drink) Rs 1,600
+  Burgers · Extra Large
+  Two smashed prime beef patties, double cheddar cheese slices, smokey BBQ mayo, and crisp lettuce.
+  Ingredients: Double Beef, Double Cheddar, BBQ Sauce, Sesame Bun
+
+## MENU: SIDES
+- Fries [#9]: Regular (Single portion) Rs 300 | Large (Sharing portion) Rs 450 | Jumbo (Family bucket) Rs 600
+  Sides · Crispy Golden
+  Freshly cut skin-on potatoes deep fried to golden crispiness and dusted with special salt seasoning.
+  Ingredients: Potato, Sea Salt, Vegetable Oil
+- Loaded Fries [#10]: Regular (Single bowl) Rs 550 | Large (Party platter) Rs 800
+  Sides · Cheesy & Saucy
+  Golden fries smothered in warm cheddar cheese sauce, crispy jalapeno bites, and chipotle garlic drizzle.
+  Ingredients: Fries, Cheddar Sauce, Jalapeños, Chipotle Mayo
+- Garlic Bread [#11]: Plain (4 slices) Rs 400 | Cheesy (4 slices with mozzarella) Rs 550
+  Sides · Warm & Buttery
+  Crispy baguette slices toasted with roasted garlic herb butter and fresh Italian parsley.
+  Ingredients: French Baguette, Garlic Butter, Parsley, Oregano
+- Nuggets (6) [#12]: 6 Pcs (Single box) Rs 450 | 12 Pcs (Sharing box) Rs 800
+  Sides · Tender Bites
+  Bite-sized tender all-white chicken breast nuggets battered and fried golden brown with dipping sauce.
+  Ingredients: Chicken Breast, Crispy Breading, Dip Sauce
+
+## MENU: DRINKS
+- Coke 500ml [#13]: 500ml (Bottle) Rs 150 | 1.5L (Large bottle) Rs 280
+  Drinks · Chilled Refreshment
+  Classic Coca-Cola served ice cold.
+  Ingredients: Carbonated Water, Cola Syrup, Caramel Color
+- Mineral Water [#14]: Small (500ml) Rs 80 | Large (1.5L) Rs 140
+  Drinks · Pure Hydration
+  Pure natural mineral drinking water, chilled.
+  Ingredients: Natural Mineral Water
+- Mint Margarita [#15]: Rs 350
+  Drinks · Freshly Blended
+  Refreshing mocktail blended with fresh mint leaves, lemon juice, ice, and fizzy soda.
+  Ingredients: Fresh Mint, Lemon Juice, Soda, Black Salt
+
+## MENU: DESSERTS
+- Lava Cake [#16]: Standard (Warm cake) Rs 450 | With Ice Cream (With vanilla scoop) Rs 600
+  Desserts · Warm & Decadent
+  Warm dark chocolate sponge cake with a rich molten Belgian chocolate center, dusted with icing sugar.
+  Ingredients: Dark Chocolate, Belgian Cocoa, Butter, Eggs
+- Ice Cream [#17]: Single Scoop (1 scoop cup) Rs 250 | Double Scoop (2 scoops cup) Rs 420 | Sundae Bowl (With nuts & syrup) Rs 550
+  Desserts · Creamy Scoops
+  Artisanal creamy ice cream served chilled in your choice of flavors with chocolate drizzle.
+  Ingredients: Fresh Cream, Milk, Natural Flavors, Chocolate Sauce
+
+## NOT AVAILABLE RIGHT NOW
+(everything on the menu is available)
