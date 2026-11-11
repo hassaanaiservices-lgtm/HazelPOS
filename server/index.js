@@ -1555,6 +1555,13 @@ app.post('/api/qr-requests/:id/reject', (req, res) => {
 app.use('/api', (req, res) => res.status(404).json({ error: `Unknown address: ${req.method} ${req.originalUrl}` }));
 
 // Serve built frontend in production
+// The public demo is one service: the landing page (site/) at /, the POS at /app. The POS still loads its own files from
+// /assets, /favicon.svg and /icons.svg (no clash with site/, whose index.html wins at /).
+if (DEMO) {
+  app.get('/README.md', (req, res) => res.status(404).end()); // site/README.md is notes for us, not for visitors
+  app.get(['/app', '/app/'], (req, res) => res.sendFile(path.join(__dirname, '../client/dist/index.html')));
+  app.use(express.static(path.join(__dirname, '../site')));
+}
 app.use(express.static(path.join(__dirname, '../client/dist')));
 app.get('/t/:token', (req, res) => res.sendFile(path.join(__dirname, '../client/dist/index.html')));
 
