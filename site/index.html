@@ -9,7 +9,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=4">
+  <link rel="stylesheet" href="styles.css?v=5">
   <script>document.documentElement.classList.add('js')</script>
 </head>
 <body>
@@ -223,8 +223,12 @@
 
   <script>
     // The demo's address. Empty until the demo server is live: the buttons then lead to the closing section.
-    const DEMO_URL = 'http://localhost:4300' // the demo on this PC (npm run demo); change to the live address when it is hosted
-    if (DEMO_URL) for (const a of document.querySelectorAll('[data-demo-link]')) a.href = DEMO_URL
+    const DEMO_URL = '' // set this to the hosted demo URL when the demo service is live
+    // Testing at home: when this page is opened on this PC or over the home WiFi (a phone), the demo is the same machine on
+    // port 4300 (npm run demo). On a real domain this stays off and DEMO_URL decides.
+    const home = /^(localhost|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(location.hostname)
+    const demo = DEMO_URL || (home ? `${location.protocol}//${location.hostname}:4300` : '')
+    if (demo) for (const a of document.querySelectorAll('[data-demo-link]')) a.href = demo
 
     // The bot chat: while the visitor scrolls through the stage, messages appear one by one (a reply shows "typing" first).
     // Scrolling back hides them again. Without the script, or with reduced motion, the whole chat is simply shown.

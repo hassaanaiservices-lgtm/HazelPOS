@@ -11,7 +11,7 @@ const path = require('path');
 const ROOT = path.join(__dirname, '..');
 const TEMPLATE = path.join(__dirname, 'template.db');
 const RUN = path.join(__dirname, 'run.db');
-const PORT = process.env.DEMO_PORT || 4300;
+const PORT = process.env.DEMO_PORT || process.env.PORT || 4300;
 
 if (!fs.existsSync(TEMPLATE)) { console.error('No demo/template.db yet. Build it first: node demo/seed.js'); process.exit(1); }
 if (!fs.existsSync(path.join(ROOT, 'client', 'dist', 'index.html'))) { console.error('Build the screens first: npm --prefix client run build'); process.exit(1); }

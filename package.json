@@ -11,5 +11,8 @@
     "cloud": "node cloud/index.js",
     "demo": "node demo/start.js",
     "demo:seed": "node demo/seed.js"
+  },
+  "engines": {
+    "node": ">=22.13"
   }
 }

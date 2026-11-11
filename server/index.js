@@ -395,6 +395,18 @@ const taxRate = () => (+getSettings().tax_rate || 0) / 100;
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: '2mb' })); // payment QR image is stored as a data URL in settings
+
+// The public demo gives every visitor the Owner screen, so whatever makes THIS server reach out or write somewhere is shut:
+// a printer "address" can be a file path or a host:port, and the fiscal and cloud addresses are fetched by the server.
+if (DEMO) {
+  const NOT_IN_DEMO = ['receipt_printer', 'kitchen_printer', 'fiscal_mode', 'fiscal_url', 'fiscal_pos_id', 'fiscal_pct_code'];
+  app.use('/api', (req, res, next) => {
+    const blocked = /^\/(cloud\/(connect|sync|backup)|print\/|secrets|fiscal\/retry)/.test(req.path) && req.method !== 'GET';
+    if (blocked) return res.status(403).json({ error: 'Not available in the demo' });
+    if (req.method === 'POST' && req.path === '/settings' && req.body) for (const k of NOT_IN_DEMO) delete req.body[k];
+    next();
+  });
+}
 const now = () => new Date().toISOString();
 
 // ---------- Auth (PIN + session token) ----------
