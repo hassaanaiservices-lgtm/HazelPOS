@@ -1560,6 +1560,7 @@ app.use('/api', (req, res) => res.status(404).json({ error: `Unknown address: ${
 if (DEMO) {
   app.get('/README.md', (req, res) => res.status(404).end()); // site/README.md is notes for us, not for visitors
   app.get(['/app', '/app/'], (req, res) => res.sendFile(path.join(__dirname, '../client/dist/index.html')));
+  app.use('/images', express.static(path.join(__dirname, '../site/images'), { maxAge: '7d' })); // screenshots change rarely: let browsers keep them
   app.use(express.static(path.join(__dirname, '../site')));
 }
 app.use(express.static(path.join(__dirname, '../client/dist')));

@@ -3,13 +3,156 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>HazelPOS: restaurant POS with a WhatsApp ordering bot</title>
-  <meta name="description" content="Billing, tables, kitchen screen, delivery and a WhatsApp bot that takes orders in Urdu. Try the full POS free, no signup.">
+  <title>HazelPOS: Agentic Restaurant POS with a WhatsApp Ordering Bot</title>
+  <meta name="description" content="Agentic restaurant POS for Pakistan: an AI agent takes WhatsApp orders in Urdu and sends them to your counter. Billing, kitchen, delivery, khata. Free demo.">
   <meta name="theme-color" content="#eadfc9">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <!-- Search and AI answer engines: the address below is the live one. When a custom domain is connected, change it here, in robots.txt, sitemap.xml and llms.txt. -->
+  <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1">
+  <link rel="canonical" href="https://hazelpos.up.railway.app/">
+  <link rel="alternate" type="text/plain" href="/llms.txt" title="HazelPOS in plain text, for AI assistants">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="HazelPOS">
+  <meta property="og:title" content="HazelPOS: Agentic Restaurant POS with a WhatsApp Ordering Bot">
+  <meta property="og:description" content="Agentic restaurant POS for Pakistan: an AI agent takes WhatsApp orders in Urdu and sends them to your counter. Billing, kitchen, delivery, khata. Free demo.">
+  <meta property="og:url" content="https://hazelpos.up.railway.app/">
+  <meta property="og:image" content="https://hazelpos.up.railway.app/images/share.jpg">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="The HazelPOS order screen: menu on the left, a table's bill on the right">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:image" content="https://hazelpos.up.railway.app/images/share.jpg">
+  <meta name="twitter:title" content="HazelPOS: Agentic Restaurant POS with a WhatsApp Ordering Bot">
+  <meta name="twitter:description" content="Agentic restaurant POS for Pakistan: an AI agent takes WhatsApp orders in Urdu and sends them to your counter. Billing, kitchen, delivery, khata. Free demo.">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles.css?v=5">
+  <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "WebSite",
+      "@id": "https://hazelpos.up.railway.app/#website",
+      "url": "https://hazelpos.up.railway.app/",
+      "name": "HazelPOS",
+      "inLanguage": "en"
+    },
+    {
+      "@type": "Organization",
+      "@id": "https://hazelpos.up.railway.app/#org",
+      "name": "HazelPOS",
+      "url": "https://hazelpos.up.railway.app/"
+    },
+    {
+      "@type": "SoftwareApplication",
+      "@id": "https://hazelpos.up.railway.app/#app",
+      "name": "HazelPOS",
+      "url": "https://hazelpos.up.railway.app/",
+      "applicationCategory": "BusinessApplication",
+      "applicationSubCategory": "Restaurant point of sale",
+      "operatingSystem": "Web browser on Windows, macOS, Linux, Android and iOS",
+      "description": "HazelPOS is an agentic restaurant POS for Pakistan. An AI agent answers customers on WhatsApp in Urdu, Roman Urdu or English, takes the order and address, and sends it to the counter for the cashier to accept. Billing, tables, kitchen screen, delivery, cash drawer, inventory, supplier khata and reports are in the same system.",
+      "inLanguage": [
+        "en",
+        "ur"
+      ],
+      "audience": {
+        "@type": "Audience",
+        "audienceType": "Restaurant owners",
+        "geographicArea": {
+          "@type": "Country",
+          "name": "Pakistan"
+        }
+      },
+      "featureList": [
+        "WhatsApp ordering agent in Urdu, Roman Urdu and English, including voice notes",
+        "Dine-in, takeaway and delivery billing",
+        "Floor plan with live table bills",
+        "Kitchen ticket screen",
+        "Delivery board with rider cash on delivery",
+        "Cash drawer shifts with Z-report",
+        "Inventory with recipes and low-stock alerts",
+        "Supplier khata",
+        "Reports with Excel export",
+        "Table QR codes for customer self-ordering",
+        "Cash, card and Raast QR payments",
+        "Works offline for billing, tables and kitchen",
+        "Receipts with NTN and tax; PRA and FBR reporting"
+      ],
+      "publisher": {
+        "@id": "https://hazelpos.up.railway.app/#org"
+      },
+      "isPartOf": {
+        "@id": "https://hazelpos.up.railway.app/#website"
+      }
+    },
+    {
+      "@type": "FAQPage",
+      "@id": "https://hazelpos.up.railway.app/#faq",
+      "mainEntity": [
+        {
+          "@type": "Question",
+          "name": "What is an agentic POS?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "A POS that does work on its own instead of only recording it. HazelPOS has an AI agent that reads WhatsApp messages and voice notes, answers from your real menu and prices, asks for what is missing (delivery or takeaway, then the address) and sends the order to your cashier to accept. The POS calculates every total, not the AI."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Is HazelPOS made for restaurants in Pakistan?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Yes. It chats in Urdu, Roman Urdu and English, prices in rupees, takes cash, card and Raast QR, keeps supplier khata, tracks rider cash on delivery and prints receipts with your NTN and tax."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "What is in the free demo?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "The whole POS with a sample restaurant already running. Put in your own name and menu, and switch between owner, cashier and kitchen in one click."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Can I talk to the WhatsApp bot in the demo?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Not yet. The chat on this page is a real conversation with the bot on the demo menu. Message us and we will show it to you live on WhatsApp. Your own number is linked once you buy HazelPOS."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Does it need internet?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Billing, tables and the kitchen run on your own PC, so they work offline. WhatsApp catches up when the internet returns."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Does it handle tax invoices?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Receipts show your NTN and tax. PRA and FBR reporting switches on with your credentials."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "How much does it cost?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "It depends on your branches. Message us for a plain answer."
+          }
+        }
+      ]
+    }
+  ]
+}
+  </script>
   <script>document.documentElement.classList.add('js')</script>
 </head>
 <body>
@@ -32,8 +175,8 @@
     <section class="hero" id="top">
       <div class="container hero-grid">
         <div class="hero-text">
-          <h1>The restaurant POS that answers WhatsApp</h1>
-          <p class="lead">Billing, tables, kitchen and a WhatsApp bot that takes orders in Urdu.</p>
+          <h1>The agentic restaurant POS that answers WhatsApp</h1>
+          <p class="lead">An agentic POS for restaurants in Pakistan: an AI agent answers customers on WhatsApp in Urdu, takes the order and sends it to your counter. Billing, tables, kitchen, delivery and khata are in the same system.</p>
           <div class="actions">
             <a class="btn btn-primary" href="#start" data-demo-link>Start free demo</a>
             <a class="btn btn-ghost" href="#tour">Take the tour</a>
@@ -41,7 +184,7 @@
           <p class="terms">No signup and no card. A demo restaurant of your own opens in seconds.</p>
         </div>
         <figure class="hero-shot" data-slot data-kind="product">
-          <picture><source media="(max-width: 640px)" srcset="images/phone-counter.png" width="780" height="1688"><img src="images/counter.png" width="3360" height="2400" fetchpriority="high"
+          <picture><source media="(max-width: 640px)" srcset="images/phone-counter.webp" width="780" height="1688"><img src="images/counter.webp" width="3360" height="2400" fetchpriority="high"
             alt="The order screen: the menu by category on the left, a table's bill with chicken karahi, naan and raita on the right, total Rs. 4,130"></picture>
         </figure>
       </div>
@@ -101,19 +244,19 @@
             <button type="button" role="tab" id="tab-delivery" aria-controls="panel-delivery" aria-selected="false">Delivery</button>
           </div>
           <figure class="panel on" role="tabpanel" id="panel-counter" aria-labelledby="tab-counter" data-slot data-kind="product">
-            <picture><source media="(max-width: 640px)" srcset="images/phone-counter.png" width="780" height="1688"><img src="images/counter.png" width="3360" height="2400" loading="lazy" alt="Order screen with a dine-in bill for table T1"></picture>
+            <picture><source media="(max-width: 640px)" srcset="images/phone-counter.webp" width="780" height="1688"><img src="images/counter.webp" width="3360" height="2400" loading="lazy" alt="Order screen with a dine-in bill for table T1"></picture>
             <figcaption>Dine-in, takeaway or delivery, paid by cash, card or Raast QR.</figcaption>
           </figure>
           <figure class="panel" role="tabpanel" id="panel-tables" aria-labelledby="tab-tables" data-slot data-kind="product">
-            <picture><source media="(max-width: 640px)" srcset="images/phone-tables.png" width="780" height="1688"><img src="images/tables.png" width="2880" height="1800" loading="lazy" alt="Floor plan with three occupied tables and their running bills"></picture>
+            <picture><source media="(max-width: 640px)" srcset="images/phone-tables.webp" width="780" height="1688"><img src="images/tables.webp" width="2880" height="1800" loading="lazy" alt="Floor plan with three occupied tables and their running bills"></picture>
             <figcaption>Every table’s running bill and how long it has been seated.</figcaption>
           </figure>
           <figure class="panel" role="tabpanel" id="panel-kitchen" aria-labelledby="tab-kitchen" data-slot data-kind="product">
-            <picture><source media="(max-width: 640px)" srcset="images/phone-kitchen.png" width="780" height="1688"><img src="images/kitchen.png" width="2880" height="1800" loading="lazy" alt="Kitchen board with new, preparing and ready tickets"></picture>
+            <picture><source media="(max-width: 640px)" srcset="images/phone-kitchen.webp" width="780" height="1688"><img src="images/kitchen.webp" width="2880" height="1800" loading="lazy" alt="Kitchen board with new, preparing and ready tickets"></picture>
             <figcaption>New tickets arrive instantly; late ones turn red.</figcaption>
           </figure>
           <figure class="panel" role="tabpanel" id="panel-delivery" aria-labelledby="tab-delivery" data-slot data-kind="product">
-            <picture><source media="(max-width: 640px)" srcset="images/phone-delivery.png" width="780" height="1688"><img src="images/delivery.png" width="2880" height="1800" loading="lazy" alt="Delivery board with an order to dispatch and a rider on the road"></picture>
+            <picture><source media="(max-width: 640px)" srcset="images/phone-delivery.webp" width="780" height="1688"><img src="images/delivery.webp" width="2880" height="1800" loading="lazy" alt="Delivery board with an order to dispatch and a rider on the road"></picture>
             <figcaption>Dispatch a rider, then collect the cash they bring back.</figcaption>
           </figure>
         </div>
@@ -129,16 +272,16 @@
           <p class="lead">What sold, what you spent and what should be in the drawer.</p>
         </div>
         <figure class="showcase-main" data-slot data-kind="product">
-          <picture><source media="(max-width: 640px)" srcset="images/phone-reports.png" width="780" height="1688"><img src="images/reports.png" width="2880" height="1800" loading="lazy" alt="Reports for seven days: revenue, expenses, net profit, sales by hour and top items"></picture>
+          <picture><source media="(max-width: 640px)" srcset="images/phone-reports.webp" width="780" height="1688"><img src="images/reports.webp" width="2880" height="1800" loading="lazy" alt="Reports for seven days: revenue, expenses, net profit, sales by hour and top items"></picture>
           <figcaption>Revenue, expenses and profit for any dates.</figcaption>
         </figure>
         <div class="showcase-pair">
           <figure data-slot data-kind="product">
-            <picture><source media="(max-width: 640px)" srcset="images/phone-khata.png" width="780" height="1688"><img src="images/khata.png" width="2904" height="1815" loading="lazy" alt="Supplier khata with purchases, payments and the balance owed"></picture>
+            <picture><source media="(max-width: 640px)" srcset="images/phone-khata.webp" width="780" height="1688"><img src="images/khata.webp" width="2904" height="1815" loading="lazy" alt="Supplier khata with purchases, payments and the balance owed"></picture>
             <figcaption>Supplier khata: purchases add stock automatically.</figcaption>
           </figure>
           <figure data-slot data-kind="product">
-            <picture><source media="(max-width: 640px)" srcset="images/phone-drawer.png" width="780" height="1688"><img src="images/drawer.png" width="2304" height="1440" loading="lazy" alt="Cash drawer with opening float, cash sales and expected cash"></picture>
+            <picture><source media="(max-width: 640px)" srcset="images/phone-drawer.webp" width="780" height="1688"><img src="images/drawer.webp" width="2304" height="1440" loading="lazy" alt="Cash drawer with opening float, cash sales and expected cash"></picture>
             <figcaption>Cash drawer: shortages show at closing.</figcaption>
           </figure>
         </div>
@@ -158,8 +301,8 @@
           </ul>
         </div>
         <div class="phones">
-          <figure data-slot data-kind="product"><img src="images/phone-counter.png" width="780" height="1688" loading="lazy" alt="The order screen on a phone, with the order total in a bar at the bottom"></figure>
-          <figure data-slot data-kind="product"><img src="images/phone-kitchen.png" width="780" height="1688" loading="lazy" alt="The kitchen board on a phone"></figure>
+          <figure data-slot data-kind="product"><img src="images/phone-counter.webp" width="780" height="1688" loading="lazy" alt="The order screen on a phone, with the order total in a bar at the bottom"></figure>
+          <figure data-slot data-kind="product"><img src="images/phone-kitchen.webp" width="780" height="1688" loading="lazy" alt="The kitchen board on a phone"></figure>
         </div>
       </div>
     </section>
@@ -170,12 +313,20 @@
         <h2>Before you try it</h2>
         <div class="q-list">
           <details open>
+            <summary>What is an agentic POS?</summary>
+            <p>A POS that does work on its own instead of only recording it. HazelPOS has an AI agent that reads WhatsApp messages and voice notes, answers from your real menu and prices, asks for what is missing (delivery or takeaway, then the address) and sends the order to your cashier to accept. The POS calculates every total, not the AI.</p>
+          </details>
+          <details>
+            <summary>Is HazelPOS made for restaurants in Pakistan?</summary>
+            <p>Yes. It chats in Urdu, Roman Urdu and English, prices in rupees, takes cash, card and Raast QR, keeps supplier khata, tracks rider cash on delivery and prints receipts with your NTN and tax.</p>
+          </details>
+          <details>
             <summary>What is in the free demo?</summary>
             <p>The whole POS with a sample restaurant already running. Put in your own name and menu, and switch between owner, cashier and kitchen in one click.</p>
           </details>
           <details>
             <summary>Can I talk to the WhatsApp bot in the demo?</summary>
-            <p>Yes. Play the customer and send up to 10 messages. Your own number is linked once you buy HazelPOS.</p>
+            <p>Not yet. The chat on this page is a real conversation with the bot on the demo menu. Message us and we will show it to you live on WhatsApp. Your own number is linked once you buy HazelPOS.</p>
           </details>
           <details>
             <summary>Does it need internet?</summary>

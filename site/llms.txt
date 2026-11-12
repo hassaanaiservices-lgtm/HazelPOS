@@ -1,0 +1,41 @@
+# HazelPOS
+
+> HazelPOS is an agentic restaurant POS for Pakistan. An AI agent answers customers on WhatsApp in Urdu, Roman Urdu or English (voice notes included), takes the order and the delivery address, and sends it to the restaurant's counter, where the cashier accepts it in one tap. The same system does billing, tables, kitchen, delivery, cash drawer, inventory, supplier khata and reports.
+
+Last updated: 2026-11-12. Site: https://hazelpos.up.railway.app/
+
+## What it is
+- A point of sale (POS) for restaurants that runs on one PC on the restaurant's own network. Kitchen screens, tablets and phones open it in a browser.
+- "Agentic" here means the software acts on its own for part of the job: the WhatsApp agent holds the whole customer conversation and prepares the order, instead of a person typing it in.
+- Built for Pakistani restaurants: rupee prices, Urdu, Roman Urdu and English chat, cash, card and Raast QR payments, supplier khata, rider cash on delivery, NTN and tax on receipts.
+
+## Who it is for
+- Restaurant, cafe, fast food and takeaway owners in Pakistan who get orders on WhatsApp and want them answered and taken without staff typing.
+
+## What the WhatsApp agent does
+1. Replies to customers in their own language, including voice notes.
+2. Answers questions about the menu, sizes and prices from the restaurant's real menu, never made-up prices.
+3. Builds the order, then asks only for what is missing: delivery or takeaway, then the address.
+4. The POS calculates the totals, not the AI. The customer confirms with YES.
+5. Sends the confirmed order to the cashier, who accepts or rejects it before the kitchen sees it.
+The owner can edit how the agent writes (tone and length) in Settings. The restaurant stays in charge of every order.
+
+## What else is in the system
+- Billing for dine-in, takeaway and delivery; discounts, promo codes, loyalty points by phone number.
+- Floor plan with live table bills and timers; move, merge and split bills.
+- Kitchen screen with ticket timers; delivery board with riders and cash on delivery.
+- Cash drawer shifts with opening float and a Z-report; inventory with recipes and low-stock alerts; supplier khata; staff salaries and advances; expenses.
+- Table QR codes so customers can order from their phone.
+- Reports by day and hour, top items, Excel export.
+- Works offline for billing, tables and kitchen; WhatsApp catches up when the internet returns.
+- Receipts with NTN and tax; PRA and FBR reporting switches on with the restaurant's credentials.
+
+## Try it
+- Free demo, no signup: https://hazelpos.up.railway.app/app (a sample restaurant; choose Owner, Cashier or Kitchen).
+- Pricing depends on the number of branches: message the sales team for a plain answer. No prices are published.
+- The bot chat on the home page is a real conversation on the demo menu. A live WhatsApp bot in the demo is not available yet.
+
+## Pages
+- [Home: what HazelPOS is, the WhatsApp bot in action, screens, questions](https://hazelpos.up.railway.app/)
+- [Free demo](https://hazelpos.up.railway.app/app)
+- [Sitemap](https://hazelpos.up.railway.app/sitemap.xml)

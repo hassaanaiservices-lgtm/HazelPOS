@@ -25,6 +25,14 @@ Recapture in the light theme too.
 All names, phone numbers and amounts in them are samples. Recapture them after design changes so the page shows the
 product as it is.
 
+The page uses WebP files (about 60% lighter than PNG, which matters for search ranking). After recapturing, convert each PNG
+to WebP at quality 82 and remove the PNG. `images/share.jpg` (1200x630) is the picture shown when the link is shared.
+
+## Search and AI assistants
+
+`robots.txt`, `sitemap.xml`, `llms.txt` and the tags and JSON-LD in the `<head>` of `index.html` all carry the live address.
+When the domain changes, change it in all four. The FAQ in the JSON-LD must stay word for word the same as the FAQ on the page.
+
 ## Design
 
 Same system as the POS (`/DESIGN.md`), in its light "dark cream" theme: sand ground, near-white cards, near-black ink,
