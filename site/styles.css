@@ -111,6 +111,9 @@ figure { margin: 0; }
 .nav { position: sticky; top: 0; z-index: var(--z-sticky-nav); background: var(--color-nav); border-bottom: var(--bw) solid var(--color-outline); }
 .nav-row { display: flex; align-items: center; gap: var(--space-xl); min-height: 72px; }
 .wordmark { font-weight: 800; font-size: 1.25rem; letter-spacing: -0.02em; text-decoration: none; }
+.wordmark { display: inline-flex; align-items: center; gap: var(--space-xs); }
+.wordmark .mark { width: 54px; height: 54px; flex: none; }
+.wordmark-lg .mark { width: clamp(3.5rem, 2rem + 4vw, 6rem); height: clamp(3.5rem, 2rem + 4vw, 6rem); margin-right: var(--space-xs); }
 .nav-links { display: flex; gap: var(--space-lg); margin-left: auto; }
 .nav-links a { color: var(--color-ink-2); text-decoration: none; font-size: var(--text-sm); font-weight: 600; transition: color var(--dur-micro) var(--ease-out); }
 .nav-links a:hover { color: var(--color-ink); text-decoration: underline; text-decoration-thickness: 2px; }

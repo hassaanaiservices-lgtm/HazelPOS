@@ -6,7 +6,9 @@
   <title>HazelPOS: Agentic Restaurant POS with a WhatsApp Ordering Bot</title>
   <meta name="description" content="Agentic restaurant POS for Pakistan: an AI agent takes WhatsApp orders in Urdu and sends them to your counter. Billing, kitchen, delivery, khata. Free demo.">
   <meta name="theme-color" content="#eadfc9">
-  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="icon" href="/favicon-32.png" type="image/png" sizes="32x32">
+  <link rel="icon" href="/favicon-48.png" type="image/png" sizes="48x48">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png">
   <!-- Search and AI answer engines: the address below is the live one. When a custom domain is connected, change it here, in robots.txt, sitemap.xml and llms.txt. -->
   <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1">
   <link rel="canonical" href="https://hazelpos.up.railway.app/">
@@ -27,7 +29,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=5">
+  <link rel="stylesheet" href="styles.css?v=7">
   <script type="application/ld+json">
 {
   "@context": "https://schema.org",
@@ -43,7 +45,13 @@
       "@type": "Organization",
       "@id": "https://hazelpos.up.railway.app/#org",
       "name": "HazelPOS",
-      "url": "https://hazelpos.up.railway.app/"
+      "url": "https://hazelpos.up.railway.app/",
+      "logo": {
+        "@type": "ImageObject",
+        "url": "https://hazelpos.up.railway.app/apple-touch-icon.png",
+        "width": 180,
+        "height": 180
+      }
     },
     {
       "@type": "SoftwareApplication",
@@ -160,7 +168,7 @@
 
   <header class="nav">
     <div class="container nav-row">
-      <a class="wordmark" href="#top" aria-label="HazelPOS home">HazelPOS</a>
+      <a class="wordmark" href="#top" aria-label="HazelPOS home"><img class="mark" src="images/logo.png" width="54" height="54" alt="">HazelPOS</a>
       <nav class="nav-links" aria-label="Page">
         <a href="#whatsapp">WhatsApp bot</a>
         <a href="#tour">Tour</a>
@@ -361,7 +369,7 @@
 
   <footer class="footer">
     <div class="container footer-grid">
-      <p class="wordmark wordmark-lg">HazelPOS</p>
+      <p class="wordmark wordmark-lg"><img class="mark" src="images/logo.png" width="96" height="96" alt="">HazelPOS</p>
       <nav class="footer-links" aria-label="Footer">
         <a href="#whatsapp">WhatsApp bot</a>
         <a href="#tour">Tour</a>
