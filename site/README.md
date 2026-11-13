@@ -15,7 +15,7 @@ then open http://localhost:4600.
 
 1. **Demo link.** In `index.html`, set `DEMO_URL` (near the bottom) to the demo's address once the demo server is
    live. Until then every "Start free demo" button leads to the closing section.
-2. **Sales WhatsApp number.** Replace the dashed placeholder `your sales number` in the closing section.
+2. **Sales WhatsApp number.** Done: +92 319 4188820, linked as `wa.me/923194188820` in the hero, the closing band, the FAQ, the footer, the floating button and the structured data. To change it, search the page for `923194188820`.
 3. **Pricing.** The page says "Message us" on purpose; change the last question if you publish prices.
 
 ## Screenshots

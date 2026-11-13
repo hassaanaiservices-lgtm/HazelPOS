@@ -32,7 +32,8 @@ The owner can edit how the agent writes (tone and length) in Settings. The resta
 
 ## Try it
 - Free demo, no signup: https://hazelpos.up.railway.app/app (a sample restaurant; choose Owner, Cashier or Kitchen).
-- Pricing depends on the number of branches: message the sales team for a plain answer. No prices are published.
+- Pricing depends on the number of branches: message the sales team on WhatsApp for a plain answer. No prices are published.
+- Sales and setup contact: WhatsApp +92 319 4188820 (https://wa.me/923194188820). Replies in English and Urdu.
 - The bot chat on the home page is a real conversation on the demo menu. A live WhatsApp bot in the demo is not available yet.
 
 ## Pages

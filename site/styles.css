@@ -17,6 +17,7 @@
   --color-accent-ink: oklch(21.9% 0.007 78);
   --color-focus: oklch(47.3% 0.147 39);        /* the POS --accent-text: a ring that reads on every band, orange included */
   --color-outline: oklch(21.9% 0.007 78);
+  --color-whatsapp: #25D366;                   /* the WhatsApp green, only on the contact buttons */
   --color-wa: oklch(45.1% 0.104 157);          /* the POS light --ok */
   /* section bands (Committed posture): soft fills from the POS accent, ok and info hues */
   --color-field-peach: oklch(91% 0.055 50);
@@ -69,13 +70,15 @@
   --dur-micro: 120ms;
   --dur-short: 220ms;
   --z-sticky-nav: 300;
+  --z-float: 250;
 
   color-scheme: light;
 }
 
 /* ---------- base ---------- */
 *, *::before, *::after { box-sizing: border-box; }
-html, body { overflow-x: clip; }
+html { overflow-x: clip; }
+body { overflow-x: clip; }
 html { scroll-behavior: smooth; scroll-padding-top: 88px; -webkit-text-size-adjust: 100%; }
 body { margin: 0; background: var(--color-paper); color: var(--color-ink); font-family: var(--font-body); font-size: var(--text-md);
   line-height: 1.55; font-synthesis: none; -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
@@ -315,3 +318,16 @@ figcaption { font-size: var(--text-sm); color: var(--color-ink-2); margin-top: v
   *, *::before, *::after { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
   .btn:hover, .btn:active { transform: none; }
 }
+
+/* contact on WhatsApp: the channel green, ink glyph and ink edge like every button on the page */
+.btn-wa { background: var(--color-whatsapp); color: var(--color-ink); gap: var(--space-xs); }
+.btn-wa:hover { background: var(--color-whatsapp); }
+.close .btn-wa { box-shadow: 3px 3px 0 var(--color-card); }
+.close .btn-wa:hover { box-shadow: 4px 4px 0 var(--color-card); }
+.close .btn-wa:active { box-shadow: 0 0 0 var(--color-card); }
+.close .contact a { color: var(--color-ink); font-weight: 600; }
+.wa-float { position: fixed; right: var(--space-md); bottom: var(--space-md); z-index: var(--z-float); width: 60px; height: 60px; border-radius: 50%;
+  display: grid; place-items: center; background: var(--color-whatsapp); color: var(--color-ink); border: var(--bw) solid var(--color-outline); box-shadow: var(--pop); }
+.wa-float:hover { transform: translate(-1px, -1px); box-shadow: 5px 5px 0 var(--color-outline); }
+.wa-float:active { transform: translate(3px, 3px); box-shadow: none; }
+@media print { .wa-float { display: none; } }
