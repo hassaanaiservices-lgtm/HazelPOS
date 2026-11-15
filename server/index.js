@@ -417,6 +417,8 @@ const ACCESS = [
   [/^POST \/login$/, null],
   [/^GET \/settings$/, null], // logged-out callers only get name + logo
   [/^(GET|POST) \/qr\//, null], // customer table ordering, guarded by the table's QR token
+  [/^GET \/licence$/, null], // the activation screen shows before anyone can log in
+  [/^POST \/licence\/(activate|check)$/, null], // activate: only until activated, then admin (checked in the route)
   [/^POST \/logout$/, ALL],
   [/^GET \/(menu|tables|summary|kitchen)$/, ALL],
   [/^POST \/kitchen\/\d+$/, ALL],
@@ -456,6 +458,15 @@ app.use('/api', (req, res, next) => {
   next();
 });
 
+// Membership locked (server/licence.js): no NEW orders from any channel. Paying open bills, reports and data keep working.
+const NEW_ORDER = /^POST \/(qr\/[^/]+\/order|qr-requests\/\d+\/accept|whatsapp\/orders\/\d+\/accept)$/;
+app.use('/api', (req, res, next) => {
+  const isNew = (req.method === 'POST' && req.path === '/orders' && !req.body?.id) || NEW_ORDER.test(`${req.method} ${req.path}`);
+  if (!isNew || !lic.locked()) return next();
+  if (req.path.startsWith('/qr/')) return res.status(402).json({ error: 'Ordering from the table is not available right now. Please ask the staff.' });
+  res.status(402).json({ error: lic.state().message });
+});
+
 // 5 wrong PINs from one device locks it out for 5 minutes
 const loginFails = new Map();
 app.post('/api/login', (req, res) => {
@@ -482,7 +493,8 @@ app.post('/api/logout', (req, res) => {
 // ---------- Settings ----------
 app.get('/api/settings', (req, res) => {
   const s = getSettings();
-  res.json(req.user ? { ...s, bot_behaviour_default: DEFAULT_SETTINGS.bot_behaviour, demo: DEMO } : { name: s.name, logo: s.logo, demo: DEMO });
+  const licence = lic.state();
+  res.json(req.user ? { ...s, bot_behaviour_default: DEFAULT_SETTINGS.bot_behaviour, demo: DEMO, licence } : { name: s.name, logo: s.logo, demo: DEMO, licence });
 });
 app.post('/api/settings', (req, res) => {
   const up = db.prepare('INSERT INTO settings (key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value');
@@ -1395,7 +1407,24 @@ app.post('/api/cloud/sync', async (req, res) => {
 app.post('/api/cloud/backup', async (req, res) => {
   try { await cloud.backupNow(); res.json(cloud.status()); } catch (e) { res.status(502).json({ error: e.message }); }
 });
-app.post('/api/cloud/disconnect', (req, res) => { cloud.disconnect(); res.json(cloud.status()); });
+app.post('/api/cloud/disconnect', (req, res) => {
+  if (lic.required) return res.status(400).json({ error: 'This POS is activated with HazelPOS Cloud, so it stays connected' });
+  cloud.disconnect(); res.json(cloud.status());
+});
+
+// ---------- Membership (installed app only: HAZEL_LICENCE=1, see server/licence.js) ----------
+const lic = require('./licence')(db, cloud);
+app.get('/api/licence', (req, res) => res.json(lic.state()));
+app.post('/api/licence/check', async (req, res) => res.json(await lic.check()));
+app.post('/api/licence/activate', async (req, res) => {
+  if (!lic.required) return res.status(400).json({ error: 'This POS does not need activating' });
+  // Before activation nobody can log in yet, so the screen is open; afterwards only the owner can re-point it
+  if (lic.state().state !== 'activate' && req.user?.role !== 'admin') return res.status(403).json({ error: 'Already activated. Ask the owner' });
+  const url = String(req.body.url || '').trim(), key = String(req.body.key || '').trim();
+  if (!/^https?:\/\//.test(url) || !key) return res.status(400).json({ error: 'Enter the cloud address and the branch key' });
+  try { res.json(await lic.activate(url, key)); }
+  catch (e) { res.status(502).json({ error: `Could not activate: ${e.message}` }); }
+});
 
 // ---------- Fiscal invoicing (PRA / FBR) ----------
 const secret = k => db.prepare('SELECT value FROM secrets WHERE key=?').get(k)?.value || '';

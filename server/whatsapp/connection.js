@@ -10,11 +10,13 @@ const fs = require('fs');
 const path = require('path');
 const QRCode = require('qrcode');
 
-const AUTH_DIR = path.join(__dirname, 'auth');
+// HAZEL_DATA_DIR: the desktop app keeps the login and voice notes in the user's app-data folder, so updates never wipe them.
+const DATA_DIR = process.env.HAZEL_DATA_DIR ? path.join(process.env.HAZEL_DATA_DIR, 'whatsapp') : __dirname;
+const AUTH_DIR = path.join(DATA_DIR, 'auth');
 // WHATSAPP=off: never connect (test copies, the demo server). Two servers on one WhatsApp login push each other off,
 // and the second one could answer real customers from the wrong database.
 const OFF = process.env.WHATSAPP === 'off';
-const MEDIA_DIR = path.join(__dirname, 'media'); // voice notes, so staff can listen and the engine can transcribe
+const MEDIA_DIR = path.join(DATA_DIR, 'media'); // voice notes, so staff can listen and the engine can transcribe
 const HEARTBEAT_MS = 30_000;        // how often we note "still online", to know later what we missed
 const OFFLINE_GRACE_MS = 20_000;    // messages this close to the connection opening count as live
 const HISTORY_MARGIN_MS = 120_000;  // ignore messages older than our last moment online (they're history, not missed)

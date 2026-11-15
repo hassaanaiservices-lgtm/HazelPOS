@@ -5,6 +5,8 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
+const { setCloudLink } = require('../rag/src/generation/ai-route');
+
 const BATCH = 200;
 const BACKUP_EVERY_MS = 24 * 60 * 60 * 1000;
 
@@ -18,6 +20,8 @@ module.exports = function cloudSync(db) {
   const hash = o => crypto.createHash('sha1').update(JSON.stringify(o)).digest('hex');
   const mark = (tbl, id, h = '') => db.prepare('INSERT OR REPLACE INTO sync_log VALUES (?,?,?)').run(tbl, id, h);
   let running = false;
+  const linkAi = () => setCloudLink(get('url'), get('key')); // AI calls go through the cloud when this PC has no AI keys
+  linkAi();
 
   async function call(urlPath, body, raw) {
     const r = await fetch(get('url').replace(/\/+$/, '') + urlPath, {
@@ -106,10 +110,10 @@ module.exports = function cloudSync(db) {
     try {
       const hello = await call('/api/sync/hello');
       if (old.url !== url || old.key !== key) { db.exec('DELETE FROM sync_log'); set('stock_hash', ''); set('last_backup', ''); } // new cloud: send everything
-      set('branch', hello.branch); set('last_error', '');
+      set('branch', hello.branch); set('last_error', ''); linkAi();
       syncNow();
       return hello;
-    } catch (e) { set('url', old.url); set('key', old.key); throw e; }
+    } catch (e) { set('url', old.url); set('key', old.key); linkAi(); throw e; }
   }
 
   function status() {
@@ -120,7 +124,7 @@ module.exports = function cloudSync(db) {
         AND id NOT IN (SELECT local_id FROM sync_log WHERE tbl='orders')`).get().c,
     };
   }
-  const disconnect = () => { set('url', ''); set('key', ''); set('branch', ''); };
+  const disconnect = () => { set('url', ''); set('key', ''); set('branch', ''); linkAi(); };
 
   setInterval(syncNow, 60 * 1000).unref();
   setTimeout(syncNow, 5000).unref();

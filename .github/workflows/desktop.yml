@@ -1,0 +1,31 @@
+# Builds the HazelPOS installers (Windows .exe, Mac .dmg, Linux .AppImage) and attaches them to a GitHub release.
+# Each OS builds on its own runner because server/node_modules has platform-specific parts (sharp).
+# Release: bump "version" in desktop/package.json, then  git tag v1.0.1 && git push --tags
+# Installed apps pick the update up by themselves (electron-updater).
+name: Desktop installers
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm --prefix desktop install
+      - run: npm --prefix desktop run prepare-app
+      - run: npx electron-builder --publish always
+        working-directory: desktop
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

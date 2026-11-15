@@ -5,20 +5,25 @@ const path = require('path');
 
 const ENV = path.join(__dirname, '..', '..', '..', '.env');
 if (!process.env.DEEPSEEK_API_KEY && fs.existsSync(ENV)) process.loadEnvFile(ENV);
+const { cloudLink, viaCloud } = require('./ai-route');
 
 async function once(cfg, messages, signal) {
   const t0 = Date.now();
-  const r = await fetch(cfg.base_url + '/chat/completions', {
-    method: 'POST',
-    headers: { Authorization: 'Bearer ' + process.env.DEEPSEEK_API_KEY, 'Content-Type': 'application/json' },
+  const req = {
     body: JSON.stringify({
       model: cfg.model, messages, max_tokens: cfg.max_reply_tokens,
       thinking: { type: cfg.thinking }, response_format: { type: 'json_object' },
     }),
+    headers: { 'Content-Type': 'application/json' },
     signal: AbortSignal.any([AbortSignal.timeout(cfg.timeout_ms), signal].filter(Boolean)),
-  });
-  const body = await r.json().catch(() => ({}));
-  if (!r.ok) throw Object.assign(new Error(`DeepSeek HTTP ${r.status}: ${body.error?.message || 'no details'}`), { retry: r.status === 429 || r.status >= 500 });
+  };
+  let r, body;
+  if (process.env.DEEPSEEK_API_KEY) {
+    r = await fetch(cfg.base_url + '/chat/completions', { ...req, method: 'POST', headers: { ...req.headers, Authorization: 'Bearer ' + process.env.DEEPSEEK_API_KEY } });
+    body = await r.json().catch(() => ({}));
+  } else ({ r, data: body } = await viaCloud('/api/ai/chat', req)); // no key on this PC: through HazelPOS Cloud
+  // 402/403 from the cloud = membership not active or daily limit reached: retrying won't help
+  if (!r.ok) throw Object.assign(new Error(`DeepSeek HTTP ${r.status}: ${body.error?.message || body.error || 'no details'}`), { retry: r.status === 429 || r.status >= 500 });
   const content = body.choices?.[0]?.message?.content || '';
   let json;
   try { json = JSON.parse(content); } catch { throw Object.assign(new Error('DeepSeek did not return valid JSON'), { retry: true, content }); }
@@ -50,7 +55,7 @@ function hedged(cfg, messages) {
 }
 
 async function chatJson(cfg, messages) {
-  if (!process.env.DEEPSEEK_API_KEY) throw new Error('DEEPSEEK_API_KEY is not set in .env');
+  if (!process.env.DEEPSEEK_API_KEY && !cloudLink()) throw new Error('No DeepSeek key: set DEEPSEEK_API_KEY in .env, or connect HazelPOS Cloud (Settings → Cloud)');
   let lastErr;
   for (let attempt = 0; attempt <= cfg.max_retries; attempt++) {
     try { return { ...(await hedged(cfg, messages)), attempts: attempt + 1 }; }

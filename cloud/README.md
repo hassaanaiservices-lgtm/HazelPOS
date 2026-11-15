@@ -21,7 +21,10 @@ Settings (environment variables):
 | --- | --- | --- |
 | `PORT` | `4200` | HTTP port |
 | `DATA_DIR` | `cloud/data` | Where `cloud.db` and the `backups/` folder live. Back this folder up. |
-| `ALLOW_SIGNUP` | on | Set to `0` after you have created your owner accounts, so strangers can't sign up |
+| `ALLOW_SIGNUP` | on (off when `VENDOR_PASSWORD` is set) | Set to `0` after you have created your owner accounts, so strangers can't sign up. On the vendor cloud, `1` turns it back on |
+| `VENDOR_PASSWORD` | not set | Makes this **your** HazelPOS Cloud: memberships are enforced, your page `/vendor.html` is on, and the AI proxy works. Use a long random password |
+| `DEEPSEEK_API_KEY`, `GROQ_API_KEY` | not set | Your AI keys, used for every restaurant's WhatsApp assistant and voice notes (`/api/ai/chat`, `/api/ai/transcribe`). They never leave this server |
+| `AI_DAILY_LIMIT` | `3000` | AI calls per branch per day |
 
 Put it behind HTTPS (for example Caddy or Nginx with Let's Encrypt). Branch keys and owner passwords travel in requests, so plain HTTP is only acceptable on a private network.
 
@@ -44,3 +47,23 @@ If a key leaks, open the branch in the dashboard and press **New branch key**. T
 | Database backup | daily | The last 14 are kept per branch |
 
 Customers, menus and settings stay on the branch. Re-sending is safe because the cloud upserts by branch and local id.
+
+## Vendor mode (selling HazelPOS monthly)
+
+With `VENDOR_PASSWORD` set, open `/vendor.html`:
+
+1. **Add a restaurant**: the owner's email and password (for this dashboard), plan, and paid-until date (default: one month from today).
+2. **Add branch**: shows the branch key once. The restaurant types it, with this cloud's address, into the installed app's activation screen.
+3. When they pay: **Paid: +1 month** (counts from the later of today and their current date). **Suspend** stops new orders straight away.
+4. AI usage per branch this month: replies, tokens, voice minutes, failures.
+
+The installed POS checks its membership every 3 hours and remembers the last answer, so a dropped internet connection
+doesn't stop billing. The rules (offline days, grace days) are in `server/licence.js` and listed in `RISKS.md` (L1–L3).
+
+## Deploy on Railway (your vendor cloud)
+
+1. In the Railway project: **New → GitHub repo → HazelPOS**, as a new service next to the demo. Settings → **Root directory** `cloud`, start command `node index.js`.
+2. **Add a volume** to this service, mounted at `/data`. Do this before adding any restaurant: without it, every redeploy wipes `cloud.db` (memberships, keys, backups). See RISKS.md A3.
+3. Variables: `DATA_DIR=/data`, `VENDOR_PASSWORD=<long random>`, `DEEPSEEK_API_KEY=…`, `GROQ_API_KEY=…`. Railway sets `PORT` itself.
+4. Settings → Networking → **Generate domain** (HTTPS comes with it). Pick a region close to Pakistan (RISKS.md A1).
+5. Open `https://<domain>/vendor.html`, log in with the vendor password and add your first restaurant.

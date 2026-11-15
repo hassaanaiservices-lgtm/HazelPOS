@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useMemo, useState } from 'react'
 import './App.css'
 import { api, rs, TYPES, parseModifiers, modsText, promoPreview, run } from './lib'
 import Login from './Login'
+import Activate from './Activate'
 import Kitchen from './Kitchen'
 import Reports from './Reports'
 import Admin from './Admin'
@@ -72,6 +73,10 @@ export default function App() {
   }
   const reloadAll = () => { api('/settings').then(setSettings); if (user) { api('/menu').then(setMenu); refresh() } }
   useEffect(reloadAll, [user?.id])
+  useEffect(() => { // the POS stays open for days: keep the membership banner current
+    const t = setInterval(() => api('/settings').then(setSettings).catch(() => {}), 30 * 60 * 1000)
+    return () => clearInterval(t)
+  }, [])
   const notify = (m, kind) => toast(m, kind)
   useEffect(() => {
     if (user?.role !== 'cashier') return
@@ -91,6 +96,9 @@ export default function App() {
     return () => window.removeEventListener('pos-logout', clearSession)
   }, [])
 
+  // Wait for /settings so the demo role picker doesn't flash the PIN keypad first.
+  if (settings.demo === undefined) return <div className="login" />
+  if (settings.licence?.state === 'activate') return <Activate settings={settings} onDone={reloadAll} />
   if (!user) return <Login settings={settings} onLogin={login} />
   const nav = NAV[user.role] || NAV.cashier
   const newOrder = (type, table) => { setOrder({ type, table_id: table?.id, tableName: table?.name, items: [], discount: 0, user_name: user.name }); setView('register') }
@@ -145,6 +153,8 @@ export default function App() {
       <div className="drawer-bg" onClick={() => setNavOpen(false)} />
 
       <main>
+        {['due_soon', 'warning', 'locked'].includes(settings.licence?.state) && user.role !== 'kitchen' &&
+          <div className={'licence-banner no-print ' + settings.licence.state} role={settings.licence.state === 'due_soon' ? 'status' : 'alert'}>{settings.licence.message}</div>}
         {view === 'home' && <Home onPick={t => t === 'dine-in' ? (refresh(), setView('tables')) : newOrder(t)} />}
         {view === 'tables' && <TablesFloor tables={tables} onBack={goHome} onRefresh={refresh} canEditFloors={user.role === 'admin'}
           onPick={t => t.order_id ? openExisting(t.order_id) : newOrder('dine-in', t)} />}

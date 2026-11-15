@@ -24,7 +24,18 @@ CREATE TABLE IF NOT EXISTS c_stock (branch_id INTEGER, local_id INTEGER, name TE
 CREATE TABLE IF NOT EXISTS c_shifts (branch_id INTEGER, local_id INTEGER, opened_at TEXT, closed_at TEXT, opened_by TEXT, closed_by TEXT,
   opening_cash REAL, expected_cash REAL, closing_cash REAL, difference REAL, notes TEXT, PRIMARY KEY (branch_id, local_id));
 CREATE TABLE IF NOT EXISTS backups (id INTEGER PRIMARY KEY, branch_id INTEGER, at TEXT, size INTEGER, file TEXT);
+CREATE TABLE IF NOT EXISTS ai_usage (id INTEGER PRIMARY KEY, branch_id INTEGER, at TEXT, day TEXT, kind TEXT, ok INTEGER,
+  tokens_in INTEGER, tokens_cached INTEGER, tokens_out INTEGER, audio_seconds REAL, ms INTEGER);
+CREATE INDEX IF NOT EXISTS ai_usage_day ON ai_usage (branch_id, day);
 `);
+// Memberships (you, the vendor, sell HazelPOS monthly): paid_until per owner account; suspended = switched off by hand
+for (const sql of [
+  'ALTER TABLE owners ADD COLUMN paid_until TEXT',
+  'ALTER TABLE owners ADD COLUMN suspended INTEGER DEFAULT 0',
+  'ALTER TABLE owners ADD COLUMN plan TEXT',
+  'ALTER TABLE owners ADD COLUMN phone TEXT',
+  'ALTER TABLE owners ADD COLUMN notes TEXT',
+]) { try { db.exec(sql); } catch { /* already there */ } }
 
 const now = () => new Date().toISOString();
 const sha = s => crypto.createHash('sha256').update(String(s)).digest('hex');
@@ -38,6 +49,7 @@ const KEEP_BACKUPS = 14;
 
 const app = express();
 app.use('/api/sync/backup', express.raw({ type: '*/*', limit: '500mb' }));
+app.use('/api/ai/transcribe', express.raw({ type: '*/*', limit: '25mb' })); // WhatsApp voice notes are small
 app.use(express.json({ limit: '10mb' }));
 
 // ---------- Owner accounts ----------
@@ -46,7 +58,8 @@ app.post('/api/owner/signup', (req, res) => {
   const email = String(req.body.email || '').trim().toLowerCase(), pass = String(req.body.password || '');
   if (!/^\S+@\S+\.\S+$/.test(email)) return res.status(400).json({ error: 'Enter a valid email' });
   if (pass.length < 8) return res.status(400).json({ error: 'Password must be at least 8 characters' });
-  if (process.env.ALLOW_SIGNUP === '0') return res.status(403).json({ error: 'Signups are closed on this server' });
+  // On your vendor cloud, you create the restaurants' accounts (vendor page), so open signup is off unless ALLOW_SIGNUP=1
+  if (process.env.ALLOW_SIGNUP === '0' || (process.env.VENDOR_PASSWORD && process.env.ALLOW_SIGNUP !== '1')) return res.status(403).json({ error: 'Signups are closed on this server' });
   if (db.prepare('SELECT 1 FROM owners WHERE email=?').get(email)) return res.status(400).json({ error: 'An account with this email already exists' });
   const id = db.prepare('INSERT INTO owners (email,name,pass,created_at) VALUES (?,?,?,?)').run(email, String(req.body.name || ''), hashPass(pass), now()).lastInsertRowid;
   res.json(session(id));
@@ -164,6 +177,8 @@ const branchAuth = (req, res, next) => {
   next();
 };
 app.get('/api/sync/hello', branchAuth, (req, res) => res.json({ branch: req.branch.name, id: req.branch.id }));
+// The installed POS asks this every few hours (server/licence.js) and keeps the last answer for offline days
+app.get('/api/licence', branchAuth, (req, res) => res.json({ ...membership(req.branch.owner_id), branch: req.branch.name, server_time: now() }));
 
 // Upserts are keyed by (branch, local id), so re-sending the same batch is harmless
 app.post('/api/sync/push', branchAuth, (req, res) => {
@@ -200,6 +215,160 @@ app.post('/api/sync/backup', branchAuth, (req, res) => {
     db.prepare('DELETE FROM backups WHERE id=?').run(old.id);
   }
   res.json({ ok: true });
+});
+
+// ---------- Memberships ----------
+// VENDOR_PASSWORD set = this is your HazelPOS Cloud and memberships are enforced (see vendor routes below).
+// Not set = someone runs their own cloud just for their branches: nothing is enforced.
+const VENDOR = !!process.env.VENDOR_PASSWORD;
+const today = () => new Date().toISOString().slice(0, 10);
+function membership(ownerId) {
+  if (!VENDOR) return { active: true, paid_until: null, suspended: false };
+  const o = db.prepare('SELECT paid_until, suspended, plan FROM owners WHERE id=?').get(ownerId) || {};
+  const active = !o.suspended && !!o.paid_until && o.paid_until >= today();
+  return { active, paid_until: o.paid_until || null, suspended: !!o.suspended, plan: o.plan || null };
+}
+
+// ---------- Vendor (you): restaurants, memberships, AI usage — page: /vendor.html ----------
+const vendorTokens = new Map(); // token -> created; in memory, so a restart means logging in again
+const vendorAuth = (req, res, next) => {
+  const t = (req.get('authorization') || '').replace(/^Bearer /, '');
+  const at = VENDOR && vendorTokens.get(t);
+  if (!at || Date.now() - at > 7 * 864e5) return res.status(401).json({ error: 'Please log in again' });
+  next();
+};
+app.post('/api/vendor/login', (req, res) => {
+  if (!VENDOR) return res.status(404).json({ error: 'Vendor mode is off on this server' });
+  const f = fails.get('v:' + req.ip) || { n: 0, until: 0 };
+  if (f.until > Date.now()) return res.status(429).json({ error: 'Too many attempts. Try again in a few minutes' });
+  const ok = crypto.timingSafeEqual(Buffer.from(sha(req.body.password || '')), Buffer.from(sha(process.env.VENDOR_PASSWORD)));
+  if (!ok) { f.n++; if (f.n >= 5) { f.n = 0; f.until = Date.now() + 15 * 60 * 1000; } fails.set('v:' + req.ip, f); return res.status(401).json({ error: 'Wrong password' }); }
+  fails.delete('v:' + req.ip);
+  const token = crypto.randomBytes(32).toString('hex');
+  vendorTokens.set(token, Date.now());
+  res.json({ token });
+});
+const addMonths = (from, n) => { const d = new Date(from + 'T00:00:00Z'); d.setUTCMonth(d.getUTCMonth() + n); return d.toISOString().slice(0, 10); };
+app.get('/api/vendor/owners', vendorAuth, (req, res) => {
+  const month = today().slice(0, 7);
+  res.json(db.prepare('SELECT id, email, name, phone, plan, notes, paid_until, suspended, created_at FROM owners ORDER BY id DESC').all().map(o => ({
+    ...o, ...membership(o.id),
+    branches: db.prepare('SELECT id, name, created_at, last_sync, last_ip FROM branches WHERE owner_id=? ORDER BY id').all(o.id).map(b => ({
+      ...b,
+      ai: db.prepare(`SELECT COUNT(*) calls, COALESCE(SUM(tokens_in),0) tokens_in, COALESCE(SUM(tokens_cached),0) tokens_cached,
+        COALESCE(SUM(tokens_out),0) tokens_out, COALESCE(SUM(audio_seconds),0) audio_seconds, COALESCE(SUM(ok=0),0) failed
+        FROM ai_usage WHERE branch_id=? AND substr(day,1,7)=?`).get(b.id, month),
+    })),
+  })));
+});
+app.post('/api/vendor/owners', vendorAuth, (req, res) => {
+  const email = String(req.body.email || '').trim().toLowerCase(), pass = String(req.body.password || '');
+  if (!/^\S+@\S+\.\S+$/.test(email)) return res.status(400).json({ error: 'Enter a valid email' });
+  if (pass.length < 8) return res.status(400).json({ error: 'Password must be at least 8 characters' });
+  if (db.prepare('SELECT 1 FROM owners WHERE email=?').get(email)) return res.status(400).json({ error: 'An account with this email already exists' });
+  const paid = /^\d{4}-\d{2}-\d{2}$/.test(req.body.paid_until || '') ? req.body.paid_until : addMonths(today(), 1);
+  const id = db.prepare('INSERT INTO owners (email,name,pass,created_at,phone,plan,notes,paid_until) VALUES (?,?,?,?,?,?,?,?)')
+    .run(email, String(req.body.name || ''), hashPass(pass), now(), String(req.body.phone || ''), String(req.body.plan || ''), String(req.body.notes || ''), paid).lastInsertRowid;
+  res.json({ id });
+});
+const vendorOwner = (req, res) => {
+  const o = db.prepare('SELECT * FROM owners WHERE id=?').get(req.params.id);
+  if (!o) res.status(404).json({ error: 'Restaurant not found' });
+  return o;
+};
+app.post('/api/vendor/owners/:id', vendorAuth, (req, res) => {
+  const o = vendorOwner(req, res); if (!o) return;
+  const b = req.body || {};
+  if (b.paid_until !== undefined && b.paid_until !== null && !/^\d{4}-\d{2}-\d{2}$/.test(b.paid_until)) return res.status(400).json({ error: 'Date must be YYYY-MM-DD' });
+  db.prepare('UPDATE owners SET name=?, phone=?, plan=?, notes=?, paid_until=?, suspended=? WHERE id=?').run(
+    b.name ?? o.name, b.phone ?? o.phone, b.plan ?? o.plan, b.notes ?? o.notes,
+    b.paid_until === undefined ? o.paid_until : b.paid_until, b.suspended === undefined ? o.suspended : (b.suspended ? 1 : 0), o.id);
+  res.json({ ok: true, ...membership(o.id) });
+});
+// Payment received: add months from the later of today and the current paid-until date
+app.post('/api/vendor/owners/:id/extend', vendorAuth, (req, res) => {
+  const o = vendorOwner(req, res); if (!o) return;
+  const months = Math.max(1, Math.min(24, +req.body.months || 1));
+  const from = o.paid_until && o.paid_until > today() ? o.paid_until : today();
+  db.prepare('UPDATE owners SET paid_until=? WHERE id=?').run(addMonths(from, months), o.id);
+  res.json({ ok: true, ...membership(o.id) });
+});
+// The branch key goes into the restaurant's activation screen. Shown once; only its hash is kept.
+app.post('/api/vendor/owners/:id/branches', vendorAuth, (req, res) => {
+  const o = vendorOwner(req, res); if (!o) return;
+  const name = String(req.body.name || '').trim() || 'Main branch';
+  const key = 'hz_' + crypto.randomBytes(24).toString('hex');
+  const id = db.prepare('INSERT INTO branches (owner_id,name,key_hash,created_at) VALUES (?,?,?,?)').run(o.id, name, sha(key), now()).lastInsertRowid;
+  res.json({ id, name, key });
+});
+app.post('/api/vendor/branches/:id/rekey', vendorAuth, (req, res) => {
+  const b = db.prepare('SELECT * FROM branches WHERE id=?').get(req.params.id);
+  if (!b) return res.status(404).json({ error: 'Branch not found' });
+  const key = 'hz_' + crypto.randomBytes(24).toString('hex');
+  db.prepare('UPDATE branches SET key_hash=? WHERE id=?').run(sha(key), b.id);
+  res.json({ id: b.id, name: b.name, key });
+});
+
+// ---------- AI proxy (Authorization: Bearer <branch key>) ----------
+// Restaurants' installed apps have no AI keys. Their WhatsApp assistant (DeepSeek) and voice notes (Groq) come through
+// here: your keys stay on this server, every call is counted per branch, and an unpaid membership switches AI off.
+const AI_DAILY_LIMIT = +process.env.AI_DAILY_LIMIT || 3000; // calls per branch per day: a runaway loop can't empty your account
+const aiAuth = (req, res, next) => {
+  if (!VENDOR) return res.status(503).json({ error: 'The AI proxy only runs on the vendor cloud (VENDOR_PASSWORD set)' }); // else anyone who signs up uses your keys
+  const key = (req.get('authorization') || '').replace(/^Bearer /, '');
+  const b = key && db.prepare('SELECT * FROM branches WHERE key_hash=?').get(sha(key));
+  if (!b) return res.status(401).json({ error: 'Unknown branch key' });
+  if (!membership(b.owner_id).active) return res.status(402).json({ error: 'HazelPOS membership is not active: the WhatsApp assistant is paused until it is renewed' });
+  const used = db.prepare('SELECT COUNT(*) c FROM ai_usage WHERE branch_id=? AND day=?').get(b.id, today()).c;
+  if (used >= AI_DAILY_LIMIT) return res.status(403).json({ error: `Daily AI limit reached (${AI_DAILY_LIMIT} calls). It resets tomorrow` });
+  req.branch = b;
+  next();
+};
+const logAi = (b, kind, ok, t0, u = {}) => db.prepare(`INSERT INTO ai_usage (branch_id,at,day,kind,ok,tokens_in,tokens_cached,tokens_out,audio_seconds,ms)
+  VALUES (?,?,?,?,?,?,?,?,?,?)`).run(b.id, now(), today(), kind, ok ? 1 : 0, u.in ?? null, u.cached ?? null, u.out ?? null, u.seconds ?? null, Date.now() - t0);
+
+app.post('/api/ai/chat', aiAuth, async (req, res) => {
+  if (!process.env.DEEPSEEK_API_KEY) return res.status(503).json({ error: 'The cloud has no DeepSeek key yet' });
+  const t0 = Date.now(), { model, messages, max_tokens, thinking, response_format } = req.body || {};
+  if (!Array.isArray(messages)) return res.status(400).json({ error: 'messages missing' });
+  try {
+    const r = await fetch((process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com') + '/chat/completions', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + process.env.DEEPSEEK_API_KEY, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model, messages, max_tokens: Math.min(+max_tokens || 400, 1000), thinking, response_format }),
+      signal: AbortSignal.timeout(30_000),
+    });
+    const body = await r.json().catch(() => ({}));
+    const u = body.usage || {};
+    logAi(req.branch, 'chat', r.ok, t0, { in: u.prompt_tokens, cached: u.prompt_cache_hit_tokens, out: u.completion_tokens });
+    res.status(r.status).json(body);
+  } catch (e) {
+    logAi(req.branch, 'chat', false, t0);
+    res.status(502).json({ error: 'DeepSeek did not answer: ' + e.message });
+  }
+});
+
+app.post('/api/ai/transcribe', aiAuth, async (req, res) => {
+  if (!process.env.GROQ_API_KEY) return res.status(503).json({ error: 'The cloud has no Groq key yet' });
+  if (!req.body?.length) return res.status(400).json({ error: 'No audio' });
+  const t0 = Date.now();
+  const form = new FormData();
+  form.append('file', new Blob([req.body], { type: req.get('content-type') || 'audio/ogg' }), path.basename(String(req.query.name || 'voice.ogg')));
+  form.append('model', String(req.query.model || 'whisper-large-v3'));
+  form.append('response_format', 'verbose_json');
+  form.append('temperature', '0');
+  if (req.query.language) form.append('language', String(req.query.language));
+  try {
+    const r = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
+      method: 'POST', body: form, headers: { Authorization: 'Bearer ' + process.env.GROQ_API_KEY }, signal: AbortSignal.timeout(60_000),
+    });
+    const body = await r.json().catch(() => ({}));
+    logAi(req.branch, 'voice', r.ok, t0, { seconds: body.duration });
+    res.status(r.status).json(body);
+  } catch (e) {
+    logAi(req.branch, 'voice', false, t0);
+    res.status(502).json({ error: 'Groq did not answer: ' + e.message });
+  }
 });
 
 app.use(express.static(path.join(__dirname, 'public')));
