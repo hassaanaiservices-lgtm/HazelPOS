@@ -13,7 +13,7 @@ import Customers from './Customers'
 import Delivery from './Delivery'
 import Payroll from './Payroll'
 import WhatsApp from './WhatsApp'
-import { QrOrderAlerts, QrCodesModal, beep } from './QrOrders'
+import { QrOrderAlerts, beep } from './QrOrders'
 import QRCode from 'qrcode'
 import { Icon, Logo } from './ui'
 import { toast, toastError, confirmBox, promptBox } from './notify'
@@ -27,7 +27,6 @@ const NAV = {
     ['orders', 'Orders', 'list'],
     ['kitchen', 'Kitchen', 'flame'],
     ['delivery', 'Delivery', 'bike'],
-    ['qr_menu', 'QR codes', 'qr'],
     ['menu', 'Menu', 'book'],
     ['places', 'Tables & delivery', 'table'],
     ['register_session', 'Cash drawer', 'wallet'],
@@ -41,7 +40,6 @@ const NAV = {
     ['orders', 'Orders', 'list'],
     ['kitchen', 'Kitchen', 'flame'],
     ['delivery', 'Delivery', 'bike'],
-    ['qr_menu', 'QR codes', 'qr'],
     ['whatsapp', 'WhatsApp', 'chat'],
     ['register_session', 'Cash drawer', 'wallet'],
   ],
@@ -173,7 +171,6 @@ export default function App() {
         {view === 'menu' && user.role === 'admin' && <MenuSection onChanged={reloadAll} notify={notify} />}
         {view === 'places' && user.role === 'admin' && <PlacesSection onChanged={reloadAll} notify={notify} />}
         {view === 'admin' && user.role === 'admin' && <Admin onChanged={reloadAll} notify={notify} />}
-        {view === 'qr_menu' && <QrCodesModal onClose={() => go(nav[0][0])} />}
       </main>
       {user.role === 'cashier' && <QrOrderAlerts user={user} notify={notify} onAccepted={refresh} />}
     </div>

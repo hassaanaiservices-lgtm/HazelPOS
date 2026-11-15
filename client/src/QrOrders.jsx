@@ -4,8 +4,9 @@ import { api, modsText } from './lib'
 import { Icon } from './ui'
 import { toastError } from './notify'
 
-// Printable sheet with one QR code per table
-export function QrCodesModal({ onClose }) {
+// Printable sheet with one QR code per table. only: a table id = just that table's code.
+// Every table gets its code automatically when it's added (server: ensureQrTokens).
+export function QrCodesModal({ onClose, only = null }) {
   const [info, setInfo] = useState(null)
   const [base, setBase] = useState('')
   const [codes, setCodes] = useState({})
@@ -33,7 +34,7 @@ export function QrCodesModal({ onClose }) {
       <div className="modal qr-modal" onClick={e => e.stopPropagation()}>
         <div className="qr-modal-head no-print">
           <div>
-            <h2>Table QR codes</h2>
+            <h2>{only ? `QR code: ${info?.tables.find(t => t.id === only)?.name || ''}` : 'Table QR codes'}</h2>
             <p className="muted">Print and stick one on each table. Customers scan it, order from their phone, and the order pops up here for you to accept.</p>
           </div>
           <div className="qr-modal-actions">
@@ -48,7 +49,7 @@ export function QrCodesModal({ onClose }) {
         </div>
         {!info ? <p className="muted">Loading…</p> : (
           <div className="qr-grid" id="qr-print-area">
-            {info.tables.map(t => (
+            {info.tables.filter(t => !only || t.id === only).map(t => (
               <div key={t.id} className="qr-card">
                 <div className="qr-card-title">{t.name}</div>
                 <div className="qr-card-floor">{t.floor}</div>

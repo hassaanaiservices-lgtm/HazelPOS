@@ -178,7 +178,7 @@ export default function TablesFloor({ tables, onPick, onBack, onRefresh, canEdit
           <span className="stat-pill free">Free <b>{freeCount}</b></span>
           <span className="stat-pill busy">Occupied <b>{occupiedCount}</b></span>
           {totalOccupiedRevenue > 0 && <span className="stat-pill">Open bills <b>{rs(totalOccupiedRevenue)}</b></span>}
-          <button className="ghost sm" id="qr-codes-btn" onClick={() => setShowQr(true)}><Icon name="qr" size={16} />QR codes</button>
+          {canEditFloors && <button className="ghost sm" id="qr-codes-btn" onClick={() => setShowQr(true)}><Icon name="qr" size={16} />QR codes</button>}
           {canEditFloors && <button className="ghost sm edit-floors-btn" onClick={openFloorManager}><Icon name="edit" size={16} />Floors</button>}
         </div>
       </div>

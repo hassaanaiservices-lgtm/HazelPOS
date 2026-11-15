@@ -116,10 +116,23 @@ export default function RegisterSession({ user, notify }) {
                 </div>
                 <div className="kpi big">
                   <span>Expected Drawer Cash</span>
-                  <b style={{ color: 'var(--accent2)' }}>{rs(session.expectedCash)}</b>
-                  <small className="muted">Must be in drawer right now</small>
+                  <b style={{ color: session.expectedCash < 0 ? 'var(--red)' : 'var(--accent2)' }}>{rs(session.expectedCash)}</b>
+                  <small className="muted">{session.expectedCash < 0 ? 'Below zero: see why below' : 'Must be in drawer right now'}</small>
                 </div>
               </div>
+              {session.expectedCash < 0 && (() => {
+                // Minus is allowed (the money really left the drawer); say where it went
+                const refunds = (session.moves || []).filter(m => m.type === 'out' && /^Refund #/.test(m.reason || ''))
+                const refundSum = refunds.reduce((t, m) => t + m.amount, 0)
+                return (
+                  <div className="drawer-minus" role="note">
+                    <b>Why the drawer is below zero ({rs(session.expectedCash)})</b>
+                    <p>More cash went out of this drawer ({rs(session.cashOut)}) than the opening float, cash sales and cash in added up to ({rs(session.opening_cash + session.cashSales + session.cashIn)}).</p>
+                    {refunds.length > 0 && <p>{refunds.length === 1 ? 'A refund' : `${refunds.length} refunds`} ({rs(refundSum)}) came out of this drawer: {refunds.map(m => m.reason.split(':')[0].replace('Refund ', '')).join(', ')}. If an order was paid in an earlier shift, its cash went into that shift's drawer, so refunding it from today's drawer pushes this one below zero.</p>}
+                    <p className="muted">Nothing is wrong with the figures. When you close the shift, count the cash as it is; the difference shows on the Z-report.</p>
+                  </div>
+                )
+              })()}
 
               {session.otherSales?.length > 0 && (
                 <div className="card" style={{ marginTop: 14 }}>

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { api, rs, parseModifiers, downloadCsv, dealItems } from './lib'
 import { Icon } from './ui'
 import Integrations from './Integrations'
+import { QrCodesModal } from './QrOrders'
 import { toastError, confirmBox } from './notify'
 
 const TABS = ['Restaurant', 'Staff & PINs', 'WhatsApp bot', 'Integrations', 'Cloud', 'Activity Log']
@@ -28,9 +29,11 @@ const PLACE_TABS = [['floors', 'Floors'], ['tables', 'Tables'], ['zones', 'Deliv
 export function PlacesSection({ onChanged, notify }) {
   const [tab, setTab] = useState('tables')
   const [floors, setFloors] = useState([])
+  const [qr, setQr] = useState(null) // 'all' or a table id: the printable QR sheet
   useEffect(() => { if (tab === 'tables') api('/floors').then(f => setFloors(f.map(x => x.name))).catch(() => {}) }, [tab])
   return (
     <section className="admin">
+      {qr && <QrCodesModal only={qr === 'all' ? null : qr} onClose={() => setQr(null)} />}
       <div className="row-head"><h2>Tables & delivery</h2>
         <div className="tabs" role="tablist">{PLACE_TABS.map(([id, label]) => <button key={id} role="tab" aria-selected={tab === id} className={tab === id ? 'active' : ''} onClick={() => setTab(id)}>{label}</button>)}</div>
       </div>
@@ -50,6 +53,8 @@ export function PlacesSection({ onChanged, notify }) {
           </>
         )} />}
       {tab === 'tables' && <SimpleAdmin route="tables" listUrl="/tables" onChanged={onChanged} notify={notify}
+        headExtra={<button className="ghost" onClick={() => setQr('all')}><Icon name="qr" size={16} />Print all QR codes</button>}
+        rowExtra={t => <button className="ghost" onClick={() => setQr(t.id)}><Icon name="qr" size={16} />QR code</button>}
         fields={[
           ['name', 'Table Name (e.g. T1, F1)'],
           ['seats', 'Seats / Capacity', 'number'],
@@ -356,7 +361,7 @@ function ModifierEditor({ groups, onChange }) {
   )
 }
 
-function SimpleAdmin({ route, listUrl, pick = d => d, fields, blank, show, onChanged = () => {}, notify }) {
+function SimpleAdmin({ route, listUrl, pick = d => d, fields, blank, show, onChanged = () => {}, notify, rowExtra = null, headExtra = null }) {
   const [list, setList] = useState([])
   const [edit, setEdit] = useState(null)
   const load = () => api(listUrl).then(d => setList(pick(d)))
@@ -368,11 +373,12 @@ function SimpleAdmin({ route, listUrl, pick = d => d, fields, blank, show, onCha
   const del = async x => { if (await confirmBox('Delete?')) { await api(`/${route}/${x.id}/delete`, {}); load(); onChanged() } }
   return (
     <>
-      <button className="primary add" onClick={() => setEdit({ ...blank })}>+ Add</button>
+      <div className="row add"><button className="primary" onClick={() => setEdit({ ...blank })}>+ Add</button>{headExtra}</div>
       <div className="admin-list">
         {list.map(x => (
           <div key={x.id} className="admin-row">{show(x)}
             <span style={{ flex: 1 }} />
+            {rowExtra?.(x)}
             <button className="ghost" onClick={() => setEdit(x)}>Edit</button>
             <button className="ghost danger" onClick={() => del(x)}>Delete</button>
           </div>
