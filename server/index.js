@@ -442,6 +442,7 @@ const ACCESS = [
   [/^GET \/settings$/, null], // logged-out callers only get name + logo
   [/^(GET|POST) \/qr\//, null], // customer table ordering, guarded by the table's QR token
   [/^GET \/licence$/, null], // the activation screen shows before anyone can log in
+  [/^(GET|POST) \/internal\//, null], // the desktop app itself, guarded by its own secret (App updates, below)
   [/^GET \/menu-images(\/\d+\/image)?$/, null], // menu card pictures: public like the menu itself (QR page)
   [/^POST \/licence\/(activate|check)$/, null], // activate: only until activated, then admin (checked in the route)
   [/^POST \/logout$/, ALL],
@@ -1515,10 +1516,45 @@ const health = () => {
     orders_today: db.prepare("SELECT COUNT(*) c FROM orders WHERE date(created_at,'localtime') = date('now','localtime')").get().c,
     cloud_sync: (({ last_sync, last_backup, last_error, pending_orders }) => ({ last_sync, last_backup, last_error, pending_orders }))(cloud.status()),
     errors: recentErrors.slice(-20),
+    update: { state: appUpdate.state, version: appUpdate.version || null }, // appUpdate: App updates below
   };
 };
 const restorer = require('./restore')(db, cloud);
 const lic = require('./licence')(db, cloud, { setup: setupApplier, health, restore: restorer });
+// ---------- App updates (with the desktop app: desktop/main.js) ----------
+// The desktop app downloads updates in the background and reports here; the owner sees it in Settings → Updates and
+// can install now. Otherwise it installs at night with no open orders. Before installing: a cloud backup (prepare-update)
+// and a copy of the database on this PC (done by the desktop app).
+const INTERNAL = process.env.HAZEL_INTERNAL_TOKEN || '';
+const internalOnly = (req, res, next) => INTERNAL && req.get('x-hazel-internal') === INTERNAL ? next() : res.status(403).json({ error: 'Not allowed' });
+let appUpdate = { state: INTERNAL ? 'idle' : 'unavailable' }, updateAsk = { install: false, check: false }, vendorAskSeen = '';
+const openOrders = () => db.prepare("SELECT COUNT(*) c FROM orders WHERE status='open'").get().c;
+// Updates to a few clients first (admin app → Updates): a test client installs any version; the others only up to the
+// version you released to everyone. No release set yet = everyone (nothing held back).
+const newer = (a, b) => { const x = String(a).split('.').map(Number), y = String(b).split('.').map(Number); for (let i = 0; i < 3; i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0); return false; };
+const updateAllowed = version => {
+  const p = lic.state().update_policy;
+  return !version || !p || p.early || !p.release_version || !newer(version, p.release_version);
+};
+app.post('/api/internal/update-state', internalOnly, (req, res) => { appUpdate = { ...req.body }; res.json({ ok: true }); });
+app.get('/api/internal/update-request', internalOnly, (req, res) => {
+  const vendorAsk = lic.state().update_requested_at || ''; // you pressed "Ask all clients to update" in the admin app
+  if (vendorAsk && vendorAsk !== vendorAskSeen) { vendorAskSeen = vendorAsk; updateAsk.check = true; }
+  res.json({ ...updateAsk, open_orders: openOrders(), allowed: updateAllowed(appUpdate.version) });
+  updateAsk = { install: false, check: false };
+});
+app.post('/api/internal/prepare-update', internalOnly, async (req, res) => {
+  try { await cloud.backupNow(); res.json({ ok: true, cloud_backup: true }); } catch (e) { res.json({ ok: true, cloud_backup: false, error: e.message }); }
+});
+app.get('/api/update', (req, res) => res.json({ ...appUpdate, allowed: updateAllowed(appUpdate.version), current: process.env.HAZEL_VERSION || require('./package.json').version,
+  desktop: !!INTERNAL, open_orders: openOrders(), vendor_requested_at: lic.state().update_requested_at || null }));
+app.post('/api/update/check', (req, res) => { if (!INTERNAL) return res.status(400).json({ error: 'Updates come with the installed HazelPOS app' }); updateAsk.check = true; res.json({ ok: true }); });
+app.post('/api/update/install', (req, res) => {
+  if (appUpdate.state !== 'ready') return res.status(400).json({ error: 'No update is ready to install yet' });
+  if (!updateAllowed(appUpdate.version)) return res.status(400).json({ error: 'HazelPOS is testing this version with a few restaurants first. It installs as soon as it is released to everyone' });
+  updateAsk.install = true; res.json({ ok: true });
+});
+
 // Owner: replace everything on this PC with the cloud's newest backup of this branch
 app.post('/api/cloud/restore', async (req, res) => {
   if (req.body.confirm !== 'RESTORE') return res.status(400).json({ error: 'Type RESTORE to confirm' });

@@ -39,6 +39,8 @@ for (const sql of [
   'ALTER TABLE owners ADD COLUMN wa_grace_days INTEGER',
   'ALTER TABLE owners ADD COLUMN pos_grace_days INTEGER',
   'ALTER TABLE owners ADD COLUMN cancelled_at TEXT',
+  // Updates to a few clients first: test clients install every new version; everyone else up to release_version
+  'ALTER TABLE owners ADD COLUMN early_updates INTEGER DEFAULT 0',
   // Activation code (HZ-XXXX-XXXX): one use, swapped for the branch key by the installed app
   'ALTER TABLE branches ADD COLUMN code_hash TEXT',
   'ALTER TABLE branches ADD COLUMN code_created_at TEXT',
@@ -53,6 +55,7 @@ for (const sql of [
 ]) { try { db.exec(sql); } catch { /* already there */ } }
 // The restaurant's setup you prepare before they install (server/setup.js applies it): one per branch
 db.exec(`
+CREATE TABLE IF NOT EXISTS vendor_settings (key TEXT PRIMARY KEY, value TEXT);
 CREATE TABLE IF NOT EXISTS setups (branch_id INTEGER PRIMARY KEY, data TEXT, updated_at TEXT, applied_at TEXT, applied TEXT, error TEXT);
 CREATE TABLE IF NOT EXISTS setup_images (id INTEGER PRIMARY KEY, branch_id INTEGER, caption TEXT, mime TEXT, data BLOB, sort INTEGER);
 CREATE TABLE IF NOT EXISTS branch_errors (id INTEGER PRIMARY KEY, branch_id INTEGER, at TEXT, text TEXT, UNIQUE (branch_id, at, text));
@@ -205,7 +208,10 @@ app.get('/api/sync/hello', branchAuth, (req, res) => res.json({ branch: req.bran
 // The installed POS asks this every few hours (server/licence.js) and keeps the last answer for offline days
 app.get('/api/licence', branchAuth, (req, res) => {
   const st = db.prepare('SELECT updated_at, applied_at FROM setups WHERE branch_id=?').get(req.branch.id);
-  res.json({ ...membership(req.branch.owner_id), branch: req.branch.name, server_time: now(), setup_ready: !!st && !st.applied_at });
+  const vs = k => db.prepare('SELECT value FROM vendor_settings WHERE key=?').get(k)?.value || null;
+  const early = !!db.prepare('SELECT early_updates FROM owners WHERE id=?').get(req.branch.owner_id)?.early_updates;
+  res.json({ ...membership(req.branch.owner_id), branch: req.branch.name, server_time: now(), setup_ready: !!st && !st.applied_at,
+    update_requested_at: vs('update_requested_at'), update_policy: { early, release_version: vs('release_version') } });
 });
 
 // ---------- Activation code + setup download (the installed app, right after activation) ----------
@@ -523,6 +529,31 @@ app.get('/api/vendor/usage', vendorAuth, (req, res) => {
   const days = db.prepare(`SELECT day, ${SUM} FROM ai_usage WHERE substr(day,1,7)=? GROUP BY day ORDER BY day`).all(month).map(d => ({ ...d, cost_usd: +aiCost(d).toFixed(4) }));
   const months = db.prepare(`SELECT DISTINCT substr(day,1,7) m FROM ai_usage ORDER BY m DESC LIMIT 24`).all().map(r => r.m);
   res.json({ month, months: months.includes(month) ? months : [month, ...months], prices: PRICES, branches, days });
+});
+
+// Versions across all branches (from their health reports), and "ask all clients to update": their apps check for
+// the update at their next licence check (within 3 hours) and install it at night with no open orders.
+app.get('/api/vendor/updates', vendorAuth, (req, res) => {
+  const branches = db.prepare(`SELECT b.id, b.name, b.health, b.health_at, o.id owner_id, o.early_updates, COALESCE(NULLIF(o.name,''), o.email) owner FROM branches b JOIN owners o ON o.id=b.owner_id ORDER BY o.id, b.id`).all()
+    .map(b => { const h = JSON.parse(b.health || 'null'); return { id: b.id, name: b.name, owner: b.owner, owner_id: b.owner_id, early: !!b.early_updates, version: h?.version || null, update: h?.update || null, health_at: b.health_at }; });
+  const vs = k => db.prepare('SELECT value FROM vendor_settings WHERE key=?').get(k)?.value || null;
+  res.json({ branches, requested_at: vs('update_requested_at'), release_version: vs('release_version') });
+});
+// Test clients (early_updates) get every new version; the others install only up to release_version
+app.post('/api/vendor/owners/:id/early', vendorAuth, (req, res) => {
+  const o = vendorOwner(req, res); if (!o) return;
+  db.prepare('UPDATE owners SET early_updates=? WHERE id=?').run(req.body.early ? 1 : 0, o.id);
+  res.json({ ok: true });
+});
+app.post('/api/vendor/updates/release', vendorAuth, (req, res) => {
+  const v = String(req.body.version || '').trim();
+  if (v && !/^\d+\.\d+\.\d+$/.test(v)) return res.status(400).json({ error: 'Version like 1.2.0' });
+  db.prepare("INSERT INTO vendor_settings (key,value) VALUES ('release_version', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(v);
+  res.json({ ok: true, release_version: v || null });
+});
+app.post('/api/vendor/updates/request', vendorAuth, (req, res) => {
+  db.prepare("INSERT INTO vendor_settings (key,value) VALUES ('update_requested_at', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(now());
+  res.json({ ok: true });
 });
 
 // A new activation code: shown once. Using it on a PC swaps it for a new key, so any older install stops.

@@ -71,6 +71,12 @@ export default function App() {
   }
   const reloadAll = () => { api('/settings').then(setSettings); if (user) { api('/menu').then(setMenu); refresh() } }
   useEffect(reloadAll, [user?.id])
+  const [updateReady, setUpdateReady] = useState('') // version of a downloaded app update (owner banner)
+  useEffect(() => {
+    if (user?.role !== 'admin') return
+    const poll = () => api('/update').then(u => setUpdateReady(u.state === 'ready' ? u.version || 'An update' : '')).catch(() => {})
+    poll(); const t = setInterval(poll, 5 * 60 * 1000); return () => clearInterval(t)
+  }, [user?.role])
   useEffect(() => { // the POS stays open for days: keep the membership banner current
     const t = setInterval(() => api('/settings').then(setSettings).catch(() => {}), 30 * 60 * 1000)
     return () => clearInterval(t)
@@ -151,6 +157,8 @@ export default function App() {
       <div className="drawer-bg" onClick={() => setNavOpen(false)} />
 
       <main>
+        {updateReady && user.role === 'admin' && view !== 'admin' && <div className="licence-banner due_soon no-print" role="status">
+          HazelPOS {updateReady} is ready to install. <button className="link" onClick={() => go('admin')}>Settings → Updates</button> (or it installs tonight by itself).</div>}
         {['due_soon', 'warning', 'locked'].includes(settings.licence?.state) && user.role !== 'kitchen' &&
           <div className={'licence-banner no-print ' + settings.licence.state} role={settings.licence.state === 'due_soon' ? 'status' : 'alert'}>{settings.licence.message}</div>}
         {view === 'home' && <Home onPick={t => t === 'dine-in' ? (refresh(), setView('tables')) : newOrder(t)} />}

@@ -5,7 +5,7 @@ import Integrations from './Integrations'
 import { QrCodesModal } from './QrOrders'
 import { toastError, confirmBox, promptBox } from './notify'
 
-const TABS = ['Restaurant', 'Staff & PINs', 'Alerts', 'WhatsApp bot', 'Integrations', 'Cloud', 'Activity Log']
+const TABS = ['Restaurant', 'Staff & PINs', 'Alerts', 'Updates', 'WhatsApp bot', 'Integrations', 'Cloud', 'Activity Log']
 
 export default function Admin({ onChanged, notify }) {
   const [tab, setTab] = useState('Restaurant')
@@ -17,6 +17,7 @@ export default function Admin({ onChanged, notify }) {
       {tab === 'Restaurant' && <RestaurantSettings onChanged={onChanged} notify={notify} />}
       {tab === 'Staff & PINs' && <LoginPins notify={notify} />}
       {tab === 'Alerts' && <StockAlerts notify={notify} />}
+      {tab === 'Updates' && <Updates notify={notify} />}
       {tab === 'WhatsApp bot' && <BotBehaviour notify={notify} />}
       {tab === 'Integrations' && <Integrations onChanged={onChanged} notify={notify} />}
       {tab === 'Cloud' && <CloudSettings notify={notify} />}
@@ -469,6 +470,39 @@ function RestaurantSettings({ onChanged, notify }) {
           <option value="refuse">Refuse — the cashier must open the Cash Drawer first</option>
         </select></label>
       <button className="primary" onClick={async () => { await api('/settings', s); onChanged(); notify('Settings saved') }}>Save settings</button>
+    </div>
+  )
+}
+
+// App updates (desktop app): status, check now, update now. Installs at night by itself when no orders are open.
+const UPDATE_TEXT = {
+  idle: 'Waiting for the first check.', checking: 'Checking for an update…', none: 'You have the newest version.',
+  downloading: 'Downloading the update in the background. You can keep working.', ready: 'An update is downloaded and ready to install.',
+  installing: 'Installing: HazelPOS restarts in about a minute.', error: 'The last check failed (no internet?). It tries again by itself.',
+  unavailable: 'Updates come with the installed HazelPOS app.',
+}
+function Updates({ notify }) {
+  const [u, setU] = useState(null)
+  const load = () => api('/update').then(setU).catch(() => {})
+  useEffect(() => { load(); const t = setInterval(load, 5000); return () => clearInterval(t) }, [])
+  if (!u) return null
+  const install = async () => {
+    const warn = u.open_orders ? ` ${u.open_orders} order(s) are still open; they stay open and come back after the update.` : ''
+    if (!await confirmBox(`Install the update now? HazelPOS closes for about a minute and opens again by itself. A backup is made first.${warn}`, { title: 'Update HazelPOS', confirmLabel: 'Update now' })) return
+    try { await api('/update/install', {}); notify('Updating: HazelPOS restarts in about a minute') } catch (e) { toastError(e.message) }
+  }
+  return (
+    <div className="admin-form">
+      <h3>App updates</h3>
+      <p>Version <b>{u.current}</b>{u.version && u.version !== u.current ? <> · new version <b>{u.version}</b></> : null}</p>
+      <p className={u.state === 'error' ? 'err' : 'muted'}>{UPDATE_TEXT[u.state] || u.state}{u.state === 'downloading' && u.percent ? ` ${u.percent}%` : ''}{u.state === 'error' && u.error ? ` (${u.error})` : ''}</p>
+      {u.vendor_requested_at && <p className="notice-inline">HazelPOS asked all restaurants to update ({new Date(u.vendor_requested_at).toLocaleDateString()}).</p>}
+      {u.desktop && <div className="row">
+        {u.state === 'ready' && u.allowed && <button className="primary" onClick={install}>Update now</button>}
+        {u.state === 'ready' && !u.allowed && <span className="muted">HazelPOS is testing this version with a few restaurants first. It installs as soon as it's released to everyone.</span>}
+        <button className="ghost" disabled={['checking', 'downloading', 'installing'].includes(u.state)} onClick={async () => { await api('/update/check', {}).catch(e => toastError(e.message)); notify('Checking for updates…'); setTimeout(load, 2000) }}>Check for updates</button>
+      </div>}
+      <p className="muted" style={{ fontSize: 13 }}>How updates work: they download by themselves in the background. If you don't press "Update now", HazelPOS installs the update at night (3–5 AM) when no orders are open. Before every update, your data is backed up to HazelPOS Cloud and copied on this PC, and the update never changes your menu, orders or settings.</p>
     </div>
   )
 }

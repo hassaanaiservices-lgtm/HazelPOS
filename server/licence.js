@@ -83,7 +83,7 @@ module.exports = function licence(db, cloud, { setup = null, health = () => ({})
     if (!required) return { state: 'off' };
     if (!get('url') || !get('key') || !get('lic_checked_at')) return { state: 'activate', default_url: process.env.HAZEL_CLOUD_URL || '' };
     const today = day(clock()), a = answer();
-    const base = { paid_until: a.paid_until || null, ai_until: a.ai_until || null, pos_until: a.pos_until || null, last_check: new Date(+get('lic_checked_at')).toISOString(), error: get('lic_error') };
+    const base = { paid_until: a.paid_until || null, ai_until: a.ai_until || null, pos_until: a.pos_until || null, update_requested_at: a.update_requested_at || null, update_policy: a.update_policy || null, last_check: new Date(+get('lic_checked_at')).toISOString(), error: get('lic_error') };
     if (a.revoked) return { ...base, state: 'locked', message: 'This branch key was removed from HazelPOS Cloud. Contact HazelPOS to reconnect.' };
     if (a.cancelled) return { ...base, state: 'locked', message: 'Your HazelPOS membership was cancelled. New orders and the WhatsApp assistant are off. Contact HazelPOS.' };
     if (a.suspended) return { ...base, state: 'locked', message: 'HazelPOS has paused your membership. New orders and the WhatsApp assistant are off until it is renewed. Contact HazelPOS.' };

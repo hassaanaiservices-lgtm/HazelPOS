@@ -20,6 +20,13 @@ Status: **open** = not decided yet, **decided** = we chose what to do (the choic
 | D9 | The installer is about 290 MB unpacked (Electron is most of it). | Slow download on weak internet. | Normal for Electron apps. The download itself is compressed, so it's smaller. | open |
 | D10 | A Windows installer built on Linux (like the test one in `desktop/dist/`) carries Linux image libraries (`sharp`). The POS still starts (checked under Wine), but WhatsApp image thumbnails may not work. | Small: only thumbnails. | Use the GitHub Actions build (each OS built on its own runner) for installers you give to clients. | open |
 
+## App updates
+
+| # | Risk | What happens if it goes wrong | Options | Status |
+| --- | --- | --- | --- | --- |
+| U1 | The real install step (electron-updater swapping the app) is untested: it needs a published GitHub release. Everything around it is tested (status, Update now, test clients, release to everyone, backup before update). | An update could fail to install on some PC. | Before the first real client: publish 1.0.1, install it on your own PC as a test client, check it updates and keeps data. | open |
+| U2 | There's no one-click "go back to the old version". | A bad update stays until the next one. | Test clients first (built in), the local copy in data folder → backups, and the old installer on GitHub releases to reinstall. | open |
+
 ## Licence / membership
 
 | # | Risk | What happens if it goes wrong | Options | Status |
