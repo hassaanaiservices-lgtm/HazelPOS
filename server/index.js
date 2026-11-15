@@ -422,7 +422,7 @@ if (DEMO) {
     const DEMO_ONLY = [
       [/^\/whatsapp\/(connect|logout)/, "WhatsApp isn't available in the demo. In the real HazelPOS, you link the restaurant's own WhatsApp here by scanning a QR code with the phone. The assistant then answers customers, sends the menu and takes orders."],
       [/^\/print\//, "Printing isn't available in the demo. In the real HazelPOS, receipts and kitchen tickets print straight to your thermal printer."],
-      [/^\/cloud\/(connect|sync|backup)/, "HazelPOS Cloud isn't available in the demo. In the real HazelPOS, every sale is backed up and the owner sees all branches from their phone."],
+      [/^\/cloud\/(connect|sync|backup|restore)/, "HazelPOS Cloud isn't available in the demo. In the real HazelPOS, every sale is backed up and the owner sees all branches from their phone."],
       [/^\/(secrets|fiscal\/retry)/, "PRA / FBR reporting isn't available in the demo. In the real HazelPOS, each invoice is reported to PRA or FBR automatically."],
     ];
     const hit = req.method !== 'GET' && DEMO_ONLY.find(([re]) => re.test(req.path));
@@ -1517,7 +1517,13 @@ const health = () => {
     errors: recentErrors.slice(-20),
   };
 };
-const lic = require('./licence')(db, cloud, { setup: setupApplier, health });
+const restorer = require('./restore')(db, cloud);
+const lic = require('./licence')(db, cloud, { setup: setupApplier, health, restore: restorer });
+// Owner: replace everything on this PC with the cloud's newest backup of this branch
+app.post('/api/cloud/restore', async (req, res) => {
+  if (req.body.confirm !== 'RESTORE') return res.status(400).json({ error: 'Type RESTORE to confirm' });
+  try { res.json(await restorer.fromCloud()); } catch (e) { res.status(400).json({ error: `Could not restore: ${e.message}` }); }
+});
 app.get('/api/licence', (req, res) => res.json(lic.state()));
 app.post('/api/licence/check', async (req, res) => res.json(await lic.check()));
 app.post('/api/licence/activate', async (req, res) => {

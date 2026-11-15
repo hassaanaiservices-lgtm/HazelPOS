@@ -58,7 +58,10 @@ module.exports = function cloudSync(db) {
     return { changed, deleted: [...seen.keys()].filter(id => !ids.has(id)) };
   }
 
+  let held = false; // during activation (server/licence.js): no upload until the restore or setup is done
+  const hold = on => { held = !!on; };
   async function syncNow() {
+    if (held) return { skipped: 'activation in progress' };
     if (!get('url') || !get('key')) return { skipped: 'not connected' };
     if (running) return { skipped: 'already running' };
     running = true;
@@ -106,14 +109,25 @@ module.exports = function cloudSync(db) {
     } finally { fs.rmSync(file, { force: true }); }
   }
 
-  async function connect(url, key) {
+  // The newest backup of this branch from the cloud -> { buffer, at }
+  async function downloadLatestBackup() {
+    if (!get('url') || !get('key')) throw new Error('Not connected to HazelPOS Cloud');
+    const r = await fetch(get('url').replace(/\/+$/, '') + '/api/sync/backup/latest', { headers: { Authorization: 'Bearer ' + get('key') }, signal: AbortSignal.timeout(300000) })
+      .catch(() => { throw new Error('Cloud not reachable (no internet?)'); });
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `Cloud replied ${r.status}`);
+    return { buffer: Buffer.from(await r.arrayBuffer()), at: r.headers.get('x-backup-at') };
+  }
+
+  // sync:false = don't upload yet (activation: a new PC must not upload its empty demo database as the newest backup
+  // before it has restored the real one)
+  async function connect(url, key, { sync = true } = {}) {
     const old = { url: get('url'), key: get('key') };
     set('url', url); set('key', key);
     try {
       const hello = await call('/api/sync/hello');
       if (old.url !== url || old.key !== key) { db.exec('DELETE FROM sync_log'); set('stock_hash', ''); set('last_backup', ''); } // new cloud: send everything
       set('branch', hello.branch); set('last_error', ''); linkAi();
-      syncNow();
+      if (sync) syncNow();
       return hello;
     } catch (e) { set('url', old.url); set('key', old.key); linkAi(); throw e; }
   }
@@ -130,5 +144,5 @@ module.exports = function cloudSync(db) {
 
   setInterval(syncNow, 60 * 1000).unref();
   setTimeout(syncNow, 5000).unref();
-  return { syncNow, backupNow, connect, disconnect, status };
+  return { syncNow, backupNow, connect, disconnect, status, downloadLatestBackup, hold };
 };

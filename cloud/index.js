@@ -275,6 +275,12 @@ app.post('/api/sync/push', branchAuth, (req, res) => {
 });
 
 // Whole-database snapshot from the branch; the newest KEEP_BACKUPS are kept
+// The branch's newest backup, for a new PC or a restore (server/restore.js). 404 = none yet.
+app.get('/api/sync/backup/latest', branchAuth, (req, res) => {
+  const bk = db.prepare('SELECT * FROM backups WHERE branch_id=? ORDER BY id DESC LIMIT 1').get(req.branch.id);
+  if (!bk || !fs.existsSync(path.join(DATA, 'backups', bk.file))) return res.status(404).json({ error: 'No backup of this branch yet' });
+  res.set('X-Backup-At', bk.at).type('application/octet-stream').sendFile(path.join(DATA, 'backups', bk.file));
+});
 app.post('/api/sync/backup', branchAuth, (req, res) => {
   if (!req.body?.length || req.body.subarray(0, 15).toString() !== 'SQLite format 3') return res.status(400).json({ error: 'Not a database file' });
   const file = `b${req.branch.id}-${Date.now()}.db`;

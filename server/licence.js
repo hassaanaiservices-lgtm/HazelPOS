@@ -16,7 +16,8 @@ const CHECK_EVERY_MS = 3 * 60 * 60 * 1000;
 const DAY = 864e5;
 
 // setup: server/setup.js applier · health: () => what the POS reports to your admin app (version, WhatsApp, errors)
-module.exports = function licence(db, cloud, { setup = null, health = () => ({}) } = {}) {
+// restore: server/restore.js (a new PC takes the branch's newest cloud backup on activation)
+module.exports = function licence(db, cloud, { setup = null, health = () => ({}), restore = null } = {}) {
   const required = process.env.HAZEL_LICENCE === '1';
   // cloud_config is created by cloud-sync.js, which runs first
   const get = k => db.prepare('SELECT value FROM cloud_config WHERE key=?').get(k)?.value || '';
@@ -117,11 +118,20 @@ module.exports = function licence(db, cloud, { setup = null, health = () => ({})
       if (!r.ok) throw new Error(d.error || `Cloud replied ${r.status}`);
       key = d.key;
     }
-    await cloud.connect(url, key);
+    cloud.hold(true);
+    try { await cloud.connect(url, key, { sync: false }); } catch (e) { cloud.hold(false); throw e; }
     set('setup_error', '');
-    const s = await check(); // also downloads the setup if one is ready
+    // A new PC for a branch that already ran: bring its data back (orders, menu, staff…) instead of the setup
+    let restored = null;
+    if (restore && setup && !setup.hasOrders()) {
+      try { restored = await restore.fromCloud(); }
+      catch (e) { if (!/No backup/.test(e.message)) set('setup_error', `Backup not restored: ${e.message}`); }
+    }
+    let s;
+    try { s = await check(); } finally { cloud.hold(false); } // check() also downloads the setup if one is ready (skipped after a restore)
     if (s.state === 'activate') throw new Error(get('lic_error') || 'The cloud did not confirm the membership');
-    return { ...s, setup_applied_at: setup?.appliedAt() || null, setup_error: get('setup_error') || null };
+    cloud.syncNow(); // only now: the first backup is of the restored / set-up restaurant, not the demo
+    return { ...s, restored, setup_applied_at: setup?.appliedAt() || null, setup_error: get('setup_error') || null };
   }
 
   const locked = () => state().state === 'locked';

@@ -19,7 +19,8 @@ export default function Activate({ settings, onDone }) {
     setBusy(true); setErr('')
     try {
       const r = await api('/licence/activate', { url: otherUrl ? url.trim() : '', code: code.trim() })
-      if (r.setup_error) toast(`Activated, but the setup didn't load: ${r.setup_error}`, 'error')
+      if (r.restored) toast(`Activated. Your data is back from the backup of ${new Date(r.restored.at).toLocaleString()} (${r.restored.orders} orders). Log in with your usual PIN.`)
+      else if (r.setup_error) toast(`Activated, but the setup didn't load: ${r.setup_error}`, 'error')
       else if (r.setup_applied_at) toast('Activated. Your menu and setup are ready')
       else toast('Activated')
       onDone()

@@ -3,7 +3,7 @@ import { api, rs, parseModifiers, downloadCsv, dealItems } from './lib'
 import { Icon } from './ui'
 import Integrations from './Integrations'
 import { QrCodesModal } from './QrOrders'
-import { toastError, confirmBox } from './notify'
+import { toastError, confirmBox, promptBox } from './notify'
 
 const TABS = ['Restaurant', 'Staff & PINs', 'Alerts', 'WhatsApp bot', 'Integrations', 'Cloud', 'Activity Log']
 
@@ -621,6 +621,17 @@ function CloudSettings({ notify }) {
           <button className="primary" disabled={!!busy} onClick={act('sync', async () => { await api('/cloud/sync', {}); notify('Synced') })}>{busy === 'sync' ? 'Syncing…' : 'Sync now'}</button>
           <button className="ghost" disabled={!!busy} onClick={act('backup', async () => { await api('/cloud/backup', {}); notify('Backup uploaded') })}>{busy === 'backup' ? 'Uploading…' : 'Backup now'}</button>
           <button className="ghost danger" onClick={act('off', async () => { if (await confirmBox('Stop syncing this branch?')) await api('/cloud/disconnect', {}) })}>Disconnect</button>
+        </div>
+        <h3 style={{ marginTop: 22 }}>Restore from cloud backup</h3>
+        <p className="muted" style={{ fontSize: 13 }}>For a new or repaired PC: brings back this branch's newest backup from the cloud (orders, menu, staff and PINs, customers, stock, settings). Everything on this PC now is replaced. A new PC activated with a code does this by itself.</p>
+        <div className="actions" style={{ justifyContent: 'flex-start' }}>
+          <button className="ghost danger" disabled={!!busy} onClick={act('restore', async () => {
+            const typed = await promptBox('Everything on this PC (orders, menu, staff, settings) will be replaced by the cloud backup. Type RESTORE to continue.', { title: 'Restore from cloud backup?', placeholder: 'RESTORE', confirmLabel: 'Restore', required: true })
+            if (typed === null) return
+            const r = await api('/cloud/restore', { confirm: typed.trim().toUpperCase() })
+            notify(`Restored the backup from ${new Date(r.at).toLocaleString()}: ${r.orders} orders, ${r.products} menu items`)
+            setTimeout(() => window.dispatchEvent(new Event('pos-logout')), 1500) // logins were cleared: PIN screen
+          })}>{busy === 'restore' ? 'Restoring…' : 'Restore from cloud backup'}</button>
         </div>
       </> : <>
         <h3>Connect to HazelPOS Cloud</h3>
