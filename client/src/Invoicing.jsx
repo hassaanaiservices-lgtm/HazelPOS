@@ -5,8 +5,10 @@ import { toastError, confirmBox } from './notify'
 
 const EXP_CATEGORIES = ['Ingredients', 'Packaging', 'Utilities', 'Salaries', 'Rent', 'Maintenance', 'Marketing', 'Miscellaneous']
 
-export default function Invoicing({ user, notify }) {
-  const [tab, setTab] = useState('summary') // summary | expenses | invoices
+// tab given (Dashboard): that tab only, without this screen's own title and tabs
+export default function Invoicing({ user, notify, tab: fixedTab }) {
+  const [ownTab, setTab] = useState('summary') // summary | expenses | invoices
+  const tab = fixedTab || ownTab
   const [summary, setSummary] = useState(null)
   const [expenses, setExpenses] = useState([])
   const [orders, setOrders] = useState([])
@@ -44,14 +46,14 @@ export default function Invoicing({ user, notify }) {
   if (!summary) return <div className="loading">Loading Invoicing & Accounts...</div>
 
   return (
-    <section className="invoicing">
+    <section className={'invoicing' + (fixedTab ? ' embedded' : '')}>
       <div className="row-head">
-        <h2>Invoicing & Accounts</h2>
-        <div className="tabs">
+        {!fixedTab && <h2>Invoicing & Accounts</h2>}
+        {!fixedTab && <div className="tabs">
           <button className={tab === 'summary' ? 'active' : ''} onClick={() => setTab('summary')}>Overview</button>
           <button className={tab === 'expenses' ? 'active' : ''} onClick={() => setTab('expenses')}>Expenses ({expenses.length})</button>
           <button className={tab === 'invoices' ? 'active' : ''} onClick={() => setTab('invoices')}>Tax Invoices ({orders.length})</button>
-        </div>
+        </div>}
         {tab === 'expenses' && (
           <button className="primary sm" onClick={() => setShowAddExpense(true)}>+ Log Expense</button>
         )}

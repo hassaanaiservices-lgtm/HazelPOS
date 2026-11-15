@@ -9,7 +9,7 @@ const RANGES = {
   'This month': () => { const d = new Date(); return [localDate(new Date(d.getFullYear(), d.getMonth(), 1)), localDate()] },
 }
 
-export default function Reports() {
+export default function Reports({ embedded = false }) {
   const [range, setRange] = useState(RANGES.Today())
   const [label, setLabel] = useState('Today')
   const [r, setR] = useState(null)
@@ -21,9 +21,9 @@ export default function Reports() {
   const maxP = Math.max(1, ...r.topProducts.map(p => p.qty))
 
   return (
-    <section className="reports">
+    <section className={'reports' + (embedded ? ' embedded' : '')}>
       <div className="row-head">
-        <h2>Reports</h2>
+        {!embedded && <h2>Reports</h2>}
         <div className="tabs">
           {Object.keys(RANGES).map(k => <button key={k} className={label === k ? 'active' : ''} onClick={() => { setLabel(k); setRange(RANGES[k]()) }}>{k}</button>)}
         </div>

@@ -208,9 +208,10 @@ main > section { flex: 1; min-height: 0; }
 }
 
 /* ---------- Page scaffolding ---------- */
-.orders, .reports, .admin, .invoicing, .register-session, section.delivery, .tables, .home { overflow-y: auto; padding: 24px 28px 40px; }
+.orders, .reports, .admin, .invoicing, .register-session, section.delivery, .tables, .home, .dashboard { overflow-y: auto; padding: 24px 28px 40px; }
+.dashboard > .embedded { padding: 0; overflow: visible; } /* Reports / Accounts inside the Dashboard */
 /* wide monitors: the content stops at 1280px and the gutters grow */
-.orders, .reports, .admin, .invoicing, .register-session { padding-inline: max(28px, calc((100% - 1280px) / 2)); }
+.orders, .reports, .admin, .invoicing, .register-session, .dashboard { padding-inline: max(28px, calc((100% - 1280px) / 2)); }
 .row-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 20px; }
 .row-head > h2 { margin-right: auto; }
 .tabs { display: flex; gap: 4px; padding: 4px; background: var(--surface); border: var(--bw) solid var(--outline); border-radius: var(--r-md);
@@ -809,7 +810,8 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px
 
 /* ---------- Narrow screens ---------- */
 @media (max-width: 959px) {
-  .orders, .reports, .admin, .invoicing, .register-session, .tables, .home { padding: 16px 16px 32px; }
+  .orders, .reports, .admin, .invoicing, .register-session, .tables, .home, .dashboard { padding: 16px 16px 32px; }
+  .dashboard > .embedded { padding: 0; }
   .r-grid { grid-template-columns: minmax(0, 1fr); }
 }
 @media (max-width: 559px) {

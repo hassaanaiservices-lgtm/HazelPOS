@@ -4,9 +4,8 @@ import { api, rs, TYPES, parseModifiers, modsText, promoPreview, run } from './l
 import Login from './Login'
 import Activate from './Activate'
 import Kitchen from './Kitchen'
-import Reports from './Reports'
+import Dashboard from './Dashboard'
 import Admin from './Admin'
-import Invoicing from './Invoicing'
 import RegisterSession from './RegisterSession'
 import TablesFloor from './TablesFloor'
 import Inventory from './Inventory'
@@ -24,6 +23,7 @@ const THEMES = [['dark', 'Dark', 'moon'], ['light', 'Light', 'sun'], ['auto', 'A
 // [view, label, icon]
 const NAV = {
   admin: [
+    ['dashboard', 'Dashboard', 'chart'],
     ['orders', 'Orders', 'list'],
     ['kitchen', 'Kitchen', 'flame'],
     ['delivery', 'Delivery', 'bike'],
@@ -32,8 +32,6 @@ const NAV = {
     ['inventory', 'Inventory', 'box'],
     ['customers', 'Customers', 'users'],
     ['staff', 'Staff', 'badge'],
-    ['invoicing', 'Accounts', 'receipt'],
-    ['reports', 'Reports', 'chart'],
     ['admin', 'Settings', 'settings'],
   ],
   cashier: [
@@ -53,7 +51,7 @@ const NAV = {
 export default function App() {
   const [user, setUser] = useState(() => JSON.parse(localStorage.getItem('pos_user') || 'null'))
   const [settings, setSettings] = useState({ name: 'HazelPOS', logo: '🍕' })
-  const [view, setView] = useState(user?.role === 'kitchen' ? 'kitchen' : user?.role === 'admin' ? 'orders' : 'home')
+  const [view, setView] = useState(user?.role === 'kitchen' ? 'kitchen' : user?.role === 'admin' ? 'dashboard' : 'home')
   const [menu, setMenu] = useState({ categories: [], products: [], taxRate: 0 })
   const [tables, setTables] = useState([])
   const [order, setOrder] = useState(null)
@@ -88,7 +86,7 @@ export default function App() {
     poll(); const t = setInterval(poll, 5000); return () => clearInterval(t)
   }, [user?.id])
 
-  const login = ({ token, user: u }) => { localStorage.setItem('pos_token', token); setUser(u); localStorage.setItem('pos_user', JSON.stringify(u)); setView(u.role === 'kitchen' ? 'kitchen' : u.role === 'admin' ? 'orders' : 'home') }
+  const login = ({ token, user: u }) => { localStorage.setItem('pos_token', token); setUser(u); localStorage.setItem('pos_user', JSON.stringify(u)); setView(u.role === 'kitchen' ? 'kitchen' : u.role === 'admin' ? 'dashboard' : 'home') }
   const clearSession = () => { setUser(null); localStorage.removeItem('pos_user'); localStorage.removeItem('pos_token'); setOrder(null) }
   const logout = () => { api('/logout', {}).catch(() => {}).finally(clearSession) }
   useEffect(() => {
@@ -162,8 +160,7 @@ export default function App() {
         {view === 'orders' && <Orders onOpen={user.role === 'admin' ? null : openExisting} notify={notify} />}
         {view === 'kitchen' && <Kitchen readOnly={user.role === 'admin'} />}
         {view === 'register_session' && <RegisterSession user={user} notify={notify} />}
-        {view === 'invoicing' && user.role === 'admin' && <Invoicing user={user} notify={notify} />}
-        {view === 'reports' && user.role === 'admin' && <Reports />}
+        {view === 'dashboard' && user.role === 'admin' && <Dashboard user={user} notify={notify} />}
         {view === 'inventory' && user.role === 'admin' && <Inventory notify={notify} />}
         {view === 'customers' && user.role === 'admin' && <Customers notify={notify} />}
         {view === 'staff' && user.role === 'admin' && <section className="admin"><div className="row-head"><h2>Staff</h2>
