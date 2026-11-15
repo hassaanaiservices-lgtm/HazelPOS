@@ -18,6 +18,7 @@ Status: **open** = not decided yet, **decided** = we chose what to do (the choic
 | D7 | A fresh install starts with the demo restaurant: "Pizza Venu", its menu, sample expenses, an open cash drawer, and PINs 1234/1111/2222. | The client sees someone else's menu and fake expenses in their reports. If the PINs aren't changed, anyone who knows the defaults can log in. | A "start empty" first run (no demo data), and force the PINs to be changed on first login. | open |
 | D8 | The installer build was leaving out `server/node_modules`. | The installed app would crash on start. | Fixed in `desktop/package.json`, and checked: the packaged server starts. | fixed |
 | D9 | The installer is about 290 MB unpacked (Electron is most of it). | Slow download on weak internet. | Normal for Electron apps. The download itself is compressed, so it's smaller. | open |
+| D10 | A Windows installer built on Linux (like the test one in `desktop/dist/`) carries Linux image libraries (`sharp`). The POS still starts (checked under Wine), but WhatsApp image thumbnails may not work. | Small: only thumbnails. | Use the GitHub Actions build (each OS built on its own runner) for installers you give to clients. | open |
 
 ## Licence / membership
 
