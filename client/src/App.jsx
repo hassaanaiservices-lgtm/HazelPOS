@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useState } from 'react'
 import './App.css'
-import { api, rs, TYPES, parseModifiers, modsText, promoPreview, run } from './lib'
+import { api, rs, TYPES, parseModifiers, modsText, promoPreview, run, isDeal, dealIncludes, includesText, combosOf } from './lib'
 import Login from './Login'
 import Activate from './Activate'
 import Kitchen from './Kitchen'
@@ -232,7 +232,7 @@ function hasMultipleSizes(product) {
 }
 const needsOptions = p => hasMultipleSizes(p) || parseModifiers(p).length > 0
 
-function ItemDetailModal({ product, category, onAdd, onClose }) {
+function ItemDetailModal({ product, category, onAdd, onClose, includes = [], combos = [], onPickCombo }) {
   const sizes = useMemo(() => parseProductSizes(product), [product]);
   const ingredients = useMemo(() => parseProductImages(product), [product]);
 
@@ -288,6 +288,23 @@ function ItemDetailModal({ product, category, onAdd, onClose }) {
         {/* Description */}
         {product.description && (
           <p className="item-modal-desc">{product.description}</p>
+        )}
+        {includes.length > 0 && <p className="item-modal-desc"><b>In this deal:</b> {includesText(includes)}</p>}
+
+        {/* Combos offered with this item ("Zinger Combo": Zinger + Fries + Drink) */}
+        {combos.length > 0 && (
+          <div className="item-modal-section">
+            <div className="item-modal-sec-title">Make it a combo</div>
+            <div className="combo-list">
+              {combos.map(c => (
+                <button key={c.id} type="button" className="combo-card" onClick={() => { onClose(); onPickCombo(c) }}>
+                  <span className="combo-emoji">{c.emoji}</span>
+                  <span className="combo-text"><b>{c.name}</b><small>{c.inc}</small></span>
+                  <span className="combo-price">{rs(c.price)}</span>
+                </button>
+              ))}
+            </div>
+          </div>
         )}
 
         {/* CHOOSE SIZE (Non-editable, selectable variation) */}
@@ -401,6 +418,8 @@ function Register({ menu, order, setOrder, notify, onDone, onBack }) {
   const total = net + tax + deliveryFee
 
   // Prices shown here are a preview; the server recalculates every line from the menu when the order is saved
+  // Items with sizes, options, deal contents or combos open the item popup; others go straight into the order
+  const pick = p => (needsOptions(p) || isDeal(p) || combosOf(p, menu.products).length) ? setActiveProduct(p) : addWithVariation({ product: p, size: parseProductSizes(p)[0], qty: 1, note: '' })
   const addWithVariation = ({ product, size, qty = 1, note = '', mods = [] }) => setOrder(o => {
     const hasMultiple = hasMultipleSizes(product);
     const sizeSuffix = (hasMultiple || (size && size.name !== 'Regular')) ? ` (${size.name})` : '';
@@ -417,7 +436,7 @@ function Register({ menu, order, setOrder, notify, onDone, onBack }) {
     }
     return {
       ...o,
-      items: [...o.items, { product_id: product.id, name: itemName, size: size?.name, mods, price: itemPrice, qty, note: cleanNote }]
+      items: [...o.items, { product_id: product.id, name: itemName, size: size?.name, mods, price: itemPrice, qty, note: cleanNote, includes: dealIncludes(product, menu.products) }]
     };
   })
 
@@ -508,8 +527,9 @@ function Register({ menu, order, setOrder, notify, onDone, onBack }) {
                 id={'prod-' + p.id}
                 className="prod"
                 style={{ '--c': color(p.category_id) }}
-                onClick={() => needsOptions(p) ? setActiveProduct(p) : addWithVariation({ product: p, size: parseProductSizes(p)[0], qty: 1, note: '' })}
+                onClick={() => pick(p)}
               >
+                {isDeal(p) && <span className="deal-tag">{+p.combo_for ? 'Combo' : 'Deal'}</span>}
                 <span className="emoji">{p.emoji}</span>
                 <b>{p.name}</b>
                     <span className="price">{hasMultiple ? `from ${rs(minP)}` : rs(p.price)}</span>
@@ -549,6 +569,7 @@ function Register({ menu, order, setOrder, notify, onDone, onBack }) {
             <div className="item" key={k}>
               <div className="iname"><b>{i.name}</b><small>{rs(i.price)}</small>
                 {i.mods?.length > 0 && <small className="mods">+ {modsText(i.mods)}</small>}
+                {i.includes?.length > 0 && <small className="mods">{includesText(i.includes)}</small>}
                 <input className="note" placeholder="+ note (e.g. no onion)" value={i.note || ''}
                   onChange={e => setOrder(o => ({ ...o, items: o.items.map((x, j) => j === k ? { ...x, note: e.target.value } : x) }))} /></div>
               <div className="qty"><button onClick={() => setQty(k, -1)}>−</button><span>{i.qty}</span><button onClick={() => setQty(k, 1)}>+</button></div>
@@ -589,6 +610,9 @@ function Register({ menu, order, setOrder, notify, onDone, onBack }) {
           product={activeProduct}
           category={menu.categories.find(c => c.id === activeProduct.category_id)}
           onAdd={addWithVariation}
+          includes={dealIncludes(activeProduct, menu.products)}
+          combos={combosOf(activeProduct, menu.products).map(c => ({ ...c, inc: includesText(dealIncludes(c, menu.products)) }))}
+          onPickCombo={pick}
           onClose={() => setActiveProduct(null)}
         />
       )}
@@ -733,6 +757,7 @@ function Receipt({ order, onClose, notify, closeLabel = 'New Order' }) {
           {order.items.map(i => <div key={i.id}>
             <div className="r-line"><span>{i.qty} × {i.name}</span><span>{rs(i.qty * i.price)}</span></div>
             {i.mods?.length > 0 && <div className="r-sub">+ {modsText(i.mods)}</div>}
+            {i.includes?.length > 0 && <div className="r-sub">{includesText(i.includes)}</div>}
           </div>)}
           <hr />
           <div className="r-line"><span>Subtotal</span><span>{rs(order.subtotal)}</span></div>

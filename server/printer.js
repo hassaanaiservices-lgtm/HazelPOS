@@ -63,6 +63,7 @@ function receipt(order, s, { openDrawer = false } = {}) {
   for (const i of order.items) {
     p.push(cols(`${i.qty} x ${i.name}`, money(i.qty * i.price), w), '\n');
     for (const m of modLines(i, w)) p.push(m, '\n');
+    for (const d of i.includes || []) p.push(ascii(`   - ${d.qty * i.qty} x ${d.name}${d.size ? ` (${d.size})` : ''}`), '\n'); // what's in a deal
   }
   p.push(rule(w), '\n', cols('Subtotal', money(order.subtotal), w), '\n');
   if (order.discount > 0) p.push(cols('Discount', '-' + money(order.discount), w), '\n');
@@ -97,6 +98,7 @@ function kitchenTicket(order, items, { addOn = false, s = {} } = {}) {
   for (const i of items) {
     p.push(BOLD, TALL, wrap(`${i.qty} x ${i.name}`, w).join('\n'), NORMAL, NOBOLD, '\n');
     for (const m of modLines({ ...i, mods: (i.mods || []).map(x => ({ name: x.name })) }, w)) p.push(m, '\n');
+    for (const d of i.includes || []) p.push(BOLD, wrap(`  - ${d.qty * i.qty} x ${d.name}${d.size ? ` (${d.size})` : ''}`, w).join('\n'), NOBOLD, '\n'); // deal: each item to make
   }
   p.push(rule(w), '\n\n\n\n', CUT);
   return Buffer.from(p.join(''), 'latin1');

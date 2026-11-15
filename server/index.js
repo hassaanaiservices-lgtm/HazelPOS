@@ -76,6 +76,10 @@ for (const sql of [
   "ALTER TABLE tables_ ADD COLUMN shape TEXT DEFAULT 'square'",
   'ALTER TABLE tables_ ADD COLUMN qr_token TEXT',
   'ALTER TABLE products ADD COLUMN modifiers TEXT',
+  // Deals and combos: deal_items = [{product_id, size, qty}] — the items inside, for one price. combo_for = the item this
+  // deal is offered with ("Zinger Combo" on Zinger Burger); empty = a stand-alone deal (Deals tab only).
+  'ALTER TABLE products ADD COLUMN deal_items TEXT',
+  'ALTER TABLE products ADD COLUMN combo_for INTEGER',
   'ALTER TABLE order_items ADD COLUMN size TEXT',
   'ALTER TABLE order_items ADD COLUMN mods TEXT',
   'ALTER TABLE orders ADD COLUMN customer_id INTEGER',
@@ -551,7 +555,7 @@ app.post('/api/products/:id/delete', (req, res, next) => {
   if (o) return res.status(400).json({ error: `This item is on open bill #${o.id}. Remove it from that bill first, or hide the item instead (Edit → untick "Show on menu").` });
   next();
 });
-crud('products', 'products', ['name', 'price', 'category_id', 'emoji', 'active', 'subtitle', 'description', 'ingredients', 'sizes', 'modifiers']);
+crud('products', 'products', ['name', 'price', 'category_id', 'emoji', 'active', 'subtitle', 'description', 'ingredients', 'sizes', 'modifiers', 'deal_items', 'combo_for']);
 crud('categories', 'categories', ['name', 'color']);
 
 // ---------- Menu import from Excel / CSV (server/menu-import.js) ----------
@@ -720,10 +724,19 @@ const userErrors = fn => (req, res) => {
   catch (e) { if (e instanceof UserError) res.status(400).json({ error: e.message }); else throw e; }
 };
 
+// What's inside a deal, with today's item names: [{product_id, name, size, qty}] (empty for a normal item)
+function dealIncludes(productId) {
+  const items = parseJSON(db.prepare('SELECT deal_items FROM products WHERE id=?').get(productId)?.deal_items, []) || [];
+  return items.filter(d => d && d.product_id).map(d => ({
+    product_id: +d.product_id, size: d.size || '', qty: Math.max(1, +d.qty || 1),
+    name: db.prepare('SELECT name FROM products WHERE id=?').get(d.product_id)?.name || 'Item removed from menu',
+  }));
+}
 function getOrder(id) {
   const o = db.prepare('SELECT * FROM orders WHERE id=?').get(id);
   if (o) {
-    o.items = db.prepare('SELECT * FROM order_items WHERE order_id=?').all(id).map(i => ({ ...i, mods: parseJSON(i.mods, []) }));
+    // includes: a deal's items, so the kitchen ticket and receipt show what to make
+    o.items = db.prepare('SELECT * FROM order_items WHERE order_id=?').all(id).map(i => ({ ...i, mods: parseJSON(i.mods, []), includes: dealIncludes(i.product_id) }));
     o.invoice_no = `INV-${new Date(o.created_at).getFullYear()}-${String(o.id).padStart(4, '0')}`;
     o.tableName = o.table_id ? db.prepare('SELECT name FROM tables_ WHERE id=?').get(o.table_id)?.name : null;
     o.customer_points = o.customer_id ? db.prepare('SELECT points FROM customers WHERE id=?').get(o.customer_id)?.points : null;
@@ -827,7 +840,12 @@ function recipeFor(productId, size) {
 }
 // On payment: take the ingredients out of stock, spend redeemed points, count the promo use, award new points
 function settle(o, userName) {
-  for (const i of o.items) for (const r of recipeFor(i.product_id, i.size)) moveStock(r.ingredient_id, -r.qty * i.qty, 'sale', `order:${o.id}`, userName, i.name);
+  for (const i of o.items) {
+    // A deal without its own recipe uses the recipes of the items inside it
+    const own = recipeFor(i.product_id, i.size);
+    const lines = own.length ? own : dealIncludes(i.product_id).flatMap(d => recipeFor(d.product_id, d.size).map(r => ({ ...r, qty: r.qty * d.qty })));
+    for (const r of lines) moveStock(r.ingredient_id, -r.qty * i.qty, 'sale', `order:${o.id}`, userName, i.name);
+  }
   if (o.points_used) {
     const c = db.prepare('SELECT points FROM customers WHERE id=?').get(o.customer_id);
     if (!c || c.points < o.points_used) throw new UserError('Customer no longer has enough points');
@@ -1605,7 +1623,7 @@ app.get('/api/qr/:token', (req, res) => {
     table,
     restaurant: { name: s.name, logo: s.logo, logo_image: s.logo_image },
     categories: db.prepare('SELECT * FROM categories ORDER BY id').all(),
-    products: db.prepare('SELECT id, name, price, category_id, emoji, subtitle, description, ingredients, sizes, modifiers FROM products WHERE active=1 ORDER BY name').all(),
+    products: db.prepare('SELECT id, name, price, category_id, emoji, subtitle, description, ingredients, sizes, modifiers, deal_items, combo_for FROM products WHERE active=1 ORDER BY name').all(),
     taxRate: taxRate(),
   });
 });

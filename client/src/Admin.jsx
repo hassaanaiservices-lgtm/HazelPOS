@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { api, rs, parseModifiers, downloadCsv } from './lib'
+import { api, rs, parseModifiers, downloadCsv, dealItems } from './lib'
 import { Icon } from './ui'
 import Integrations from './Integrations'
 import { toastError, confirmBox } from './notify'
@@ -123,7 +123,9 @@ function MenuAdmin({ onChanged, notify }) {
       description: p.description || '',
       ingredients_str: ings,
       sizes_list: Array.isArray(sizesArr) ? sizesArr : [],
-      modifiers_list: parseModifiers(p)
+      modifiers_list: parseModifiers(p),
+      deal_list: dealItems(p).map(d => ({ product_id: +d.product_id, size: d.size || '', qty: +d.qty || 1 })),
+      is_deal: dealItems(p).length > 0,
     });
   };
 
@@ -148,7 +150,10 @@ function MenuAdmin({ onChanged, notify }) {
       modifiers: JSON.stringify((edit.modifiers_list || [])
         .map(g => ({ name: g.name.trim(), min: Math.max(0, +g.min || 0), max: Math.max(0, +g.max || 0),
           options: g.options.filter(o => o.name.trim()).map(o => ({ name: o.name.trim(), price: +o.price || 0 })) }))
-        .filter(g => g.name && g.options.length))
+        .filter(g => g.name && g.options.length)),
+      // A deal: the items inside (for the kitchen, stock and the WhatsApp bot). combo_for: offered on that item too
+      deal_items: edit.is_deal ? JSON.stringify((edit.deal_list || []).filter(d => d.product_id).map(d => ({ product_id: +d.product_id, size: d.size || '', qty: Math.max(1, +d.qty || 1) }))) : '',
+      combo_for: edit.is_deal && +edit.combo_for ? +edit.combo_for : null,
     });
     setEdit(null);
     load();
@@ -244,6 +249,8 @@ function MenuAdmin({ onChanged, notify }) {
               )}
             </div>
 
+            <DealEditor edit={edit} setEdit={setEdit} products={data.products} categories={data.categories} onCategories={load} />
+
             <ModifierEditor groups={edit.modifiers_list || []} onChange={modifiers_list => setEdit({ ...edit, modifiers_list })} />
 
             <label className="check" style={{ marginTop: 6 }}><input type="checkbox" checked={!!edit.active} onChange={e => setEdit({ ...edit, active: e.target.checked })} /> Show on menu</label>
@@ -253,6 +260,53 @@ function MenuAdmin({ onChanged, notify }) {
         </div>
       )}
     </>
+  )
+}
+
+// A deal or combo = several menu items for one price. Shown in the Deals tab of Billing; with "Offer with" set, it's also
+// offered as "Make it a combo" when that item is tapped. The kitchen sees every item inside; stock goes down for each.
+function DealEditor({ edit, setEdit, products, categories, onCategories }) {
+  const items = products.filter(p => p.id !== edit.id && !dealItems(p).length) // a deal holds normal items only
+  const sizesOf = id => { try { const s = JSON.parse(products.find(p => p.id === +id)?.sizes || '[]'); return Array.isArray(s) ? s : [] } catch { return [] } }
+  const list = edit.deal_list || []
+  const setRow = (i, patch) => setEdit({ ...edit, deal_list: list.map((d, n) => n === i ? { ...d, ...patch } : d) })
+  const turnOn = async on => {
+    let category_id = edit.category_id
+    if (on) {
+      let c = categories.find(x => /deal|combo/i.test(x.name))
+      if (!c) { c = await api('/categories', { name: 'Deals', color: '#ff6b35' }); onCategories() }
+      category_id = c.id
+    }
+    setEdit({ ...edit, is_deal: on, category_id, deal_list: on && !list.length ? [{ product_id: '', size: '', qty: 1 }] : list })
+  }
+  return (
+    <div className="deal-editor">
+      <label className="check"><input type="checkbox" checked={!!edit.is_deal} onChange={e => turnOn(e.target.checked)} /> This is a deal or combo (several items for one price)</label>
+      {edit.is_deal && <>
+        <div className="muted" style={{ fontSize: 13 }}>Items inside. The kitchen sees each one, and stock goes down for each.</div>
+        {list.map((d, i) => {
+          const sizes = sizesOf(d.product_id)
+          return (
+            <div key={i} className="deal-row">
+              <select aria-label="Item" value={d.product_id} onChange={e => setRow(i, { product_id: +e.target.value, size: sizesOf(e.target.value)[0]?.name || '' })}>
+                <option value="">Choose an item…</option>
+                {items.map(p => <option key={p.id} value={p.id}>{p.emoji} {p.name}</option>)}
+              </select>
+              {sizes.length > 1 ? <select aria-label="Size" value={d.size} onChange={e => setRow(i, { size: e.target.value })}>
+                {sizes.map(s => <option key={s.name} value={s.name}>{s.name}</option>)}</select> : <span />}
+              <input aria-label="Quantity" type="number" min="1" value={d.qty} onChange={e => setRow(i, { qty: e.target.value })} />
+              <button type="button" className="ghost danger" aria-label="Remove item" onClick={() => setEdit({ ...edit, deal_list: list.filter((_, n) => n !== i) })}><Icon name="x" size={16} /></button>
+            </div>
+          )
+        })}
+        <button type="button" className="ghost" onClick={() => setEdit({ ...edit, deal_list: [...list, { product_id: '', size: '', qty: 1 }] })}>+ Add item to the deal</button>
+        <label>Also offer it as a combo on
+          <select value={edit.combo_for || ''} onChange={e => setEdit({ ...edit, combo_for: e.target.value })}>
+            <option value="">No, only in the Deals tab</option>
+            {items.map(p => <option key={p.id} value={p.id}>{p.emoji} {p.name} (shows "Make it a combo")</option>)}
+          </select></label>
+      </>}
+    </div>
   )
 }
 

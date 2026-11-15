@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { api, rs, parseModifiers, modsText } from './lib'
+import { api, rs, parseModifiers, modsText, isDeal, dealIncludes, includesText } from './lib'
 import './CustomerOrder.css'
 import { toastError } from './notify'
 import { Logo } from './ui'
@@ -115,7 +115,7 @@ export default function CustomerOrder({ token }) {
         </button>
       )}
 
-      {choosing && <OptionSheet product={choosing} onClose={() => setChoosing(null)}
+      {choosing && <OptionSheet all={data.products} product={choosing} onClose={() => setChoosing(null)}
         onAdd={(size, mods) => { addLine(choosing, size, mods); setChoosing(null) }} />}
 
       {showCart && (
@@ -155,7 +155,7 @@ function sizesOf(p) {
 }
 
 // Bottom sheet: pick a size and any option groups, then add to the cart
-function OptionSheet({ product: p, onAdd, onClose }) {
+function OptionSheet({ product: p, all = [], onAdd, onClose }) {
   const sizes = sizesOf(p), groups = parseModifiers(p)
   const [size, setSize] = useState(sizes.length > 1 ? null : sizes[0])
   const [mods, setMods] = useState([])
@@ -173,6 +173,7 @@ function OptionSheet({ product: p, onAdd, onClose }) {
       <div className="co-sheet" onClick={e => e.stopPropagation()}>
         <div className="co-sheet-head"><h3>{p.emoji} {p.name}</h3><button onClick={onClose}>✕</button></div>
         {p.description && <p className="co-muted">{p.description}</p>}
+        {isDeal(p) && <p className="co-muted"><b>In this deal:</b> {includesText(dealIncludes(p, all))}</p>}
         {sizes.length > 1 && <>
           <h4>Size</h4>
           <div className="co-cats">{sizes.map(z => (

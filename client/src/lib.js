@@ -42,3 +42,13 @@ export const promoPreview = (promo, base) => {
 }
 // Wrap an async handler so API errors show up instead of failing silently
 export const run = fn => async (...a) => { try { await fn(...a) } catch (e) { toastError(e.message) } }
+
+// Deals and combos (products.deal_items, products.combo_for)
+export const dealItems = p => { try { const d = typeof p?.deal_items === 'string' ? JSON.parse(p.deal_items || '[]') : p?.deal_items; return Array.isArray(d) ? d.filter(x => x?.product_id) : [] } catch { return [] } }
+export const isDeal = p => dealItems(p).length > 0
+// [{product_id, name, size, qty}] for a deal, names from the menu
+export const dealIncludes = (p, products) => dealItems(p).map(d => ({ ...d, qty: Math.max(1, +d.qty || 1), name: products.find(x => x.id === +d.product_id)?.name || 'Item removed' }))
+// "2× Zinger Burger, Fries (Regular), Coke 500ml"
+export const includesText = list => (list || []).map(d => `${d.qty > 1 ? d.qty + '× ' : ''}${d.name}${d.size ? ` (${d.size})` : ''}`).join(', ')
+// Combos offered on an item: deals whose combo_for is this item
+export const combosOf = (p, products) => products.filter(x => +x.combo_for === p.id && x.active !== 0 && isDeal(x))

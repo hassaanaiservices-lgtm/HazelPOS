@@ -16,6 +16,7 @@ function readPos(dbPath, dataConfig) {
       id: p.id, name: p.name, category_id: p.category_id, active: !!p.active,
       price: p.price, subtitle: p.subtitle || '', description: p.description || '',
       ingredients: json(p.ingredients, []), sizes: json(p.sizes, []), modifiers: json(p.modifiers, []),
+      deal_items: json(p.deal_items, []) || [], combo_for: p.combo_for || null,
     }));
     const delivery_zones = db.prepare('SELECT id, name, fee, min_order, free_above, eta_min FROM delivery_zones WHERE active=1 ORDER BY name').all().map(z => ({ ...z }));
     const settings = Object.fromEntries(db.prepare('SELECT key, value FROM settings').all().map(r => [r.key, r.value]));

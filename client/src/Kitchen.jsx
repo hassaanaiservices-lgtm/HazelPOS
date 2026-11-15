@@ -49,7 +49,8 @@ export default function Kitchen({ readOnly = false }) {
                       <span className="timer">{since(m)}</span>
                     </div>
                     {t.customer && <div className="muted">{t.customer}</div>}
-                    <ul>{t.items.map(i => <li key={i.id}><b>{i.qty}×</b> {i.name}{i.mods?.length > 0 && <small className="mods"> + {modsText(i.mods)}</small>}{i.note && <em>, {i.note}</em>}</li>)}</ul>
+                    <ul>{t.items.map(i => <li key={i.id}><b>{i.qty}×</b> {i.name}{i.mods?.length > 0 && <small className="mods"> + {modsText(i.mods)}</small>}{i.note && <em>, {i.note}</em>}
+                      {i.includes?.length > 0 && <ul className="deal-incl">{i.includes.map((d, n) => <li key={n}>{d.qty * i.qty}× {d.name}{d.size ? ` (${d.size})` : ''}</li>)}</ul>}</li>)}</ul>
                     {!readOnly && <div className="t-actions">
                       {c.id !== 'new' && <button className="ghost" aria-label="Move back" title="Move back" onClick={() => move(t, COLS[COLS.indexOf(c) - 1].id)}><Icon name="back" size={16} /></button>}
                       <button className="primary" onClick={() => move(t, c.next)}>{c.btn}</button>
