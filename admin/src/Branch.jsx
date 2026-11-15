@@ -32,7 +32,7 @@ export default function Branch({ id }) {
       <div className="tabs" role="tablist">{TABS.map(t => <button key={t} role="tab" aria-selected={tab === t} className={tab === t ? 'on' : ''} onClick={() => setTab(t)}>{t}</button>)}</div>
       {tab === 'Overview' && <Overview d={d} go={setTab} />}
       {tab === 'Details' && <Details r={d.setup.restaurant || {}} save={save} />}
-      {tab === 'Menu' && <><Pictures id={id} images={d.images} reload={load} /><Menu id={id} d={d} reload={load} /><Deals menu={d.setup.menu || []} save={save} /></>}
+      {tab === 'Menu' && <><Pictures id={id} images={d.images} reload={load} /><PhotoMenu id={id} reload={load} /><Menu id={id} d={d} reload={load} /><Deals menu={d.setup.menu || []} save={save} /></>}
       {tab === 'Tables' && <Tables tables={d.setup.tables || []} floors={d.setup.floors || []} save={save} />}
       {tab === 'Delivery areas' && <Zones zones={d.setup.zones || []} save={save} />}
       {tab === 'Staff' && <Staff staff={d.setup.staff || []} save={save} />}
@@ -139,6 +139,65 @@ function Menu({ id, d, reload }) {
         </table></div> : <div className="empty">No menu yet.</div>}
       </div>
     </>
+  )
+}
+
+// S7: menu photos -> AI reads the items -> you check and fix the rows -> save as the menu (or download as Excel).
+// Nothing is saved until you press Save.
+function PhotoMenu({ id, reload }) {
+  const [rows, setRows] = useState(null) // [[category, item, size, price, description]]
+  const [busy, setBusy] = useState('')
+  const [check, setCheck] = useState(null)
+  const read = async e => {
+    const files = [...e.target.files]; e.target.value = ''
+    if (!files.length) return
+    const out = [...(rows || [])]
+    try {
+      for (const [n, f] of files.entries()) {
+        setBusy(`Reading photo ${n + 1} of ${files.length}… (about 10–30 seconds each)`)
+        const r = await api(`/branches/${id}/setup/menu-photo`, { image: await shrinkImage(f, 2000, 'image/jpeg') })
+        out.push(...r.rows)
+        setRows([...out])
+      }
+      toast(`Read ${out.length} rows. Check them before saving`)
+    } catch (err) { toastError(err.message) }
+    finally { setBusy(''); setCheck(null) }
+  }
+  const set = (i, c, v) => { setRows(rows.map((r, n) => n === i ? r.map((x, k) => k === c ? v : x) : r)); setCheck(null) }
+  const send = run(async apply => {
+    const r = await api(`/branches/${id}/setup/menu-rows`, { rows, apply })
+    setCheck(r)
+    if (r.applied) { toast(`Menu saved: ${r.items} items`); setRows(null); setCheck(null); reload() }
+  })
+  const csv = () => downloadCsv('menu-from-photos.csv', [['Category', 'Item', 'Size', 'Price', 'Description'], ...rows])
+  return (
+    <div className="card">
+      <h3>Read the menu from photos (AI)</h3>
+      <p className="muted">Take clear photos of the client's menu card, one page per photo. The AI reads items, sizes and prices into the list below. Always check it: a price it couldn't read is left empty (red).</p>
+      <div className="row" style={{ marginTop: 12 }}>
+        <label className={'file-btn' + (busy ? ' off' : '')}>{rows ? 'Add more photos' : 'Choose menu photos'}<input type="file" accept="image/jpeg,image/png,image/webp" multiple hidden disabled={!!busy} onChange={read} /></label>
+        {busy && <span className="muted">{busy}</span>}
+      </div>
+      {rows && <>
+        <div className="scroll" style={{ marginTop: 12, maxHeight: 460, overflowY: 'auto' }}><table className="edit-table">
+          <thead><tr><th>Category</th><th>Item</th><th>Size</th><th className="num">Price</th><th>Description</th><th></th></tr></thead>
+          <tbody>{rows.map((r, i) => <tr key={i}>
+            {r.map((v, c) => <td key={c}><input aria-label={['Category', 'Item', 'Size', 'Price', 'Description'][c]} value={v} onChange={e => set(i, c, e.target.value)}
+              className={c === 3 && !String(v).trim() ? 'bad' : ''} inputMode={c === 3 ? 'numeric' : undefined} /></td>)}
+            <td><button className="danger" aria-label="Remove row" onClick={() => { setRows(rows.filter((_, n) => n !== i)); setCheck(null) }}>✕</button></td></tr>)}</tbody>
+        </table></div>
+        <div className="row" style={{ marginTop: 12 }}>
+          <button onClick={() => { setRows([...rows, ['', '', '', '', '']]); setCheck(null) }}>+ Add row</button>
+          <button onClick={() => send(false)}>Check</button>
+          <button className="primary" onClick={() => send(true)}>Save as the menu</button>
+          <button onClick={csv}>Download as Excel (CSV)</button>
+          <button className="danger" onClick={() => { setRows(null); setCheck(null) }}>Discard</button>
+        </div>
+        {check && (check.errors.length
+          ? <div className="notice bad" style={{ marginTop: 12 }} role="alert"><b>Fix these first:</b><ul>{check.errors.map((x, n) => <li key={n}>Row {x.row - 1}: {x.error}</li>)}</ul></div>
+          : <p className="ok-t" style={{ marginTop: 12 }}>Looks fine: {check.items} items in {check.categories.length} categories. Saving replaces this branch's setup menu.</p>)}
+      </>}
+    </div>
   )
 }
 

@@ -60,6 +60,7 @@ Status: **open** = not decided yet, **decided** = we chose what to do (the choic
 | O5 | The cloud needs the **whole repo** on Railway (the menu upload uses `server/menu-import.js`). The admin app is a second Railway service. | Deploying only the `cloud/` folder turns menu upload off (the admin app says so). | Follow the Railway steps in `cloud/README.md` and `admin/README.md`. | open |
 | O6 | (Was: login token in picture addresses.) The admin app now uses a cookie only it can read, so nothing secret is in any address. | — | — | fixed |
 | O7 | Changes you save in the admin app reach the POS only while it has **no orders**. | After the first order, menu changes have to be made in the POS (Menu → Items, or Import from Excel). | That's on purpose, so you never overwrite the restaurant's own changes. A "push menu update" button could come later. | open |
+| A6 | Menu from photos (S7) is tested with a stand-in, not the real Groq vision model. The model name (`VISION_MODEL`, default `meta-llama/llama-4-scout-17b-16e-instruct`) may have changed at Groq. | The photo reader fails ("photo reader failed") or reads badly; you'd type the menu by hand as before. | Try one real menu photo after deploying the cloud; set `VISION_MODEL` to Groq's current vision model if needed. Prices it can't read are left empty and must be filled before saving. | open |
 
 ## WhatsApp
 

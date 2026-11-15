@@ -59,7 +59,7 @@ shows the codes so you can print them once and stick one on each table.
 | S4 | **Restore from the cloud backup when activating on a new PC** (RISKS.md O1). | Today a reinstall brings the menu back but not orders, history or staff PINs. | open |
 | S5 | **Force a PIN change on first login** when the default PINs (1234/1111/2222) are still in use (RISKS.md D7). | Anyone who knows the defaults can log in. | open |
 | S6 | **"Push menu update" button** in the admin app, for a restaurant that already has orders (RISKS.md O7). | Today your setup changes reach the POS only before its first order. | open |
-| S7 | **Menu photo → menu items with AI** (Groq vision or Claude), as a draft Excel you check. | Saves typing a client's menu by hand. You chose Excel first, photo later. | open |
+| S7 | **Menu photo → menu items with AI** (Groq vision or Claude), as a draft Excel you check. | Built: admin app → Branch → Menu → "Read the menu from photos". | done |
 | S8 | **Real combo deals** (fixed items + choices, kitchen sees each item, stock per item). Built on 2026-11-15: deals and combos in the POS, the admin app and Excel. | Kitchen tickets and stock are exact for deals. | done |
 | S9 | **Separate admin logins per team member**, with a log of who did what (RISKS.md L6). | One shared password today. | open |
 | S10 | **Signed licence answers** from the cloud (RISKS.md L4). | Stops someone technical from faking "paid" in the local database. | open |

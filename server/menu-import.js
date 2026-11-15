@@ -129,7 +129,8 @@ function readSheet(buf, name = '') {
 }
 
 // ---------- rows -> menu ----------
-const price = v => { const n = Number(String(v ?? '').replace(/rs\.?|pkr|,|\s/gi, '')); return Number.isFinite(n) ? n : NaN; };
+// An empty price is a mistake, not Rs 0 (Number('') would be 0)
+const price = v => { const t = String(v ?? '').replace(/rs\.?|pkr|,|\s/gi, ''); if (!t) return NaN; const n = Number(t); return Number.isFinite(n) ? n : NaN; };
 const no = v => /^(no|n|0|false|hidden|off|nahi)$/i.test(String(v ?? '').trim());
 
 // rows -> { items: [{category, name, price, sizes, description, emoji, active}], errors: [{row, error}] }

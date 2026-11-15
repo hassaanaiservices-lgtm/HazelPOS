@@ -506,6 +506,60 @@ app.post('/api/vendor/branches/:id/setup/images', vendorAuth, (req, res) => {
   const { data: d } = getSetup(b.id); saveSetup(b.id, d); // re-send to a POS without orders
   res.json({ ok: true });
 });
+// Menu from photos (S7): a vision model reads one menu photo into rows (Category, Item, Size, Price, Description).
+// The admin app collects the rows of all photos, shows them, and saves them with /setup/menu-rows (or you download
+// them as Excel to fix first). Never saved without you looking at it. Uses your Groq key (GROQ_API_KEY).
+const GROQ_BASE = (process.env.GROQ_BASE_URL || 'https://api.groq.com/openai/v1').replace(/\/+$/, '');
+const VISION_MODEL = process.env.VISION_MODEL || 'meta-llama/llama-4-scout-17b-16e-instruct';
+const MENU_PHOTO_PROMPT = `You read photos of restaurant menus from Pakistan and turn them into data.
+Return JSON only: {"items": [{"category": "...", "name": "...", "size": "...", "price": 0, "description": "..."}]}
+Rules:
+- One entry per item, or one entry per size when an item has several sizes or prices (e.g. Small / Medium / Large, Half / Full, Single / Double): same name, different "size" and "price".
+- "price" is a number in rupees, no "Rs" and no commas. If you can't read a price clearly, use null. Never guess a price.
+- "category" is the menu section the item is under (e.g. "Pizza", "BBQ", "Drinks"). If there is none, use "Menu".
+- Keep names exactly as printed (English, Roman Urdu or Urdu script). Don't translate, don't invent items.
+- "description" only if the menu prints one (e.g. ingredients, "serves 2"); otherwise "".
+- Deals: put what's inside in "description" (e.g. "2 Zinger, 1 fries, 1.5L drink").`;
+app.post('/api/vendor/branches/:id/setup/menu-photo', vendorAuth, async (req, res) => {
+  const b = vendorBranch(req, res); if (!b) return;
+  if (!process.env.GROQ_API_KEY) return res.status(503).json({ error: 'The cloud has no Groq key (GROQ_API_KEY), which reads the photos' });
+  const img = String(req.body.image || '');
+  if (!/^data:image\/(jpeg|png|webp);base64,/.test(img)) return res.status(400).json({ error: 'Choose a JPG, PNG or WebP photo' });
+  if (img.length > 4 * 1024 * 1024) return res.status(400).json({ error: 'That photo is too large' });
+  const t0 = Date.now();
+  try {
+    const r = await fetch(GROQ_BASE + '/chat/completions', {
+      method: 'POST', signal: AbortSignal.timeout(90_000),
+      headers: { Authorization: 'Bearer ' + process.env.GROQ_API_KEY, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: VISION_MODEL, temperature: 0, max_completion_tokens: 4000, response_format: { type: 'json_object' },
+        messages: [{ role: 'system', content: MENU_PHOTO_PROMPT }, { role: 'user', content: [{ type: 'text', text: 'Read every item on this menu photo.' }, { type: 'image_url', image_url: { url: img } }] }] }),
+    });
+    const body = await r.json().catch(() => ({}));
+    const u = body.usage || {};
+    logAi(b, 'vision', r.ok, t0, { in: u.prompt_tokens, out: u.completion_tokens });
+    if (!r.ok) return res.status(502).json({ error: `The photo reader failed: ${body.error?.message || r.status}` });
+    let items;
+    try { items = JSON.parse(body.choices?.[0]?.message?.content || '{}').items; } catch { items = null; }
+    if (!Array.isArray(items)) return res.status(502).json({ error: "The photo reader didn't return a menu. Try a clearer photo" });
+    const rows = items.filter(i => i && String(i.name || '').trim()).map(i => [String(i.category || 'Menu').trim(), String(i.name).trim(), String(i.size || '').trim(),
+      i.price == null || i.price === '' ? '' : String(i.price), String(i.description || '').trim()]);
+    res.json({ rows });
+  } catch (e) {
+    logAi(b, 'vision', false, t0);
+    res.status(502).json({ error: e.name === 'TimeoutError' ? 'The photo reader took too long. Try again' : 'The photo reader is not reachable' });
+  }
+});
+// Rows (from photos, after you checked them) -> the setup menu. Same checks as an Excel upload; dry run unless apply.
+app.post('/api/vendor/branches/:id/setup/menu-rows', vendorAuth, (req, res) => {
+  const b = vendorBranch(req, res); if (!b) return;
+  if (!menuImport) return res.status(503).json({ error: 'Menu upload needs the whole HazelPOS repo deployed (see cloud/README.md)' });
+  const rows = Array.isArray(req.body.rows) ? req.body.rows.slice(0, 3000).map(r => (Array.isArray(r) ? r : []).slice(0, 5).map(c => String(c ?? ''))) : [];
+  let menu;
+  try { menu = menuImport.toMenu([['Category', 'Item', 'Size', 'Price', 'Description'], ...rows]); } catch (e) { return res.status(400).json({ error: e.message }); }
+  const apply = !!req.body.apply && !menu.errors.length && menu.items.length > 0;
+  if (apply) { const { data } = getSetup(b.id); data.menu = menu.items; saveSetup(b.id, data); }
+  res.json({ applied: apply, items: menu.items.length, categories: [...new Set(menu.items.map(i => i.category))], errors: menu.errors });
+});
 app.post('/api/vendor/setup-images/:id/delete', vendorAuth, (req, res) => {
   const im = db.prepare('SELECT branch_id FROM setup_images WHERE id=?').get(req.params.id);
   if (im) { db.prepare('DELETE FROM setup_images WHERE id=?').run(req.params.id); const { data } = getSetup(im.branch_id); saveSetup(im.branch_id, data); }
