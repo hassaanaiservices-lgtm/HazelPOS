@@ -25,7 +25,9 @@ function readPos(dbPath, dataConfig) {
       ? db.prepare(`SELECT code, type, value, min_order, max_discount, expires FROM promos
           WHERE active=1 AND (expires IS NULL OR expires='' OR expires >= ?) AND (uses_limit=0 OR used < uses_limit)`).all(today).map(p => ({ ...p }))
       : [];
-    return { menu, categories, delivery_zones, restaurant, promos, behaviour: String(settings.bot_behaviour || '').slice(0, 2000) };
+    let menu_pictures = 0; // photos of the menu card the assistant can send (menu_images, server/index.js)
+    try { menu_pictures = db.prepare('SELECT COUNT(*) c FROM menu_images').get().c; } catch { /* older database: none */ }
+    return { menu, categories, delivery_zones, restaurant, promos, menu_pictures, behaviour: String(settings.bot_behaviour || '').slice(0, 2000) };
   } finally { db.close(); }
 }
 

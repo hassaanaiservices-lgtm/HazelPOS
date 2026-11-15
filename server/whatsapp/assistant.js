@@ -29,7 +29,7 @@ function withinHours(hours, d = new Date()) {
 }
 
 // stt (optional): speech-to-text for voice notes ({ transcribe(file) }); sttCfg: config.stt
-function createAssistant({ store, wa, ask, cfg, stt = null, sttCfg = {}, log = console }) {
+function createAssistant({ store, wa, ask, cfg, stt = null, sttCfg = {}, log = console, menuPictures = () => [] }) {
   const batches = new Map();   // chatId -> { rows, timer }
   const chains = new Map();    // chatId -> promise (one turn at a time per chat)
   let running = 0;
@@ -59,6 +59,15 @@ function createAssistant({ store, wa, ask, cfg, stt = null, sttCfg = {}, log = c
     if (wait > 0) await sleep(wait);
     wa.typing(chatId, false);
     return wa.send(chatId, text, 'Assistant', 'bot');
+  }
+
+  // The menu card photos, right after the reply that says "here is the menu"
+  async function sendMenuPictures(chatId) {
+    for (const p of menuPictures()) {
+      try { await wa.sendImage(chatId, { buffer: Buffer.from(p.data), mime: p.mime, caption: p.caption }, 'Assistant', 'bot', { menu_image: p.id }); }
+      catch (e) { log.error?.('Menu picture:', e.message); break; }
+      await sleep(400);
+    }
   }
 
   // Voice notes -> text (Groq Whisper). Done even when the assistant stays quiet, so staff always see what was said.
@@ -129,6 +138,7 @@ function createAssistant({ store, wa, ask, cfg, stt = null, sttCfg = {}, log = c
       if (res.cancelled) store.cancelCart(chatId);
       else if (res.order_ok) store.saveDraft(chatId, res.order, res.lang, res.order_complete ? 'awaiting_customer' : 'building');
       await reply(chatId, res.reply, t0);
+      if (res.send_menu_pictures) await sendMenuPictures(chatId);
       store.log({
         ...base, action: res.error ? 'fallback (LLM error)' : res.guard?.invented?.length ? 'fallback (invented amount blocked)' : 'replied',
         reply: res.reply, intent: res.intent, lang: res.lang, handoff: res.handoff ? 1 : 0,

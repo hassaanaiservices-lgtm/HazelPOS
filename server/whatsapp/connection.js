@@ -163,6 +163,13 @@ module.exports = function waConnection(store, hooks = {}) {
     const r = await sock.sendMessage(chatId, { text });
     return store.addMessage({ wa_id: r?.key?.id || `local-${Date.now()}`, chat_id: chatId, direction: 'out', sender, by_user: byUser, text, status: 1 }, { override: true });
   }
+  // A picture (menu card) with an optional caption. meta.menu_image lets the inbox show it.
+  async function sendImage(chatId, { buffer, mime, caption = '' }, byUser, sender = 'staff', meta = null) {
+    if (!sock || status !== 'connected') throw new Error('WhatsApp is not connected right now (internet?). Try again in a moment.');
+    const r = await sock.sendMessage(chatId, { image: buffer, mimetype: mime, caption: caption || undefined });
+    return store.addMessage({ wa_id: r?.key?.id || `local-${Date.now()}`, chat_id: chatId, direction: 'out', sender, by_user: byUser,
+      kind: 'image', text: '📷 ' + (caption || 'Menu picture'), meta, status: 1 }, { override: true });
+  }
   // "typing…" on the customer's phone
   const typing = (chatId, on = true) => { if (sock && status === 'connected') sock.sendPresenceUpdate(on ? 'composing' : 'paused', chatId).catch(() => {}); };
   const isConnected = () => !!sock && status === 'connected';
@@ -189,7 +196,7 @@ module.exports = function waConnection(store, hooks = {}) {
   if (!OFF && fs.existsSync(path.join(AUTH_DIR, 'creds.json'))) setTimeout(() => connect().catch(e => console.error('WhatsApp reconnect:', e.message)), 1500);
 
   return {
-    connect, send, typing, isConnected, markRead, logout, mediaPath: file => path.join(MEDIA_DIR, path.basename(file)),
+    connect, send, sendImage, typing, isConnected, markRead, logout, mediaPath: file => path.join(MEDIA_DIR, path.basename(file)),
     status: () => ({ status, qr, me, error, connected_at: connectedAt ? new Date(connectedAt).toISOString() : null, last_online: store.meta.get('last_online') }),
   };
 };

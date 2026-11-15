@@ -191,6 +191,7 @@ function Thread({ chat, connected, assistantOn, notify, onBack }) {
               <div className={'wa-msg ' + m.direction + (m.offline && !m.handled_at ? ' offline' : '')}>
                 {m.direction === 'out' && <div className={'wa-by' + (m.sender === 'bot' ? ' bot' : '')}>{m.sender === 'bot' ? 'Assistant' : m.sender === 'system' ? 'Order update (automatic)' : m.sender === 'phone' ? 'From the phone' : m.by_user || 'POS'}</div>}
                 {m.kind === 'location' && m.meta ? <a href={`https://maps.google.com/?q=${m.meta.lat},${m.meta.lng}`} target="_blank" rel="noreferrer">{m.text} — open map</a>
+                  : m.meta?.menu_image ? <img className="wa-img" src={`/api/menu-images/${m.meta.menu_image}/image`} alt={m.text} loading="lazy" />
                   : m.meta?.file ? <VoiceNote m={m} notify={notify} />
                   : m.meta?.download_error ? <span className="wa-text">{m.text} <i className="wa-dl-err">— couldn't download from WhatsApp ({m.meta.download_error}). Ask the customer to send it again.</i></span>
                   : <span className="wa-text">{m.text}</span>}

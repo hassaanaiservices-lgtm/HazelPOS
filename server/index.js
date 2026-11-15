@@ -418,6 +418,7 @@ const ACCESS = [
   [/^GET \/settings$/, null], // logged-out callers only get name + logo
   [/^(GET|POST) \/qr\//, null], // customer table ordering, guarded by the table's QR token
   [/^GET \/licence$/, null], // the activation screen shows before anyone can log in
+  [/^GET \/menu-images(\/\d+\/image)?$/, null], // menu card pictures: public like the menu itself (QR page)
   [/^POST \/licence\/(activate|check)$/, null], // activate: only until activated, then admin (checked in the route)
   [/^POST \/logout$/, ALL],
   [/^GET \/(menu|tables|summary|kitchen)$/, ALL],
@@ -534,6 +535,51 @@ app.post('/api/products/:id/delete', (req, res, next) => {
 });
 crud('products', 'products', ['name', 'price', 'category_id', 'emoji', 'active', 'subtitle', 'description', 'ingredients', 'sizes', 'modifiers']);
 crud('categories', 'categories', ['name', 'color']);
+
+// ---------- Menu import from Excel / CSV (server/menu-import.js) ----------
+// Dry run first (shows what would change), then the same call with apply:true. Rows with errors block the import.
+const menuImport = require('./menu-import');
+app.get('/api/menu/import-template', (req, res) => res.json(menuImport.TEMPLATE));
+app.post('/api/menu/import', (req, res) => { // body limit 2 MB (base64), so files up to ~1.4 MB
+  const buf = Buffer.from(String(req.body.file || ''), 'base64');
+  if (!buf.length) throw new UserError('Choose the Excel file');
+  if (buf.length > 1.4 * 1024 * 1024) throw new UserError('That file is too large (max 1.4 MB). A menu sheet is usually under 100 KB: remove pictures from it');
+  let menu;
+  try { menu = menuImport.toMenu(menuImport.readSheet(buf, String(req.body.name || ''))); }
+  catch (e) { throw new UserError(e.message); }
+  if (!menu.items.length) throw new UserError('No menu items found in this file');
+  const apply = !!req.body.apply && !menu.errors.length;
+  const plan = menuImport.importMenu(db, menu, { apply, hideMissing: !!req.body.hide_missing });
+  res.json({ applied: apply, items: menu.items.length, errors: menu.errors, ...plan });
+});
+
+// ---------- Menu pictures (photos of the menu card) ----------
+// Kept in the database, so they're in the daily cloud backup. The WhatsApp assistant sends them when a customer
+// asks to see the menu (rag/prompts/system.md rule 10).
+db.exec('CREATE TABLE IF NOT EXISTS menu_images (id INTEGER PRIMARY KEY, caption TEXT, mime TEXT, data BLOB, sort INTEGER, created_at TEXT)');
+const MAX_MENU_IMAGES = 6;
+app.get('/api/menu-images', (req, res) => res.json(db.prepare('SELECT id, caption, sort, length(data) size FROM menu_images ORDER BY sort, id').all()));
+app.get('/api/menu-images/:id/image', (req, res) => {
+  const m = db.prepare('SELECT mime, data FROM menu_images WHERE id=?').get(req.params.id);
+  if (!m) return res.status(404).json({ error: 'Not found' });
+  res.set('Cache-Control', 'public, max-age=300').type(m.mime).send(Buffer.from(m.data));
+});
+app.post('/api/menu-images', (req, res) => { // UserError -> 400 via the error handler at the end
+  const m = /^data:(image\/(jpeg|png|webp));base64,(.+)$/.exec(String(req.body.data || ''));
+  if (!m) throw new UserError('Choose a JPG, PNG or WebP picture');
+  const data = Buffer.from(m[3], 'base64');
+  if (data.length > 1.5 * 1024 * 1024) throw new UserError('That picture is too large (max 1.5 MB)');
+  if (db.prepare('SELECT COUNT(*) c FROM menu_images').get().c >= MAX_MENU_IMAGES) throw new UserError(`Up to ${MAX_MENU_IMAGES} menu pictures. Delete one first`);
+  const sort = (db.prepare('SELECT MAX(sort) s FROM menu_images').get().s ?? 0) + 1;
+  const id = db.prepare('INSERT INTO menu_images (caption, mime, data, sort, created_at) VALUES (?,?,?,?,?)')
+    .run(String(req.body.caption || '').slice(0, 200), m[1], data, sort, now()).lastInsertRowid;
+  res.json({ id });
+});
+app.post('/api/menu-images/:id', (req, res) => {
+  db.prepare('UPDATE menu_images SET caption=? WHERE id=?').run(String(req.body.caption || '').slice(0, 200), req.params.id);
+  res.json({ ok: true });
+});
+app.post('/api/menu-images/:id/delete', (req, res) => { db.prepare('DELETE FROM menu_images WHERE id=?').run(req.params.id); res.json({ ok: true }); });
 crud('tables', 'tables_', ['name', 'seats', 'floor', 'shape']);
 app.post('/api/expenses', (req, res, next) => { req.body.user_name = req.user.name; next(); });
 app.post('/api/expenses/:id/delete', (req, res, next) => {

@@ -7,6 +7,10 @@ function restaurantSection(r) {
   return ['## RESTAURANT', ...facts, ''];
 }
 
+function menuPicturesSection(n) {
+  return ['## MENU PICTURES', n ? `${n} picture(s) of the menu card are available.` : '(no menu pictures)', ''];
+}
+
 function faqSection(faqDocs) {
   if (!faqDocs.length) return ['## FREQUENTLY ASKED', '(no answers written yet)', ''];
   return ['## FREQUENTLY ASKED', ...faqDocs.flatMap(d => [`### ${d.data.question}`, d.data.answer]), ''];
@@ -29,4 +33,4 @@ function promoSection(promos, currency) {
     `${p.max_discount ? ` (max ${money(p.max_discount, currency)})` : ''}${p.min_order ? `, minimum order ${money(p.min_order, currency)}` : ''}${p.expires ? `, until ${p.expires}` : ''}`), ''];
 }
 
-module.exports = { restaurantSection, faqSection, deliverySection, promoSection };
+module.exports = { restaurantSection, faqSection, deliverySection, promoSection, menuPicturesSection };

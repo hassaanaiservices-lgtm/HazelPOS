@@ -127,6 +127,7 @@ async function ask({ message, history = [], pos, location = null, cart = null })
   }
   return {
     reply, raw, lang, intent, handoff,
+    send_menu_pictures: j.send_menu_pictures === true && (pos.menu_pictures || 0) > 0,
     order: priced, order_ok: !!orderOk, order_complete: !!orderOk && !check.missing.length, missing: check.missing, cancelled,
     prompt_version: promptVersion(pos.behaviour || ''), cost_usd: costUsd(llm.usage),
     guard: { invented },

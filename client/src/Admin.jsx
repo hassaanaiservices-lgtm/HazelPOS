@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react'
-import { api, rs, parseModifiers } from './lib'
+import { api, rs, parseModifiers, downloadCsv } from './lib'
 import { Icon } from './ui'
 import Integrations from './Integrations'
 import { toastError, confirmBox } from './notify'
 
-const TABS = ['Menu', 'Categories', 'Floors', 'Tables', 'Delivery Zones', 'Restaurant', 'WhatsApp bot', 'Integrations', 'Cloud', 'Activity Log']
+const TABS = ['Menu', 'Menu pictures', 'Categories', 'Floors', 'Tables', 'Delivery Zones', 'Restaurant', 'WhatsApp bot', 'Integrations', 'Cloud', 'Activity Log']
 
 export default function Admin({ onChanged, notify }) {
   const [tab, setTab] = useState('Menu')
@@ -16,6 +16,7 @@ export default function Admin({ onChanged, notify }) {
         <div className="tabs">{TABS.map(t => <button key={t} id={'tab-' + t} className={tab === t ? 'active' : ''} onClick={() => setTab(t)}>{t}</button>)}</div>
       </div>
       {tab === 'Menu' && <MenuAdmin onChanged={onChanged} notify={notify} />}
+      {tab === 'Menu pictures' && <MenuPictures notify={notify} />}
       {tab === 'Categories' && <SimpleAdmin route="categories" listUrl="/menu?all=1" pick={d => d.categories} onChanged={onChanged} notify={notify}
         fields={[['name', 'Name'], ['color', 'Colour', 'color']]} blank={{ name: '', color: '#ff6b35' }}
         show={c => <><i className="swatch" style={{ background: c.color }} />{c.name}</>} />}
@@ -68,6 +69,7 @@ export default function Admin({ onChanged, notify }) {
 function MenuAdmin({ onChanged, notify }) {
   const [data, setData] = useState({ categories: [], products: [] })
   const [edit, setEdit] = useState(null)
+  const [importing, setImporting] = useState(false)
   const load = () => api('/menu?all=1').then(setData)
   useEffect(() => { load() }, [])
 
@@ -132,7 +134,11 @@ function MenuAdmin({ onChanged, notify }) {
 
   return (
     <>
-      <button className="primary add" id="add-item" onClick={() => openEdit({ name: '', price: '', emoji: '🍽️', category_id: data.categories[0]?.id, active: 1, subtitle: '', description: '', ingredients_str: '', sizes_list: [] })}>+ Add item</button>
+      <div className="row add">
+        <button className="primary" id="add-item" onClick={() => openEdit({ name: '', price: '', emoji: '🍽️', category_id: data.categories[0]?.id, active: 1, subtitle: '', description: '', ingredients_str: '', sizes_list: [] })}>+ Add item</button>
+        <button className="ghost" id="import-menu" onClick={() => setImporting(true)}><Icon name="plus" size={16} />Import from Excel</button>
+      </div>
+      {importing && <MenuImport onClose={() => setImporting(false)} onDone={() => { setImporting(false); load(); onChanged() }} notify={notify} />}
       <div className="admin-list">
         {data.products.map(p => (
           <div key={p.id} className={'admin-row' + (p.active ? '' : ' off')}>
@@ -162,10 +168,13 @@ function MenuAdmin({ onChanged, notify }) {
             <label>Subtitle / Serving Info
               <input value={edit.subtitle || ''} placeholder="e.g. Pizza · Serves 1–3 depending on size" onChange={e => setEdit({ ...edit, subtitle: e.target.value })} />
             </label>
-            <label>Description
+            {/* A deal is a normal item in a "Deals" category: what's inside goes in the description (POS, QR menu and WhatsApp bot all show it) */}
+            {(() => { const isDeal = /deal|combo/i.test(cat(+edit.category_id)?.name || ''); return (
+            <label>{isDeal ? "What's in the deal" : 'Description'}
               <textarea rows={2} style={{ width: '100%', borderRadius: 12, padding: '10px 14px', background: 'var(--panel2)', border: '1px solid var(--line)', color: 'var(--text)', font: 'inherit' }}
-                value={edit.description || ''} placeholder="Describe ingredients, cooking style, taste..." onChange={e => setEdit({ ...edit, description: e.target.value })} />
-            </label>
+                value={edit.description || ''} placeholder={isDeal ? 'e.g. 1 Zinger burger, 1 regular fries, 1 soft drink (345 ml)' : 'Describe ingredients, cooking style, taste...'}
+                onChange={e => setEdit({ ...edit, description: e.target.value })} />
+            </label>) })()}
             <label>Ingredients (comma-separated)
               <input value={edit.ingredients_str || ''} placeholder="e.g. Mozzarella, Tomato sauce, Fresh basil, Olive oil" onChange={e => setEdit({ ...edit, ingredients_str: e.target.value })} />
             </label>
@@ -470,6 +479,133 @@ function CloudSettings({ notify }) {
           onClick={act('connect', async () => { const r = await api('/cloud/connect', form); setForm({ url: form.url, key: '' }); notify(`Connected as ${r.branch}`) })}>
           {busy === 'connect' ? 'Connecting…' : 'Connect'}</button>
       </>}
+    </div>
+  )
+}
+
+// Photos of the menu card. The WhatsApp assistant sends them when a customer asks "menu bhejo".
+// Pictures are shrunk in the browser first (max 1600 px, JPEG), so a phone photo of 5 MB becomes ~300 KB.
+const shrink = file => new Promise((resolve, reject) => {
+  const img = new Image()
+  img.onload = () => {
+    const scale = Math.min(1, 1600 / Math.max(img.width, img.height))
+    const c = Object.assign(document.createElement('canvas'), { width: Math.round(img.width * scale), height: Math.round(img.height * scale) })
+    c.getContext('2d').drawImage(img, 0, 0, c.width, c.height)
+    URL.revokeObjectURL(img.src)
+    resolve(c.toDataURL('image/jpeg', 0.85))
+  }
+  img.onerror = () => reject(new Error('That file is not a picture'))
+  img.src = URL.createObjectURL(file)
+})
+
+function MenuPictures({ notify }) {
+  const [pics, setPics] = useState([])
+  const [busy, setBusy] = useState(false)
+  const load = () => api('/menu-images').then(setPics)
+  useEffect(() => { load() }, [])
+
+  const upload = async e => {
+    const files = [...e.target.files]; e.target.value = ''
+    setBusy(true)
+    try {
+      for (const f of files) await api('/menu-images', { data: await shrink(f), caption: '' })
+      notify(files.length > 1 ? 'Pictures added' : 'Picture added')
+    } catch (err) { toastError(err.message) }
+    finally { setBusy(false); load() }
+  }
+  const caption = async (p, text) => { if (text !== (p.caption || '')) { await api(`/menu-images/${p.id}`, { caption: text }).catch(e => toastError(e.message)); load() } }
+  const del = async p => { if (await confirmBox('Delete this menu picture?', { confirmLabel: 'Delete', danger: true })) { await api(`/menu-images/${p.id}/delete`, {}); load() } }
+
+  return (
+    <>
+      <p className="muted">Photos of your menu card. When a customer on WhatsApp asks to see the menu, the assistant sends these pictures instead of typing out the whole list. Up to 6 pictures.</p>
+      <label className={'primary add file-btn' + (busy || pics.length >= 6 ? ' disabled' : '')}>
+        <Icon name="plus" size={16} />{busy ? 'Adding…' : 'Add pictures'}
+        <input type="file" accept="image/jpeg,image/png,image/webp" multiple hidden disabled={busy || pics.length >= 6} onChange={upload} />
+      </label>
+      {!pics.length && <div className="muted menu-pics-empty">No menu pictures yet. The assistant will describe the menu in text.</div>}
+      <div className="menu-pics">
+        {pics.map((p, i) => (
+          <figure key={p.id} className="menu-pic card">
+            <img src={`/api/menu-images/${p.id}/image`} alt={p.caption || `Menu picture ${i + 1}`} />
+            <figcaption>
+              <input defaultValue={p.caption || ''} placeholder={`Caption (optional), e.g. Page ${i + 1}`} onBlur={e => caption(p, e.target.value.trim())} />
+              <button className="ghost danger" onClick={() => del(p)} aria-label="Delete picture"><Icon name="x" size={16} /></button>
+            </figcaption>
+          </figure>
+        ))}
+      </div>
+    </>
+  )
+}
+
+// Menu from an Excel (.xlsx) or CSV file: download the template, fill it in, choose it, check what will change, import.
+// The server reads the file (server/menu-import.js); the first call is a dry run.
+function MenuImport({ onClose, onDone, notify }) {
+  const [file, setFile] = useState(null) // { name, base64 }
+  const [hide, setHide] = useState(false)
+  const [plan, setPlan] = useState(null)
+  const [err, setErr] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  const template = async () => {
+    const [head, ...rows] = await api('/menu/import-template')
+    downloadCsv('hazelpos-menu-template.csv', rows.map(r => Object.fromEntries(head.map((h, i) => [h, r[i]]))))
+  }
+  const check = async (f = file, hideMissing = hide) => {
+    if (!f) return
+    setBusy(true); setErr(''); setPlan(null)
+    try { setPlan(await api('/menu/import', { file: f.base64, name: f.name, hide_missing: hideMissing })) }
+    catch (e) { setErr(e.message) }
+    finally { setBusy(false) }
+  }
+  const choose = e => {
+    const f = e.target.files[0]; e.target.value = ''
+    if (!f) return
+    const r = new FileReader()
+    r.onload = () => { const next = { name: f.name, base64: String(r.result).split(',')[1] || '' }; setFile(next); check(next) }
+    r.readAsDataURL(f)
+  }
+  const apply = async () => {
+    setBusy(true)
+    try {
+      const r = await api('/menu/import', { file: file.base64, name: file.name, hide_missing: hide, apply: true })
+      notify(`Menu imported: ${r.added.length} new, ${r.updated.length} updated`)
+      onDone()
+    } catch (e) { setErr(e.message); setBusy(false) }
+  }
+  const list = (label, names) => names.length > 0 && <details className="import-list"><summary>{label}: <b>{names.length}</b></summary><p className="muted">{names.join(', ')}</p></details>
+
+  return (
+    <div className="modal-bg" onClick={onClose}>
+      <div className="modal import-modal" onClick={e => e.stopPropagation()}>
+        <h2>Import menu from Excel</h2>
+        <p className="muted">One row per item, or one row per size. Columns: Category, Item, Size, Price, Description, Emoji, Available. Items already on the menu are matched by name and updated.</p>
+        <div className="row">
+          <button className="ghost" onClick={template}>Download template</button>
+          <label className="primary file-btn">{file ? 'Choose another file' : 'Choose Excel file'}
+            <input type="file" accept=".xlsx,.csv" hidden onChange={choose} /></label>
+        </div>
+        {file && <p className="muted">File: <b>{file.name}</b></p>}
+        <label className="check"><input type="checkbox" checked={hide} onChange={e => { setHide(e.target.checked); check(file, e.target.checked) }} /> Hide items on the menu that aren't in this file</label>
+        {busy && !plan && <p className="muted">Reading the file…</p>}
+        {err && <div className="err">{err}</div>}
+        {plan && <div className="import-plan">
+          <p><b>{plan.items}</b> items in the file. <b>{plan.unchanged}</b> already up to date.</p>
+          {list('New items', plan.added)}
+          {list('Updated items', plan.updated)}
+          {list('New categories', plan.new_categories)}
+          {list('Will be hidden', plan.hidden)}
+          {plan.errors.length > 0 && <div className="import-errors" role="alert">
+            <b>Fix these rows in the file, then choose it again:</b>
+            <ul>{plan.errors.map((e, i) => <li key={i}>Row {e.row}: {e.error}</li>)}</ul>
+          </div>}
+        </div>}
+        <div className="actions">
+          <button className="ghost" onClick={onClose}>Cancel</button>
+          <button className="primary" disabled={busy || !plan || plan.errors.length > 0 || !(plan.added.length + plan.updated.length + plan.hidden.length)} onClick={apply}>Import</button>
+        </div>
+      </div>
     </div>
   )
 }

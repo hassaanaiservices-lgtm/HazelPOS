@@ -16,7 +16,8 @@ module.exports = function whatsapp(app, db, pos) {
   let assistant;
   const stt = createStt(config.stt);
   const wa = waConnection(store, { onIncoming: row => assistant.onIncoming(row), keepAudioDays: config.stt.keep_audio_days });
-  assistant = createAssistant({ store, wa, ask, cfg: config.assistant, stt, sttCfg: config.stt });
+  const menuPictures = () => db.prepare('SELECT id, caption, mime, data FROM menu_images ORDER BY sort, id').all(); // table made in server/index.js
+  assistant = createAssistant({ store, wa, ask, cfg: config.assistant, stt, sttCfg: config.stt, menuPictures });
   const fail = (res, e, code = 400) => res.status(code).json({ error: e.message });
   const chatId = req => req.params.id;
 

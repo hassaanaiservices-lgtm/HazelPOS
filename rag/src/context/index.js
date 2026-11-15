@@ -8,7 +8,7 @@ const crypto = require('crypto');
 const { readPos } = require('../loaders/pos-db');
 const { loadFaq } = require('../loaders/faq');
 const { menuSections } = require('./menu-section');
-const { restaurantSection, faqSection, deliverySection, promoSection } = require('./info-sections');
+const { restaurantSection, faqSection, deliverySection, promoSection, menuPicturesSection } = require('./info-sections');
 
 // pos = { menu, categories, delivery_zones, restaurant, promos } (shape of readPos); faqDocs from the FAQ loader
 function buildKnowledge(pos, faqDocs, cfg) {
@@ -16,6 +16,7 @@ function buildKnowledge(pos, faqDocs, cfg) {
   const lines = [
     ...restaurantSection(pos.restaurant),
     ...faqSection(faqDocs),
+    ...menuPicturesSection(pos.menu_pictures || 0),
     ...deliverySection(pos.delivery_zones, cur),
     ...promoSection(pos.promos, cur),
     ...menuSections(pos, cur),
