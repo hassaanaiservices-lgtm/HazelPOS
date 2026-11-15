@@ -5,7 +5,7 @@ import Integrations from './Integrations'
 import { QrCodesModal } from './QrOrders'
 import { toastError, confirmBox } from './notify'
 
-const TABS = ['Restaurant', 'Staff & PINs', 'WhatsApp bot', 'Integrations', 'Cloud', 'Activity Log']
+const TABS = ['Restaurant', 'Staff & PINs', 'Alerts', 'WhatsApp bot', 'Integrations', 'Cloud', 'Activity Log']
 
 export default function Admin({ onChanged, notify }) {
   const [tab, setTab] = useState('Restaurant')
@@ -16,6 +16,7 @@ export default function Admin({ onChanged, notify }) {
       </div>
       {tab === 'Restaurant' && <RestaurantSettings onChanged={onChanged} notify={notify} />}
       {tab === 'Staff & PINs' && <LoginPins notify={notify} />}
+      {tab === 'Alerts' && <StockAlerts notify={notify} />}
       {tab === 'WhatsApp bot' && <BotBehaviour notify={notify} />}
       {tab === 'Integrations' && <Integrations onChanged={onChanged} notify={notify} />}
       {tab === 'Cloud' && <CloudSettings notify={notify} />}
@@ -468,6 +469,51 @@ function RestaurantSettings({ onChanged, notify }) {
           <option value="refuse">Refuse — the cashier must open the Cash Drawer first</option>
         </select></label>
       <button className="primary" onClick={async () => { await api('/settings', s); onChanged(); notify('Settings saved') }}>Save settings</button>
+    </div>
+  )
+}
+
+// End-of-day WhatsApp to the owner when ingredients are really low (server/stock-alert.js)
+function StockAlerts({ notify }) {
+  const [s, setS] = useState(null)
+  const [preview, setPreview] = useState(null)
+  const loadPreview = () => api('/low-stock-alert/preview').then(setPreview).catch(() => {})
+  useEffect(() => { api('/settings').then(setS); loadPreview() }, [])
+  if (!s) return null
+  const set = k => e => setS({ ...s, [k]: e.target.type === 'checkbox' ? (e.target.checked ? '1' : '0') : e.target.value })
+  const save = async () => {
+    try { await api('/settings', { low_stock_alert: s.low_stock_alert, low_stock_alert_to: s.low_stock_alert_to, low_stock_alert_time: s.low_stock_alert_time, low_stock_alert_percent: s.low_stock_alert_percent, low_stock_alert_min_items: s.low_stock_alert_min_items }); notify('Alert saved'); loadPreview() }
+    catch (e) { toastError(e.message) }
+  }
+  const test = async () => {
+    try { await save(); const r = await api('/low-stock-alert/test', {}); notify(r.sent ? `Sent to ${r.sent} number(s)` : r.message || 'Nothing to send') }
+    catch (e) { toastError(e.message) }
+  }
+  return (
+    <div className="admin-form">
+      <h3>Low-stock WhatsApp alert</h3>
+      <p className="muted" style={{ fontSize: 13 }}>Once a day, at the time you choose, the restaurant's WhatsApp sends you the ingredients that are really low, so you can order before tomorrow. A little low doesn't count, and if nothing is low enough, no message is sent.</p>
+      <label className="check"><input type="checkbox" checked={s.low_stock_alert === '1'} onChange={set('low_stock_alert')} /> Send the alert</label>
+      <label>Send to (WhatsApp numbers, separated by commas)<input value={s.low_stock_alert_to} onChange={set('low_stock_alert_to')} placeholder="0300 1234567, 0321 7654321" inputMode="tel" /></label>
+      <div className="two">
+        <label>Time (end of the day)<input type="time" value={s.low_stock_alert_time} onChange={set('low_stock_alert_time')} /></label>
+        <label>Only when at least this many are low<input type="number" min="1" value={s.low_stock_alert_min_items} onChange={set('low_stock_alert_min_items')} /></label>
+      </div>
+      <label>How low counts as "really low"
+        <select value={s.low_stock_alert_percent} onChange={set('low_stock_alert_percent')}>
+          <option value="100">At its "Alert below" level</option>
+          <option value="75">Down to 75% of its alert level</option>
+          <option value="50">Down to half of its alert level (recommended)</option>
+          <option value="25">Down to a quarter of its alert level</option>
+        </select></label>
+      <p className="muted" style={{ fontSize: 13 }}>Each ingredient's "Alert below" level is set in Inventory → Stock. Example: buns alert at 30 pcs, "half" = the message counts buns once they're at 15 or fewer.</p>
+      <div className="row"><button className="primary" onClick={save}>Save</button><button className="ghost" onClick={test}>Send a test now</button></div>
+      {preview && <div className="alert-preview">
+        <b>{preview.low.length ? `If it were sent now (${preview.low.length} ingredient${preview.low.length === 1 ? '' : 's'}):` : 'Nothing is low enough right now, so no message would be sent.'}</b>
+        {preview.low.length > 0 && <pre>{preview.text}</pre>}
+        {preview.low.length > 0 && !preview.enough && <p className="muted">Not sent: fewer than {s.low_stock_alert_min_items} ingredients are that low.</p>}
+      </div>}
+      <p className="muted" style={{ fontSize: 13 }}>It's sent from the restaurant's linked WhatsApp (WhatsApp screen). If it's not connected at that time, it tries again every minute until midnight.</p>
     </div>
   )
 }

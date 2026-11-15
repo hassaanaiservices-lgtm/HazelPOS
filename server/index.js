@@ -341,6 +341,8 @@ const DEFAULT_SETTINGS = {
   footer: 'Thank you! Visit again 🙏',
   logo: '🍕',
   logo_image: '', // data URL of the restaurant's logo picture; shown instead of the emoji when set
+  // End-of-day WhatsApp to the owner when ingredients are really low (server/stock-alert.js)
+  low_stock_alert: '0', low_stock_alert_to: '', low_stock_alert_time: '22:00', low_stock_alert_percent: '50', low_stock_alert_min_items: '1', low_stock_alert_last: '',
   ntn: 'NTN-8934521-7',
   bank_name: 'Meezan Bank Ltd',
   bank_account: 'PK36MEZN0001000123456789',
@@ -1575,6 +1577,13 @@ function createOrder({ type, zone_id, customer, phone, address, items, userName,
   });
 }
 const waModule = require('./whatsapp')(app, db, { createOrder, getOrder, printKitchen, getSettings, aiAllowed: () => lic.aiAllowed() });
+const lowStock = require('./stock-alert')(db, { getSettings, wa: waModule.wa });
+// Settings → Alerts: what would be sent now, and a test send
+app.get('/api/low-stock-alert/preview', (req, res) => { const r = lowStock.report(); res.json({ low: r.low, text: r.text, enough: r.enough }); });
+app.post('/api/low-stock-alert/test', async (req, res) => {
+  const r = await lowStock.run({ force: true });
+  r.error ? res.status(400).json({ error: r.error }) : res.json(r);
+});
 
 // ---------- Excel / CSV export (rows; the client turns them into a file) ----------
 const exportRange = req => [req.query.from || '0000-01-01', req.query.to || '9999-12-31'];
