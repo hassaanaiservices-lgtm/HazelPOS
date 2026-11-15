@@ -412,8 +412,15 @@ app.use(express.json({ limit: '2mb' })); // payment QR image is stored as a data
 if (DEMO) {
   const NOT_IN_DEMO = ['receipt_printer', 'kitchen_printer', 'fiscal_mode', 'fiscal_url', 'fiscal_pos_id', 'fiscal_pct_code'];
   app.use('/api', (req, res, next) => {
-    const blocked = /^\/(cloud\/(connect|sync|backup)|print\/|secrets|fiscal\/retry)/.test(req.path) && req.method !== 'GET';
-    if (blocked) return res.status(403).json({ error: 'Not available in the demo' });
+    // code 'demo': the screen shows this as a popup (client/src/lib.js), saying what the real HazelPOS does instead
+    const DEMO_ONLY = [
+      [/^\/whatsapp\/(connect|logout)/, "WhatsApp isn't available in the demo. In the real HazelPOS, you link the restaurant's own WhatsApp here by scanning a QR code with the phone. The assistant then answers customers, sends the menu and takes orders."],
+      [/^\/print\//, "Printing isn't available in the demo. In the real HazelPOS, receipts and kitchen tickets print straight to your thermal printer."],
+      [/^\/cloud\/(connect|sync|backup)/, "HazelPOS Cloud isn't available in the demo. In the real HazelPOS, every sale is backed up and the owner sees all branches from their phone."],
+      [/^\/(secrets|fiscal\/retry)/, "PRA / FBR reporting isn't available in the demo. In the real HazelPOS, each invoice is reported to PRA or FBR automatically."],
+    ];
+    const hit = req.method !== 'GET' && DEMO_ONLY.find(([re]) => re.test(req.path));
+    if (hit) return res.status(403).json({ error: hit[1], code: 'demo' });
     if (req.method === 'POST' && req.path === '/settings' && req.body) for (const k of NOT_IN_DEMO) delete req.body[k];
     next();
   });

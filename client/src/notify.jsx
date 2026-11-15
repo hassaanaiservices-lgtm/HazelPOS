@@ -26,6 +26,12 @@ export function confirmBox(message, { title, confirmLabel, cancelLabel = 'Keep i
   }))
 }
 
+// await infoBox('WhatsApp isn't available in the demo…') -> a popup with one OK button
+export function infoBox(message, { title, confirmLabel = 'OK' } = {}) {
+  if (!host) { window.alert(message); return Promise.resolve(true) }
+  return new Promise(resolve => host.openDialog({ type: 'info', message, title, confirmLabel, resolve }))
+}
+
 // await promptBox('Reason?', { defaultValue }) -> the text, or null when cancelled
 export function promptBox(message, { title, defaultValue = '', placeholder = '', confirmLabel = 'OK', multiline = false, required = false } = {}) {
   if (!host) return Promise.resolve(window.prompt(message, defaultValue))
@@ -105,7 +111,7 @@ function Dialog({ d, closing, onClose }) {
               onKeyDown={e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) confirm() }} />
           : <input ref={field} value={text} placeholder={d.placeholder} onChange={e => setText(e.target.value)} onKeyDown={e => e.key === 'Enter' && confirm()} />)}
         <div className="actions">
-          <button className="ghost" onClick={() => onClose(cancelValue)}>{d.cancelLabel || 'Cancel'}</button>
+          {d.type !== 'info' && <button className="ghost" onClick={() => onClose(cancelValue)}>{d.cancelLabel || 'Cancel'}</button>}
           <button ref={ok} className={d.danger ? 'primary danger-btn' : 'primary'} onClick={confirm}>{d.confirmLabel}</button>
         </div>
       </div>

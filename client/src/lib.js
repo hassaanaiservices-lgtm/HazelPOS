@@ -1,10 +1,12 @@
-import { toast, toastError } from './notify.jsx'
+import { toast, toastError, infoBox } from './notify.jsx'
 export const api = async (url, body) => {
   const headers = { Authorization: 'Bearer ' + (localStorage.getItem('pos_token') || '') }
   const r = await fetch('/api' + url, body ? { method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : { headers })
   const data = await r.json()
   // Expired or revoked session: send the terminal back to the PIN screen
   if (r.status === 401 && url !== '/login') window.dispatchEvent(new Event('pos-logout'))
+  // Blocked in the public demo: a popup explaining the real feature. The error has no message, so no red toast as well.
+  if (data.code === 'demo') { infoBox(data.error, { title: 'Not in the demo' }); throw Object.assign(new Error(''), { code: 'demo' }) }
   if (!r.ok) throw Object.assign(new Error(data.error || 'Request failed'), { code: data.code })
   return data
 }
