@@ -583,9 +583,9 @@ app.post('/api/vendor/branches/:id/setup/images', vendorAuth, (req, res) => {
   if (data.length > 1.5 * 1024 * 1024) return res.status(400).json({ error: 'That picture is too large (max 1.5 MB)' });
   if (db.prepare('SELECT COUNT(*) c FROM setup_images WHERE branch_id=?').get(b.id).c >= 6) return res.status(400).json({ error: 'Up to 6 menu pictures' });
   const sort = (db.prepare('SELECT MAX(sort) s FROM setup_images WHERE branch_id=?').get(b.id).s ?? 0) + 1;
-  db.prepare('INSERT INTO setup_images (branch_id, caption, mime, data, sort) VALUES (?,?,?,?,?)').run(b.id, String(req.body.caption || '').slice(0, 200), m[1], data, sort);
+  const r = db.prepare('INSERT INTO setup_images (branch_id, caption, mime, data, sort) VALUES (?,?,?,?,?)').run(b.id, String(req.body.caption || '').slice(0, 200), m[1], data, sort);
   const { data: d } = getSetup(b.id); saveSetup(b.id, d); // re-send to a POS without orders
-  res.json({ ok: true });
+  res.json({ ok: true, id: Number(r.lastInsertRowid) });
 });
 // Menu from photos (S7): a vision model reads one menu photo into rows (Category, Item, Size, Price, Description).
 // The admin app collects the rows of all photos, shows them, and saves them with /setup/menu-rows (or you download
@@ -597,14 +597,22 @@ Return JSON only: {"items": [{"category": "...", "name": "...", "size": "...", "
 Rules:
 - One entry per item, or one entry per size when an item has several sizes or prices (e.g. Small / Medium / Large, Half / Full, Single / Double): same name, different "size" and "price".
 - "price" is a number in rupees, no "Rs" and no commas. If you can't read a price clearly, use null. Never guess a price.
-- "category" is the menu section the item is under (e.g. "Pizza", "BBQ", "Drinks"). If there is none, use "Menu".
+- "category" is the menu section the item is under, using the heading printed on the menu (e.g. "Starters", "Desi", "BBQ", "Burgers", "Pizza", "Wraps", "Fries", "Drinks", "Desserts").
+  If an item has no heading, pick the closest of: Starters, Desi, BBQ, Chinese, Burgers, Pizza, Sandwiches & Wraps, Fries & Sides, Deals, Drinks, Desserts. Never leave it empty and never use "Menu" when a better one fits.
+- Every deal, combo, platter or "family pack" (several items for one price, e.g. "Deal 1", "Student deal", "TPC Deals") goes in category "Deals", whatever page it is on.
+- Use one spelling per category for the whole menu (e.g. always "Burgers", not "Burger" on one item and "Burgers" on another).
 - Keep names exactly as printed (English, Roman Urdu or Urdu script). Don't translate, don't invent items.
 - "description" only if the menu prints one (e.g. ingredients, "serves 2"); otherwise "".
 - Deals: put what's inside in "description" (e.g. "2 Zinger, 1 fries, 1.5L drink").`;
 app.post('/api/vendor/branches/:id/setup/menu-photo', vendorAuth, async (req, res) => {
   const b = vendorBranch(req, res); if (!b) return;
   if (!process.env.GROQ_API_KEY) return res.status(503).json({ error: 'The cloud has no Groq key (GROQ_API_KEY), which reads the photos' });
-  const img = String(req.body.image || '');
+  let img = String(req.body.image || '');
+  if (req.body.image_id) { // one of this branch's saved menu pictures
+    const im = db.prepare('SELECT mime, data FROM setup_images WHERE id=? AND branch_id=?').get(+req.body.image_id, b.id);
+    if (!im) return res.status(404).json({ error: 'That menu picture is gone' });
+    img = `data:${im.mime};base64,${Buffer.from(im.data).toString('base64')}`;
+  }
   if (!/^data:image\/(jpeg|png|webp);base64,/.test(img)) return res.status(400).json({ error: 'Choose a JPG, PNG or WebP photo' });
   if (img.length > 4 * 1024 * 1024) return res.status(400).json({ error: 'That photo is too large' });
   const t0 = Date.now();

@@ -32,7 +32,7 @@ export default function Branch({ id }) {
       <div className="tabs" role="tablist">{TABS.map(t => <button key={t} role="tab" aria-selected={tab === t} className={tab === t ? 'on' : ''} onClick={() => setTab(t)}>{t}</button>)}</div>
       {tab === 'Overview' && <Overview d={d} go={setTab} />}
       {tab === 'Details' && <Details r={d.setup.restaurant || {}} save={save} />}
-      {tab === 'Menu' && <><Pictures id={id} images={d.images} reload={load} /><PhotoMenu id={id} reload={load} /><Menu id={id} d={d} reload={load} /><Deals menu={d.setup.menu || []} save={save} /></>}
+      {tab === 'Menu' && <><MenuPictures id={id} images={d.images} reload={load} /><Menu id={id} d={d} reload={load} /><Deals menu={d.setup.menu || []} save={save} /></>}
       {tab === 'Tables' && <Tables tables={d.setup.tables || []} floors={d.setup.floors || []} save={save} />}
       {tab === 'Delivery areas' && <Zones zones={d.setup.zones || []} save={save} />}
       {tab === 'Staff' && <Staff staff={d.setup.staff || []} save={save} />}
@@ -116,8 +116,8 @@ function Menu({ id, d, reload }) {
   const cats = [...new Set(menu.map(i => i.category))]
   return (
     <>
-      <div className="card"><h3>Upload the menu</h3>
-        <p className="muted">Their Excel, or one you typed from their menu photos into the template. One row per item, or one per size. Uploading again replaces the menu here.</p>
+      <div className="card"><h3>Or upload an Excel file</h3>
+        <p className="muted">If the client sends their menu as Excel, upload it here instead (or use our template). One row per item, or one per size. Uploading again replaces the menu here.</p>
         {d.menu_upload ? <div className="row" style={{ marginTop: 12 }}>
           <button onClick={template}>Download template</button>
           <label className={'file-btn' + (busy ? ' off' : '')}>{busy ? 'Reading…' : 'Choose Excel file'}<input type="file" accept=".xlsx,.csv" hidden disabled={busy} onChange={choose} /></label>
@@ -142,26 +142,43 @@ function Menu({ id, d, reload }) {
   )
 }
 
-// S7: menu photos -> AI reads the items -> you check and fix the rows -> save as the menu (or download as Excel).
-// Nothing is saved until you press Save.
-function PhotoMenu({ id, reload }) {
+// The client's menu card pictures, one section for both jobs:
+// 1. The WhatsApp bot sends these pictures when a customer asks for the menu.
+// 2. AI reads them into menu items, sorted into categories (Starters, Desi, Deals…). New pictures are read straight
+//    away; you check and fix the rows, then Save as the menu (or download as Excel). Nothing is saved without you.
+function MenuPictures({ id, images, reload }) {
   const [rows, setRows] = useState(null) // [[category, item, size, price, description]]
   const [busy, setBusy] = useState('')
   const [check, setCheck] = useState(null)
-  const read = async e => {
-    const files = [...e.target.files]; e.target.value = ''
-    if (!files.length) return
-    const out = [...(rows || [])]
+  const readAll = async (ids, start = rows || []) => {
+    const out = [...start]
     try {
-      for (const [n, f] of files.entries()) {
-        setBusy(`Reading photo ${n + 1} of ${files.length}… (about 10–30 seconds each)`)
-        const r = await api(`/branches/${id}/setup/menu-photo`, { image: await shrinkImage(f, 2000, 'image/jpeg') })
-        out.push(...r.rows)
-        setRows([...out])
+      for (const [n, imgId] of ids.entries()) {
+        setBusy(`AI is reading picture ${n + 1} of ${ids.length}… (about 10–30 seconds each)`)
+        const r = await api(`/branches/${id}/setup/menu-photo`, { image_id: imgId })
+        out.push(...r.rows); setRows([...out])
       }
-      toast(`Read ${out.length} rows. Check them before saving`)
+      toast(`Read ${out.length} items. Check them, then Save as the menu`)
     } catch (err) { toastError(err.message) }
     finally { setBusy(''); setCheck(null) }
+  }
+  const add = async e => {
+    const files = [...e.target.files]; e.target.value = ''
+    if (!files.length) return
+    const ids = []
+    try {
+      for (const [n, f] of files.entries()) {
+        setBusy(`Uploading picture ${n + 1} of ${files.length}…`)
+        ids.push((await api(`/branches/${id}/setup/images`, { data: await shrinkImage(f) })).id)
+      }
+    } catch (err) { toastError(err.message) }
+    setBusy(''); reload()
+    if (ids.length) await readAll(ids)
+  }
+  const del = run(async imgId => { if (await confirmBox('Delete this menu picture?', { confirmLabel: 'Delete', danger: true })) { await api(`/setup-images/${imgId}/delete`, {}); reload() } })
+  const readAgain = async () => {
+    if (rows?.length && !await confirmBox('Read all pictures again? The rows below are replaced.', { confirmLabel: 'Read again' })) return
+    setRows(null); await readAll(images.map(im => im.id), [])
   }
   const set = (i, c, v) => { setRows(rows.map((r, n) => n === i ? r.map((x, k) => k === c ? v : x) : r)); setCheck(null) }
   const send = run(async apply => {
@@ -169,15 +186,20 @@ function PhotoMenu({ id, reload }) {
     setCheck(r)
     if (r.applied) { toast(`Menu saved: ${r.items} items`); setRows(null); setCheck(null); reload() }
   })
-  const csv = () => downloadCsv('menu-from-photos.csv', [['Category', 'Item', 'Size', 'Price', 'Description'], ...rows])
+  const csv = () => downloadCsv('menu-from-pictures.csv', [['Category', 'Item', 'Size', 'Price', 'Description'], ...rows])
   return (
     <div className="card">
-      <h3>Read the menu from photos (AI)</h3>
-      <p className="muted">Take clear photos of the client's menu card, one page per photo. The AI reads items, sizes and prices into the list below. Always check it: a price it couldn't read is left empty (red).</p>
+      <h3>Menu pictures ({images.length} / 6)</h3>
+      <p className="muted">Clear photos of the client's menu card, one page per picture. The AI reads every item, size and price and sorts them into
+        categories (Starters, Desi, Burgers, Deals…). Check the list before saving: a price it couldn't read is left empty (red).
+        The WhatsApp bot also sends these pictures when a customer asks for the menu ("menu bhejo", "kya kya milta hai?").</p>
       <div className="row" style={{ marginTop: 12 }}>
-        <label className={'file-btn' + (busy ? ' off' : '')}>{rows ? 'Add more photos' : 'Choose menu photos'}<input type="file" accept="image/jpeg,image/png,image/webp" multiple hidden disabled={!!busy} onChange={read} /></label>
+        <label className={'file-btn' + (busy || images.length >= 6 ? ' off' : '')}>Add pictures<input type="file" accept="image/jpeg,image/png,image/webp" multiple hidden disabled={!!busy || images.length >= 6} onChange={add} /></label>
+        {images.length > 0 && <button onClick={readAgain} disabled={!!busy}>Read all pictures into the menu</button>}
         {busy && <span className="muted">{busy}</span>}
       </div>
+      <div className="pics">{images.map((im, i) => <figure key={im.id}><img src={`/api/setup-images/${im.id}`} alt={`Menu picture ${i + 1}`} loading="lazy" />
+        <button className="danger" onClick={() => del(im.id)}>Delete</button></figure>)}</div>
       {rows && <>
         <div className="scroll" style={{ marginTop: 12, maxHeight: 460, overflowY: 'auto' }}><table className="edit-table">
           <thead><tr><th>Category</th><th>Item</th><th>Size</th><th className="num">Price</th><th>Description</th><th></th></tr></thead>
@@ -264,27 +286,6 @@ function Deals({ menu, save }) {
           <div className="actions"><button type="button" onClick={() => setEdit(null)}>Cancel</button><button className="primary">Save deal</button></div>
         </form>
       </div>}
-    </div>
-  )
-}
-
-function Pictures({ id, images, reload }) {
-  const [busy, setBusy] = useState(false)
-  const add = async e => {
-    const files = [...e.target.files]; e.target.value = ''
-    setBusy(true)
-    try { for (const f of files) await api(`/branches/${id}/setup/images`, { data: await shrinkImage(f) }); toast('Pictures added') }
-    catch (err) { toastError(err.message) }
-    finally { setBusy(false); reload() }
-  }
-  const del = run(async imgId => { if (await confirmBox('Delete this menu picture?', { confirmLabel: 'Delete', danger: true })) { await api(`/setup-images/${imgId}/delete`, {}); reload() } })
-  return (
-    <div className="card"><h3>Menu pictures ({images.length} / 6)</h3>
-      <p className="muted">Photos of their menu card. These are the only pictures the WhatsApp bot sends: when a customer asks for the menu or what they have ("menu bhejo", "kya kya milta hai?"), the bot replies "Ye raha hamara menu" and sends these. Questions about one item are still answered in text.</p>
-      <label className={'file-btn' + (busy || images.length >= 6 ? ' off' : '')} style={{ marginTop: 12 }}>{busy ? 'Adding…' : 'Add pictures'}
-        <input type="file" accept="image/jpeg,image/png,image/webp" multiple hidden disabled={busy || images.length >= 6} onChange={add} /></label>
-      <div className="pics">{images.map((im, i) => <figure key={im.id}><img src={`/api/setup-images/${im.id}`} alt={`Menu picture ${i + 1}`} loading="lazy" />
-        <button className="danger" onClick={() => del(im.id)}>Delete</button></figure>)}</div>
     </div>
   )
 }
