@@ -19,7 +19,7 @@ import { Icon, Logo } from './ui'
 import { toast, toastError, confirmBox, promptBox } from './notify'
 
 const Ctx = createContext({})
-const THEMES = [['dark', 'Dark', 'moon'], ['light', 'Light', 'sun'], ['auto', 'Auto', 'monitor']]
+const THEMES = [['dark', 'Dark', 'moon'], ['light', 'Light', 'sun']]
 // [view, label, icon]
 const NAV = {
   admin: [
@@ -61,7 +61,7 @@ export default function App() {
   const [lowStock, setLowStock] = useState(0)
   const [wa, setWa] = useState(null) // WhatsApp unread / missed-while-offline counts for the nav badge
   const [navOpen, setNavOpen] = useState(false) // drawer on narrow screens
-  const [theme, setTheme] = useState(() => { try { return localStorage.getItem('pos_theme') || 'dark' } catch { return 'dark' } }) // per screen: dark | light | auto
+  const [theme, setTheme] = useState(() => { try { return localStorage.getItem('pos_theme') === 'light' ? 'light' : 'dark' } catch { return 'dark' } }) // per screen: dark | light
   useEffect(() => {
     document.documentElement.dataset.theme = theme
     try { localStorage.setItem('pos_theme', theme) } catch { /* private window: theme just isn't remembered */ }

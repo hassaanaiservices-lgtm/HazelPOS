@@ -10,7 +10,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
     <meta name="theme-color" content="#12110f" />
     <meta name="description" content="HazelPOS restaurant point of sale" />
-    <script>document.documentElement.classList.add('js'); try { document.documentElement.dataset.theme = localStorage.getItem('pos_theme') || 'dark' } catch { document.documentElement.dataset.theme = 'dark' }</script>
+    <script>document.documentElement.classList.add('js'); try { document.documentElement.dataset.theme = localStorage.getItem('pos_theme') === 'light' ? 'light' : 'dark' } catch { document.documentElement.dataset.theme = 'dark' }</script>
   </head>
   <body>
     <div id="root"></div>
