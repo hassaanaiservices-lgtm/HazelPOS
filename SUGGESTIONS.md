@@ -14,6 +14,41 @@ Status: **open** = waiting for you, **done**, or **dropped**.
 | Q3 | **Put it online**: push the `product-installer` branch, deploy the cloud and the admin app on Railway (steps in `cloud/README.md` and `admin/README.md`), put the cloud address in `desktop/package.json` → `hazel.cloudUrl`, then build the installers. | Nothing is online yet; everything so far runs only on your PC. | open |
 | Q4 | **Licence rules** (RISKS.md L1–L3): how many days offline before new orders lock (now 7), grace after an unpaid month (now 3 days), and whether Suspend acts straight away. | These decide how strict you are with clients. | open |
 
+## QR codes: what to do with that section (you asked)
+
+**What it is today.** Each table has its own QR code. A customer scans it, sees the menu on their phone, orders, and
+the order pops up on the cashier's screen to accept. The **QR codes** item in the sidebar (owner *and* cashier) only
+shows the codes so you can print them once and stick one on each table.
+
+**How professional POS systems handle it** (Toast, Square, Foodics, Petpooja, Lightspeed work roughly like this):
+- **Printing the codes is a one-time setup job**, done by the owner or manager in the back office, next to the tables
+  (Tables / Floor plan → "Print QR codes"). It's not a daily screen, so cashiers don't have it in their menu.
+- **The daily part is the incoming orders**: they arrive in the normal order queue (and the kitchen), sometimes with a
+  sound, and the cashier accepts or rejects them. Some restaurants switch on **auto-accept** so QR orders go straight
+  to the kitchen.
+- **QR ordering is a switch** the owner turns on or off (some only use the QR to *show the menu*, no ordering).
+- **The QR menu is served from the internet (the vendor's cloud)**, so customers open it on mobile data. They don't
+  need to join the restaurant's WiFi.
+
+**My recommendation: keep the feature, remove the section.**
+
+| # | Change | Why | Status |
+| --- | --- | --- | --- |
+| QR1 | **Remove "QR codes" from the sidebar** (owner and cashier). | It's a one-time printing job, not a daily screen; it just adds clutter. | open |
+| QR2 | **Move printing to the owner: Tables & delivery → Tables → "Print QR codes"** (one code per table, or one floor at a time). Also in the admin app's Tables tab, so you can print them for a client before installing. | That's where pros put it: next to the tables they belong to. | open |
+| QR3 | **QR orders show in Orders as their own tab ("QR requests")**, besides the popup the cashier already gets. | Nothing gets missed if the popup is closed. | open |
+| QR4 | **Owner settings: QR ordering on / off, "menu only" mode, and auto-accept to kitchen.** | Each restaurant works differently. | open |
+| QR5 | **Big one: QR codes today point to the POS PC's local address (e.g. `http://192.168.1.5:4000/…`).** A customer must be on the restaurant's WiFi for the page to open; on mobile data it fails. Pros serve the QR menu from the cloud. Fix: HazelPOS Cloud hosts the menu page and passes orders to the POS. | Most customers won't join the WiFi, so today the feature barely works in real life. | open |
+| QR6 | **One general QR** (not tied to a table) for the counter, window, flyers and Instagram: menu + takeaway/delivery order, or a WhatsApp link to your assistant. | Brings orders from outside the restaurant too. | open |
+| QR7 | **"New QR code" for one table** (if a code is copied or misused, the old one stops working). | Abuse protection. | open |
+
+## Cash drawer
+
+| # | What | Why | Status |
+| --- | --- | --- | --- |
+| C1 | In your screenshot, expected drawer cash was **Rs. -87**: refund #127 (Rs. 7,888) was taken out of *this* shift's drawer, but this shift only took Rs. 4,001 in cash. The order was probably paid in an earlier shift. Options: warn before a refund that would make the drawer negative, or let the cashier choose "refund from drawer" vs "refund by bank transfer". | A negative drawer confuses the shift close. | open |
+| C2 | Cash drawer sync, for the record: inside the POS it's always in sync (owner and cashier read the same shift). On the cloud, each **closed** shift (Z-report) goes up with expected cash, counted cash and difference; cash-in/cash-out lines don't go up one by one. | You asked; works as intended. Option: also send each cash in/out line. | open |
+
 ## Feature ideas
 
 | # | Idea | Why | Status |
