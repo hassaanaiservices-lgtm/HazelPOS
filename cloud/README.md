@@ -62,7 +62,7 @@ doesn't stop billing. The rules (offline days, grace days) are in `server/licenc
 3. Variables: `DATA_DIR=/data`, `VENDOR_API_KEY=<openssl rand -hex 32>`, `DEEPSEEK_API_KEY=…`, `GROQ_API_KEY=…`. Railway sets `PORT` itself.
 4. Settings → Networking → **Generate domain** (HTTPS comes with it). Pick a region close to Pakistan (RISKS.md A1).
 5. Deploy the admin app as a second service (admin/README.md) with the same `VENDOR_API_KEY`.
-6. Put the domain in `desktop/package.json` → `"hazel": { "cloudUrl": "https://<domain>" }` and build the installers. Restaurants then only type their activation code.
+6. Put the domain and the licence public key in `desktop/package.json` → `"hazel": { "cloudUrl": "https://<domain>", "licencePublicKey": "<the text from https://<domain>/api/licence/public-key>" }` and build the installers. Restaurants then only type their activation code, and the POS checks every licence answer is really from your cloud. The private key is in `DATA_DIR/licence-key.pem` (or set `LICENCE_PRIVATE_KEY`): keep it on the volume, never share it.
 
 ## Onboarding a restaurant
 

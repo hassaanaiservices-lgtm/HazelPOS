@@ -62,7 +62,7 @@ shows the codes so you can print them once and stick one on each table.
 | S7 | **Menu photo → menu items with AI** (Groq vision or Claude), as a draft Excel you check. | Built: admin app → Branch → Menu → "Read the menu from photos". | done |
 | S8 | **Real combo deals** (fixed items + choices, kitchen sees each item, stock per item). Built on 2026-11-15: deals and combos in the POS, the admin app and Excel. | Kitchen tickets and stock are exact for deals. | done |
 | S9 | **Separate admin logins per team member**, with a log of who did what (RISKS.md L6). | Built: admin app → Team (owner) and Activity. | done |
-| S10 | **Signed licence answers** from the cloud (RISKS.md L4). | Stops someone technical from faking "paid" in the local database. | open |
+| S10 | **Signed licence answers** from the cloud (RISKS.md L4). | Built in 4 phases: signing, checking on the POS, bound to the branch key, cloud flags orders made while locked. One step left for you: put the public key in the installer (RISKS.md L4). | done |
 | S11 | **"Download for Windows" button on the site**, once there's a public release. | You said leave it for now. | dropped (for now) |
 
 ## From earlier answers in chat (how professionals run a POS business)

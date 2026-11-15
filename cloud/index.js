@@ -41,6 +41,9 @@ for (const sql of [
   'ALTER TABLE owners ADD COLUMN cancelled_at TEXT',
   // Updates to a few clients first: test clients install every new version; everyone else up to release_version
   'ALTER TABLE owners ADD COLUMN early_updates INTEGER DEFAULT 0',
+  // S10 phase 4: orders that arrived from a POS which should have been locked (unpaid past its days, or cancelled)
+  'ALTER TABLE branches ADD COLUMN locked_orders INTEGER DEFAULT 0',
+  'ALTER TABLE branches ADD COLUMN locked_orders_last TEXT',
   // Activation code (HZ-XXXX-XXXX): one use, swapped for the branch key by the installed app
   'ALTER TABLE branches ADD COLUMN code_hash TEXT',
   'ALTER TABLE branches ADD COLUMN code_created_at TEXT',
@@ -208,12 +211,32 @@ const branchAuth = (req, res, next) => {
 };
 app.get('/api/sync/hello', branchAuth, (req, res) => res.json({ branch: req.branch.name, id: req.branch.id }));
 // The installed POS asks this every few hours (server/licence.js) and keeps the last answer for offline days
+// ---------- Signed licence answers (S10) ----------
+// Phase 1: the cloud signs every licence answer with an Ed25519 key. Phase 2: the POS checks the signature with the
+// public key built into the installer, so editing the answer in the POS database doesn't work. Phase 3: the signed
+// answer names the branch and a hash of its key, so it can't be copied to another PC/branch.
+// The private key: LICENCE_PRIVATE_KEY (PEM), or made once and kept in DATA_DIR/licence-key.pem (on the volume).
+const LICENCE_KEY = (() => {
+  if (process.env.LICENCE_PRIVATE_KEY) return crypto.createPrivateKey(process.env.LICENCE_PRIVATE_KEY.replace(/\\n/g, '\n'));
+  const file = path.join(DATA, 'licence-key.pem');
+  if (!fs.existsSync(file)) fs.writeFileSync(file, crypto.generateKeyPairSync('ed25519').privateKey.export({ type: 'pkcs8', format: 'pem' }), { mode: 0o600 });
+  return crypto.createPrivateKey(fs.readFileSync(file));
+})();
+const LICENCE_PUBLIC = crypto.createPublicKey(LICENCE_KEY).export({ type: 'spki', format: 'pem' });
+// Public: put this in desktop/package.json → hazel.licencePublicKey before building the installer
+app.get('/api/licence/public-key', (req, res) => res.type('text/plain').send(LICENCE_PUBLIC));
+const signLicence = (answer, branch, key) => {
+  const payload = Buffer.from(JSON.stringify({ ...answer, branch_id: branch.id, key_hash: sha(key), issued_at: now() })).toString('base64');
+  return { signed: payload, sig: crypto.sign(null, Buffer.from(payload), LICENCE_KEY).toString('base64') };
+};
+
 app.get('/api/licence', branchAuth, (req, res) => {
   const st = db.prepare('SELECT updated_at, applied_at FROM setups WHERE branch_id=?').get(req.branch.id);
   const vs = k => db.prepare('SELECT value FROM vendor_settings WHERE key=?').get(k)?.value || null;
   const early = !!db.prepare('SELECT early_updates FROM owners WHERE id=?').get(req.branch.owner_id)?.early_updates;
-  res.json({ ...membership(req.branch.owner_id), branch: req.branch.name, server_time: now(), setup_ready: !!st && !st.applied_at,
-    update_requested_at: vs('update_requested_at'), update_policy: { early, release_version: vs('release_version') } });
+  const answer = { ...membership(req.branch.owner_id), branch: req.branch.name, server_time: now(), setup_ready: !!st && !st.applied_at,
+    update_requested_at: vs('update_requested_at'), update_policy: { early, release_version: vs('release_version') } };
+  res.json({ ...answer, ...signLicence(answer, req.branch, (req.get('authorization') || '').replace(/^Bearer /, '')) });
 });
 
 // ---------- Activation code + setup download (the installed app, right after activation) ----------
@@ -260,6 +283,14 @@ app.post('/api/sync/health', branchAuth, (req, res) => {
 // Upserts are keyed by (branch, local id), so re-sending the same batch is harmless
 app.post('/api/sync/push', branchAuth, (req, res) => {
   const b = req.branch.id, { orders = [], expenses = [], deleted_expenses = [], stock, shifts = [] } = req.body;
+  // Cross-check (S10 phase 4): new orders made after this POS should have locked = someone got around the lock.
+  // A day of margin for clocks and for a POS that hadn't checked in yet. Shown in the admin app (Unpaid page).
+  const m = membership(req.branch.owner_id);
+  const lockFrom = m.cancelled_at ? addDays(m.cancelled_at.slice(0, 10), 1) : !m.pos_active && m.pos_until ? addDays(m.pos_until, 1) : null;
+  if (lockFrom) {
+    const late = orders.filter(o => String(o.created_at || '').slice(0, 10) > lockFrom && !db.prepare('SELECT 1 FROM c_orders WHERE branch_id=? AND local_id=?').get(b, o.local_id));
+    if (late.length) db.prepare('UPDATE branches SET locked_orders = COALESCE(locked_orders,0) + ?, locked_orders_last=? WHERE id=?').run(late.length, now(), b);
+  }
   tx(() => {
     const up = db.prepare(`INSERT OR REPLACE INTO c_orders (branch_id,local_id,type,status,table_name,subtotal,discount,promo_amount,points_amount,tax,total,
       payment_method,created_at,paid_at,day,user_name,refunded_at,refunded_by,refund_reason) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
@@ -382,7 +413,7 @@ app.get('/api/vendor/owners', vendorAuth, (req, res) => {
   const month = today().slice(0, 7);
   res.json(db.prepare('SELECT id, email, name, phone, plan, notes, paid_until, suspended, created_at, wa_grace_days AS wa_grace_custom, pos_grace_days AS pos_grace_custom FROM owners ORDER BY id DESC').all().map(o => ({
     ...o, ...membership(o.id),
-    branches: db.prepare('SELECT id, name, created_at, last_sync, last_ip, code_created_at, code_used_at, health, health_at FROM branches WHERE owner_id=? ORDER BY id').all(o.id).map(b => ({
+    branches: db.prepare('SELECT id, name, created_at, last_sync, last_ip, code_created_at, code_used_at, health, health_at, locked_orders, locked_orders_last FROM branches WHERE owner_id=? ORDER BY id').all(o.id).map(b => ({
       ...b, health: JSON.parse(b.health || 'null'),
       setup: setupSummary(b.id),
       errors_24h: db.prepare('SELECT COUNT(*) c FROM branch_errors WHERE branch_id=? AND at > ?').get(b.id, new Date(Date.now() - 864e5).toISOString()).c,

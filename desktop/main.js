@@ -12,6 +12,8 @@ const crypto = require('crypto');
 const PORT = 4000;
 // Your HazelPOS Cloud, built into the installer, so the restaurant only types its activation code (package.json "hazel")
 const CLOUD_URL = require('./package.json').hazel?.cloudUrl || '';
+// The cloud's licence public key (GET <cloud>/api/licence/public-key), built in so signed answers can be checked (S10)
+const LICENCE_PUBKEY = require('./package.json').hazel?.licencePublicKey || '';
 const LOCAL = `http://localhost:${PORT}`;
 // Packaged: server/, client/dist and rag/ are copied to resources/app (see package.json "extraResources").
 const ROOT = app.isPackaged ? path.join(process.resourcesPath, 'app') : path.join(__dirname, '..');
@@ -35,7 +37,7 @@ function startServer() {
   server = spawn(process.execPath, [path.join(ROOT, 'server', 'index.js')], {
     cwd: path.join(ROOT, 'server'),
     env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', PORT: String(PORT), POS_DB: path.join(DATA, 'pos.db'), HAZEL_DATA_DIR: DATA, HAZEL_LICENCE: '1', // licence: server/licence.js
-      HAZEL_VERSION: app.getVersion(), HAZEL_CLOUD_URL: CLOUD_URL, HAZEL_INTERNAL_TOKEN: INTERNAL },
+      HAZEL_VERSION: app.getVersion(), HAZEL_CLOUD_URL: CLOUD_URL, HAZEL_INTERNAL_TOKEN: INTERNAL, HAZEL_LICENCE_PUBKEY: LICENCE_PUBKEY },
     windowsHide: true,
   });
   server.stdout.pipe(log, { end: false });

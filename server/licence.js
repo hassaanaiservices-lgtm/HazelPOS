@@ -12,6 +12,11 @@
 // Internet doesn't matter: no answer from the cloud never locks anything; the last answer keeps applying.
 // "Locked" only stops NEW orders. Open bills can still be paid, and reports and data stay readable.
 const DUE_SOON_DAYS = 5;
+const crypto = require('crypto');
+// S10: answers are signed by the cloud (Ed25519). The public key comes with the installer (HAZEL_LICENCE_PUBKEY, from
+// desktop/package.json hazel.licencePublicKey); without it, the key the cloud showed at activation is kept and used.
+// With a key, only a valid signed answer for THIS branch key counts: editing or copying the answer locks new orders
+// until the POS reaches the cloud again.
 const CHECK_EVERY_MS = 3 * 60 * 60 * 1000;
 const DAY = 864e5;
 
@@ -36,12 +41,30 @@ module.exports = function licence(db, cloud, { setup = null, health = () => ({})
     return [r, await r.json().catch(() => ({}))];
   }
 
+  const pubkey = () => (process.env.HAZEL_LICENCE_PUBKEY || get('lic_pubkey') || '').replace(/\\n/g, '\n');
+  const keyHash = () => crypto.createHash('sha256').update(get('key')).digest('hex');
+  // A signed answer -> its content, or null when the signature, branch key or date doesn't check out
+  function verified(signed, sig) {
+    try {
+      if (!signed || !sig || !crypto.verify(null, Buffer.from(signed), crypto.createPublicKey(pubkey()), Buffer.from(sig, 'base64'))) return null;
+      const a = JSON.parse(Buffer.from(signed, 'base64').toString());
+      if (a.key_hash !== keyHash()) return null;                                     // issued for another branch/PC
+      if (Date.parse(a.issued_at) > Date.now() + 2 * DAY) return null;               // from the future: clock games
+      return a;
+    } catch { return null; }
+  }
+
   async function check() {
     if (!required || !get('url') || !get('key')) return state();
     let data = {};
     try {
       const [r, d] = await call('/api/licence'); data = d;
-      if (r.status === 401) { set('lic_answer', JSON.stringify({ active: false, revoked: true })); set('lic_checked_at', tick()); }
+      if (r.status === 401) { set('lic_answer', JSON.stringify({ active: false, revoked: true })); set('lic_revoked', '1'); set('lic_checked_at', tick()); }
+      else if (r.ok && pubkey()) {
+        const a = verified(d.signed, d.sig);
+        if (a) { set('lic_signed', d.signed); set('lic_sig', d.sig); set('lic_answer', JSON.stringify(a)); set('lic_revoked', ''); set('lic_checked_at', tick()); set('lic_error', ''); }
+        else set('lic_error', 'The answer from HazelPOS Cloud was not signed correctly');
+      }
       else if (r.ok) { set('lic_answer', JSON.stringify(d)); set('lic_checked_at', tick()); set('lic_error', ''); }
       else set('lic_error', d.error || `Cloud replied ${r.status}`);
     } catch (e) { tick(); set('lic_error', e.name === 'TimeoutError' ? 'Cloud took too long to answer' : 'Cloud not reachable (no internet?)'); return state(); }
@@ -73,7 +96,9 @@ module.exports = function licence(db, cloud, { setup = null, health = () => ({})
   const day = t => { const d = new Date(t); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
   const plus = (d, n) => new Date(Date.parse(d + 'T00:00:00Z') + n * DAY).toISOString().slice(0, 10);
   const answer = () => {
-    const a = JSON.parse(get('lic_answer') || '{}');
+    if (get('lic_revoked') === '1') return { revoked: true };
+    // With a public key, the stored answer only counts if its signature still checks out (lic_answer is just a copy)
+    const a = pubkey() ? verified(get('lic_signed'), get('lic_sig')) || { tampered: true } : JSON.parse(get('lic_answer') || '{}');
     if (a.paid_until && !a.pos_until) Object.assign(a, { ai_until: plus(a.paid_until, 3), pos_until: plus(a.paid_until, 7) }); // older cloud
     return a;
   };
@@ -85,6 +110,7 @@ module.exports = function licence(db, cloud, { setup = null, health = () => ({})
     const today = day(clock()), a = answer();
     const base = { paid_until: a.paid_until || null, ai_until: a.ai_until || null, pos_until: a.pos_until || null, update_requested_at: a.update_requested_at || null, update_policy: a.update_policy || null, last_check: new Date(+get('lic_checked_at')).toISOString(), error: get('lic_error') };
     if (a.revoked) return { ...base, state: 'locked', message: 'This branch key was removed from HazelPOS Cloud. Contact HazelPOS to reconnect.' };
+    if (a.tampered) return { ...base, state: 'locked', message: "HazelPOS couldn't confirm your membership on this PC (the saved details are missing or were changed). Connect to the internet: it fixes itself within a few minutes." };
     if (a.cancelled) return { ...base, state: 'locked', message: 'Your HazelPOS membership was cancelled. New orders and the WhatsApp assistant are off. Contact HazelPOS.' };
     if (a.suspended) return { ...base, state: 'locked', message: 'HazelPOS has paused your membership. New orders and the WhatsApp assistant are off until it is renewed. Contact HazelPOS.' };
     if (!a.paid_until) return a.active === false ? { ...base, state: 'locked', message: 'Your HazelPOS membership has not started yet. Contact HazelPOS.' } : { ...base, state: 'ok' };
@@ -120,6 +146,9 @@ module.exports = function licence(db, cloud, { setup = null, health = () => ({})
     }
     cloud.hold(true);
     try { await cloud.connect(url, key, { sync: false }); } catch (e) { cloud.hold(false); throw e; }
+    if (!process.env.HAZEL_LICENCE_PUBKEY && !get('lic_pubkey')) { // no key in the installer: trust the one shown now
+      try { const r = await fetch(url + '/api/licence/public-key', { signal: AbortSignal.timeout(20000) }); if (r.ok) set('lic_pubkey', await r.text()); } catch { /* an older cloud: answers stay unsigned */ }
+    }
     set('setup_error', '');
     // A new PC for a branch that already ran: bring its data back (orders, menu, staff…) instead of the setup
     let restored = null;

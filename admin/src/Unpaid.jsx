@@ -12,7 +12,8 @@ export default function Unpaid() {
   useEffect(() => { run(load)() }, [])
   if (!owners) return <p className="muted">Loading…</p>
 
-  const list = owners.filter(o => o.days_overdue > 0 || o.suspended || o.cancelled || !o.paid_until)
+  const lockedUse = o => o.branches.reduce((s, b) => s + (b.locked_orders || 0), 0) // orders made while the POS should have been locked
+  const list = owners.filter(o => o.days_overdue > 0 || o.suspended || o.cancelled || !o.paid_until || lockedUse(o))
     .sort((a, b) => (b.days_overdue || 0) - (a.days_overdue || 0))
   const act = fn => run(async o => { await fn(o); load() })
   const paid = act(async o => { const r = await api(`/owners/${o.id}/extend`, { months: 1 }); toast(`${o.name || o.email}: paid until ${r.paid_until}`) })
@@ -43,7 +44,7 @@ export default function Unpaid() {
             <tr key={o.id}>
               <td><button className="link" style={{ padding: 0, minHeight: 0 }} onClick={() => go('client/' + o.id)}><b>{o.name || o.email}</b></button>
                 <div className="muted small">{o.phone || o.email}{o.plan ? ` · ${o.plan}` : ''}</div></td>
-              <td><Membership o={o} /></td>
+              <td><Membership o={o} />{lockedUse(o) > 0 && <div className="err small" title="These orders reached the cloud although this POS should have been locked: check that PC">⚠ {lockedUse(o)} order(s) made while locked</div>}</td>
               <td>{o.paid_until || '—'}</td>
               <td><Service on={o.ai_active} until={o.ai_until} stopped={o.suspended || o.cancelled} /></td>
               <td><Service on={o.pos_active} until={o.pos_until} stopped={o.suspended || o.cancelled} /></td>

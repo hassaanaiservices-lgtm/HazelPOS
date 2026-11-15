@@ -54,6 +54,8 @@ export default function Client({ id }) {
         <p className="muted">Shown once. Prepare the branch's setup first, then send this code with the installer. It works one time.</p>
         <div className="row" style={{ marginTop: 12 }}><button className="primary" onClick={() => go('branch/' + code.id)}>Prepare this branch</button><button onClick={() => setCode(null)}>I've noted it</button></div></div>}
 
+      {o.branches.some(b => b.locked_orders > 0) && <p className="notice bad" style={{ marginBottom: 16 }}>
+        ⚠ {o.branches.reduce((s, b) => s + (b.locked_orders || 0), 0)} order(s) reached the cloud from a POS that should have been locked (unpaid or cancelled). Someone may have got around the lock on that PC: check it.</p>}
       <div className="grid2">
         <div className="card"><h3>Membership</h3>
           <p>Paid until <b>{o.paid_until || '—'}</b>{o.days_overdue > 0 && <span className="err"> · {o.days_overdue} day(s) unpaid</span>}{o.plan ? <span className="muted"> · {o.plan}</span> : null}</p>
