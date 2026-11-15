@@ -4,23 +4,37 @@ import { Icon } from './ui'
 import Integrations from './Integrations'
 import { toastError, confirmBox } from './notify'
 
-const TABS = ['Menu', 'Menu pictures', 'Categories', 'Floors', 'Tables', 'Delivery Zones', 'Restaurant', 'Staff & PINs', 'WhatsApp bot', 'Integrations', 'Cloud', 'Activity Log']
+const TABS = ['Restaurant', 'Staff & PINs', 'WhatsApp bot', 'Integrations', 'Cloud', 'Activity Log']
 
 export default function Admin({ onChanged, notify }) {
-  const [tab, setTab] = useState('Menu')
-  const [floors, setFloors] = useState([])
-  useEffect(() => { if (tab === 'Tables') api('/floors').then(f => setFloors(f.map(x => x.name))).catch(() => {}) }, [tab])
+  const [tab, setTab] = useState('Restaurant')
   return (
     <section className="admin">
       <div className="row-head"><h2>Settings</h2>
         <div className="tabs">{TABS.map(t => <button key={t} id={'tab-' + t} className={tab === t ? 'active' : ''} onClick={() => setTab(t)}>{t}</button>)}</div>
       </div>
-      {tab === 'Menu' && <MenuAdmin onChanged={onChanged} notify={notify} />}
-      {tab === 'Menu pictures' && <MenuPictures notify={notify} />}
-      {tab === 'Categories' && <SimpleAdmin route="categories" listUrl="/menu?all=1" pick={d => d.categories} onChanged={onChanged} notify={notify}
-        fields={[['name', 'Name'], ['color', 'Colour', 'color']]} blank={{ name: '', color: '#ff6b35' }}
-        show={c => <><i className="swatch" style={{ background: c.color }} />{c.name}</>} />}
-      {tab === 'Floors' && <SimpleAdmin route="floors" listUrl="/floors" onChanged={onChanged} notify={notify}
+      {tab === 'Restaurant' && <RestaurantSettings onChanged={onChanged} notify={notify} />}
+      {tab === 'Staff & PINs' && <LoginPins notify={notify} />}
+      {tab === 'WhatsApp bot' && <BotBehaviour notify={notify} />}
+      {tab === 'Integrations' && <Integrations onChanged={onChanged} notify={notify} />}
+      {tab === 'Cloud' && <CloudSettings notify={notify} />}
+      {tab === 'Activity Log' && <ActivityLog />}
+    </section>
+  )
+}
+
+// Its own section in the sidebar (not under Settings): floors, tables and delivery zones
+const PLACE_TABS = [['floors', 'Floors'], ['tables', 'Tables'], ['zones', 'Delivery zones']]
+export function PlacesSection({ onChanged, notify }) {
+  const [tab, setTab] = useState('tables')
+  const [floors, setFloors] = useState([])
+  useEffect(() => { if (tab === 'tables') api('/floors').then(f => setFloors(f.map(x => x.name))).catch(() => {}) }, [tab])
+  return (
+    <section className="admin">
+      <div className="row-head"><h2>Tables & delivery</h2>
+        <div className="tabs" role="tablist">{PLACE_TABS.map(([id, label]) => <button key={id} role="tab" aria-selected={tab === id} className={tab === id ? 'active' : ''} onClick={() => setTab(id)}>{label}</button>)}</div>
+      </div>
+      {tab === 'floors' && <SimpleAdmin route="floors" listUrl="/floors" onChanged={onChanged} notify={notify}
         fields={[
           ['name', 'Floor Name (e.g. Main Dining, Terrace)'],
           ['icon', 'Icon (Emoji)'],
@@ -35,7 +49,7 @@ export default function Admin({ onChanged, notify }) {
             <span className="muted">{f.total || 0} tables</span>
           </>
         )} />}
-      {tab === 'Tables' && <SimpleAdmin route="tables" listUrl="/tables" onChanged={onChanged} notify={notify}
+      {tab === 'tables' && <SimpleAdmin route="tables" listUrl="/tables" onChanged={onChanged} notify={notify}
         fields={[
           ['name', 'Table Name (e.g. T1, F1)'],
           ['seats', 'Seats / Capacity', 'number'],
@@ -51,18 +65,30 @@ export default function Admin({ onChanged, notify }) {
             <span className="pill sm" style={{ textTransform: 'capitalize' }}>{t.shape || 'square'}</span>
           </>
         )} />}
-      {tab === 'Delivery Zones' && <SimpleAdmin route="delivery-zones" listUrl="/delivery-zones" notify={notify}
+      {tab === 'zones' && <SimpleAdmin route="delivery-zones" listUrl="/delivery-zones" notify={notify}
         fields={[['name', 'Area name (e.g. DHA Phase 5)'], ['fee', 'Delivery fee (Rs)', 'number'], ['min_order', 'Minimum order (Rs)', 'number'],
           ['free_above', 'Free delivery above (Rs, 0 = never)', 'number'], ['eta_min', 'Usual delivery time (minutes)', 'number'], ['active', 'Delivering here (1 = yes, 0 = paused)', 'select', [1, 0]]]}
         blank={{ name: '', fee: 100, min_order: 0, free_above: 0, eta_min: 40, active: 1 }}
         show={z => <><b>{z.name}</b><span className="pill">{rs(z.fee)}</span>{z.min_order > 0 && <span className="muted">min {rs(z.min_order)}</span>}
           {z.free_above > 0 && <span className="muted">free above {rs(z.free_above)}</span>}<span className="muted">~{z.eta_min} min</span>{!+z.active && <span className="pill sm low-pill">Off</span>}</>} />}
-      {tab === 'Restaurant' && <RestaurantSettings onChanged={onChanged} notify={notify} />}
-      {tab === 'Staff & PINs' && <LoginPins notify={notify} />}
-      {tab === 'WhatsApp bot' && <BotBehaviour notify={notify} />}
-      {tab === 'Integrations' && <Integrations onChanged={onChanged} notify={notify} />}
-      {tab === 'Cloud' && <CloudSettings notify={notify} />}
-      {tab === 'Activity Log' && <ActivityLog />}
+    </section>
+  )
+}
+
+// Its own section in the sidebar (not under Settings): items, categories and the menu card pictures
+const MENU_TABS = [['items', 'Items'], ['categories', 'Categories'], ['pictures', 'Menu pictures']]
+export function MenuSection({ onChanged, notify }) {
+  const [tab, setTab] = useState('items')
+  return (
+    <section className="admin">
+      <div className="row-head"><h2>Menu</h2>
+        <div className="tabs" role="tablist">{MENU_TABS.map(([id, label]) => <button key={id} role="tab" aria-selected={tab === id} className={tab === id ? 'active' : ''} onClick={() => setTab(id)}>{label}</button>)}</div>
+      </div>
+      {tab === 'items' && <MenuAdmin onChanged={onChanged} notify={notify} />}
+      {tab === 'pictures' && <MenuPictures notify={notify} />}
+      {tab === 'categories' && <SimpleAdmin route="categories" listUrl="/menu?all=1" pick={d => d.categories} onChanged={onChanged} notify={notify}
+        fields={[['name', 'Name'], ['color', 'Colour', 'color']]} blank={{ name: '', color: '#ff6b35' }}
+        show={c => <><i className="swatch" style={{ background: c.color }} />{c.name}</>} />}
     </section>
   )
 }

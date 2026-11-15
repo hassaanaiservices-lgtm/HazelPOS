@@ -5,7 +5,7 @@ import Login from './Login'
 import Activate from './Activate'
 import Kitchen from './Kitchen'
 import Dashboard from './Dashboard'
-import Admin from './Admin'
+import Admin, { MenuSection, PlacesSection } from './Admin'
 import RegisterSession from './RegisterSession'
 import TablesFloor from './TablesFloor'
 import Inventory from './Inventory'
@@ -28,6 +28,8 @@ const NAV = {
     ['kitchen', 'Kitchen', 'flame'],
     ['delivery', 'Delivery', 'bike'],
     ['qr_menu', 'QR codes', 'qr'],
+    ['menu', 'Menu', 'book'],
+    ['places', 'Tables & delivery', 'table'],
     ['register_session', 'Cash drawer', 'wallet'],
     ['inventory', 'Inventory', 'box'],
     ['customers', 'Customers', 'users'],
@@ -167,6 +169,8 @@ export default function App() {
           <span className="muted">Salaries and advances are added to Expenses automatically.</span></div><Payroll notify={notify} /></section>}
         {view === 'delivery' && <Delivery notify={notify} />}
         {view === 'whatsapp' && user.role !== 'kitchen' && <WhatsApp notify={notify} />}
+        {view === 'menu' && user.role === 'admin' && <MenuSection onChanged={reloadAll} notify={notify} />}
+        {view === 'places' && user.role === 'admin' && <PlacesSection onChanged={reloadAll} notify={notify} />}
         {view === 'admin' && user.role === 'admin' && <Admin onChanged={reloadAll} notify={notify} />}
         {view === 'qr_menu' && <QrCodesModal onClose={() => go(nav[0][0])} />}
       </main>

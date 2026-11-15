@@ -88,7 +88,7 @@ everything. (Settings → Cloud uploads a backup every day if you use HazelPOS C
 
 1. Settings → Restaurant: name, address, NTN, tax rate (leave blank for no tax), printers, and what happens if someone
    takes cash while the cash drawer is closed (open a shift automatically, or refuse).
-2. Settings → Menu, Categories, Floors, Tables, Delivery Zones.
+2. Menu (items, categories, menu pictures) and Tables & delivery (floors, tables, delivery zones), both in the sidebar.
 3. Inventory → Stock: add the ingredients you buy, then Inventory → Recipes to say what goes into each item.
    Until you do, stock is not tracked (supplier bills can still be recorded as an amount).
 4. Staff: add your staff with their monthly salary. Anyone whose job contains "Rider" appears on the Delivery board.
