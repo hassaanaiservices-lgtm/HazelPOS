@@ -882,3 +882,16 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px
 .alert-preview pre { margin: 0; white-space: pre-wrap; font-family: var(--mono); font-size: var(--fs-sm); }
 .notice-inline { background: var(--info-soft); border-radius: var(--r-sm); padding: 8px 12px; }
 .licence-banner .link { padding: 0 4px; min-height: 0; }
+
+/* First-run guided tour (Tour.jsx) */
+.tour { position: fixed; inset: 0; z-index: 80; }
+.tour-dim { position: fixed; inset: 0; background: var(--scrim); }
+.tour-spot { position: fixed; border-radius: var(--r-sm); box-shadow: 0 0 0 9999px var(--scrim); outline: 3px solid var(--accent); transition: all var(--dur) var(--ease); pointer-events: none; }
+.tour-card { position: fixed; width: min(340px, calc(100vw - 32px)); background: var(--surface); border: var(--bw) solid var(--outline); border-radius: var(--r-md); padding: 18px; box-shadow: var(--shadow); display: flex; flex-direction: column; gap: 10px; }
+.tour-card.center { top: 50%; left: 50%; transform: translate(-50%, -50%); }
+.tour-card p { color: var(--text-2); }
+.tour-count { font-size: var(--fs-xs); color: var(--text-3); font-weight: 700; }
+.tour-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.tour-actions button { min-height: 44px; }
+.tour-help { width: 100%; justify-content: center; }
+@media (max-width: 559px) { .tour-card:not(.center) { left: 16px !important; top: auto !important; bottom: 16px; } }

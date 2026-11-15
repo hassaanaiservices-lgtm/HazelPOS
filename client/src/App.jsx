@@ -5,6 +5,7 @@ import Login from './Login'
 import Activate from './Activate'
 import Kitchen from './Kitchen'
 import Dashboard from './Dashboard'
+import Tour, { tourDone } from './Tour'
 import Admin, { MenuSection, PlacesSection } from './Admin'
 import RegisterSession from './RegisterSession'
 import TablesFloor from './TablesFloor'
@@ -72,6 +73,8 @@ export default function App() {
   const reloadAll = () => { api('/settings').then(setSettings); if (user) { api('/menu').then(setMenu); refresh() } }
   useEffect(reloadAll, [user?.id])
   const [updateReady, setUpdateReady] = useState('') // version of a downloaded app update (owner banner)
+  const [tour, setTour] = useState(false) // first-run guided tour (Tour.jsx); Help plays it again
+  useEffect(() => { if (user && settings.demo !== undefined && !tourDone(user.role)) setTour(true) }, [user?.role, settings.demo])
   useEffect(() => {
     if (user?.role !== 'admin') return
     const poll = () => api('/update').then(u => setUpdateReady(u.state === 'ready' ? u.version || 'An update' : '')).catch(() => {})
@@ -137,6 +140,7 @@ export default function App() {
         {brand}
         <button className="icon-btn" aria-label="Change theme" title={`Theme: ${theme}`}
           onClick={() => setTheme(THEMES[(THEMES.findIndex(t => t[0] === theme) + 1) % THEMES.length][0])}><Icon name={THEMES.find(t => t[0] === theme)?.[2] || 'moon'} size={20} /></button>
+        {solo && <button className="ghost sm" id="tour-help" onClick={() => setTour(true)}>Help</button>}
         {solo && <div className="user"><span className="avatar">{user.name[0]}</span><span>{user.name}</span>{lock}</div>}
       </header>
       {!solo && <aside className="sidebar no-print" aria-label="Main menu">
@@ -151,6 +155,7 @@ export default function App() {
               <Icon name={ic} size={14} />{label}</button>)}
           </div>
           {user.role !== 'kitchen' && <div className="today"><span>Today</span><span><b>{summary.orders}</b> orders, <b>{rs(summary.revenue)}</b></span></div>}
+          <button className="ghost sm tour-help" id="tour-help" onClick={() => { setNavOpen(false); setTour(true) }}>Help: take the tour</button>
           <div className="user"><span className="avatar">{user.name[0]}</span><span>{user.name}</span>{lock}</div>
         </div>
       </aside>}
@@ -180,6 +185,7 @@ export default function App() {
         {view === 'places' && user.role === 'admin' && <PlacesSection onChanged={reloadAll} notify={notify} />}
         {view === 'admin' && user.role === 'admin' && <Admin onChanged={reloadAll} notify={notify} />}
       </main>
+      {tour && <Tour role={user.role} onClose={() => setTour(false)} />}
       {user.role === 'cashier' && <QrOrderAlerts user={user} notify={notify} onAccepted={refresh} />}
     </div>
     </Ctx.Provider>
