@@ -57,7 +57,12 @@ export default function App() {
   const [tables, setTables] = useState([])
   const [order, setOrder] = useState(null)
   const [summary, setSummary] = useState({ orders: 0, revenue: 0 })
-  const [lowStock, setLowStock] = useState(0)
+  const [lowList, setLowList] = useState([]) // ingredients running low (owner)
+  const lowStock = lowList.length
+  // "Seen" marks for the slow blink on the menu: the low ingredients the owner has already looked at, and the app update
+  // they've already seen in Settings → Updates. Something new (another ingredient low, a newer update) blinks again.
+  const [seen, setSeenState] = useState(() => { try { return { low: [], update: '', ...JSON.parse(localStorage.getItem('pos_seen') || '{}') } } catch { return { low: [], update: '' } } })
+  const setSeen = fn => setSeenState(s => { const n = { ...s, ...fn(s) }; try { localStorage.setItem('pos_seen', JSON.stringify(n)) } catch { /* private window */ } return n })
   const [wa, setWa] = useState(null) // WhatsApp unread / missed-while-offline counts for the nav badge
   const [navOpen, setNavOpen] = useState(false) // drawer on narrow screens
   const [theme, setTheme] = useState(() => { try { return localStorage.getItem('pos_theme') === 'light' ? 'light' : 'dark' } catch { return 'dark' } }) // per screen: dark | light
@@ -68,10 +73,11 @@ export default function App() {
 
   const refresh = () => {
     api('/tables').then(setTables); api('/summary').then(setSummary)
-    if (user?.role === 'admin') api('/inventory/low').then(l => setLowStock(l.length)).catch(() => {})
+    if (user?.role === 'admin') api('/inventory/low').then(l => { setLowList(l); setSeen(s => ({ low: s.low.filter(id => l.some(i => i.id === id)) })) }).catch(() => {}) // restocked items drop out of "seen", so they blink again next time they run low
   }
   const reloadAll = () => { api('/settings').then(setSettings); if (user) { api('/menu').then(setMenu); refresh() } }
   useEffect(reloadAll, [user?.id])
+  useEffect(() => { if (view === 'inventory') setSeen(() => ({ low: lowList.map(i => i.id) })) }, [view, lowList]) // opened Inventory = seen: stop blinking
   const [updateReady, setUpdateReady] = useState('') // version of a downloaded app update (owner banner)
   const [tour, setTour] = useState(false) // first-run guided tour (Tour.jsx); Help plays it again
   useEffect(() => { if (user && settings.demo !== undefined && !tourDone(user.role)) setTour(true) }, [user?.role, settings.demo])
@@ -116,6 +122,9 @@ export default function App() {
   }
   const goHome = () => { setOrder(null); refresh(); setView('home') }
   const go = v => { setNavOpen(false); v === 'home' ? goHome() : (setOrder(null), refresh(), setView(v)) }
+  const lowNew = lowList.some(i => !seen.low.includes(i.id))
+  const updateNew = !!updateReady && seen.update !== updateReady
+  const attention = v => (v === 'inventory' && lowNew) || (v === 'admin' && updateNew)
   const isActive = v => v === view || (v === 'home' && ['tables', 'register'].includes(view))
   const solo = nav.length === 1 // kitchen: one screen, no sidebar
   const brand = <div className="brand" onClick={() => go(nav[0][0])}><span className={"brand-mark" + (settings.logo_image ? " has-img" : "")} aria-hidden="true"><Logo s={settings} /></span><span>{settings.name}</span></div>
@@ -136,7 +145,7 @@ export default function App() {
     <Ctx.Provider value={{ settings }}>
     <div className={'app' + (solo ? ' solo' : '') + (navOpen ? ' nav-open' : '')}>
       <header className="topbar no-print">
-        {!solo && <button className="icon-btn" aria-label="Open menu" onClick={() => setNavOpen(true)}><Icon name="menu" size={22} /></button>}
+        {!solo && <button className={"icon-btn" + (nav.some(([v]) => attention(v)) ? " attention" : "")} aria-label="Open menu" onClick={() => setNavOpen(true)}><Icon name="menu" size={22} /></button>}
         {brand}
         <button className="icon-btn" aria-label="Change theme" title={`Theme: ${theme}`}
           onClick={() => setTheme(THEMES[(THEMES.findIndex(t => t[0] === theme) + 1) % THEMES.length][0])}><Icon name={THEMES.find(t => t[0] === theme)?.[2] || 'moon'} size={20} /></button>
@@ -146,7 +155,7 @@ export default function App() {
       {!solo && <aside className="sidebar no-print" aria-label="Main menu">
         {brand}
         <nav className="side-nav">
-          {nav.map(([v, l, ic]) => <button key={v} id={'nav-' + v} className={isActive(v) ? 'active' : ''} aria-current={isActive(v) ? 'page' : undefined} onClick={() => go(v)}>
+          {nav.map(([v, l, ic]) => <button key={v} id={'nav-' + v} className={(isActive(v) ? 'active' : '') + (attention(v) ? ' attention' : '')} aria-current={isActive(v) ? 'page' : undefined} onClick={() => go(v)}>
             <Icon name={ic} size={20} />{l}{badge(v)}</button>)}
         </nav>
         <div className="side-foot">
@@ -183,7 +192,7 @@ export default function App() {
         {view === 'whatsapp' && user.role !== 'kitchen' && <WhatsApp notify={notify} />}
         {view === 'menu' && user.role === 'admin' && <MenuSection onChanged={reloadAll} notify={notify} />}
         {view === 'places' && user.role === 'admin' && <PlacesSection onChanged={reloadAll} notify={notify} />}
-        {view === 'admin' && user.role === 'admin' && <Admin onChanged={reloadAll} notify={notify} />}
+        {view === 'admin' && user.role === 'admin' && <Admin onChanged={reloadAll} notify={notify} updateNew={updateNew} onUpdateSeen={() => setSeen(() => ({ update: updateReady }))} />}
       </main>
       {tour && <Tour role={user.role} onClose={() => setTour(false)} />}
       {user.role === 'cashier' && <QrOrderAlerts user={user} notify={notify} onAccepted={refresh} />}

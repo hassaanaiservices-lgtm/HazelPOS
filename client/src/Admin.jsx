@@ -7,12 +7,13 @@ import { toastError, confirmBox, promptBox } from './notify'
 
 const TABS = ['Restaurant', 'Staff & PINs', 'Alerts', 'Updates', 'WhatsApp bot', 'Integrations', 'Cloud', 'Activity Log']
 
-export default function Admin({ onChanged, notify }) {
+export default function Admin({ onChanged, notify, updateNew, onUpdateSeen }) {
   const [tab, setTab] = useState('Restaurant')
+  useEffect(() => { if (tab === 'Updates' && updateNew) onUpdateSeen() }, [tab, updateNew]) // opened = seen: stop blinking
   return (
     <section className="admin">
       <div className="row-head"><h2>Settings</h2>
-        <div className="tabs">{TABS.map(t => <button key={t} id={'tab-' + t} className={tab === t ? 'active' : ''} onClick={() => setTab(t)}>{t}</button>)}</div>
+        <div className="tabs">{TABS.map(t => <button key={t} id={'tab-' + t} className={(tab === t ? 'active' : '') + (t === 'Updates' && updateNew ? ' attention' : '')} onClick={() => setTab(t)}>{t}</button>)}</div>
       </div>
       {tab === 'Restaurant' && <RestaurantSettings onChanged={onChanged} notify={notify} />}
       {tab === 'Staff & PINs' && <LoginPins notify={notify} />}
