@@ -365,6 +365,9 @@ main > section { flex: 1; min-height: 0; }
 /* ---------- Register (new order) ---------- */
 .register { display: grid; grid-template-columns: minmax(0, 1fr) 380px; height: 100%; min-height: 0; }
 .menu-side { display: flex; flex-direction: column; gap: 12px; padding: 16px 20px 0; min-height: 0; overflow: hidden; }
+.menu-head { display: flex; gap: 8px; align-items: center; }
+.menu-head input { flex: 1; min-width: 0; }
+.menu-head .back-btn { min-height: 44px; flex: none; }
 .cats { display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none; flex: none; padding-bottom: 4px; }
 .cats::-webkit-scrollbar { display: none; }
 .cat { --c: var(--text-2); flex: none; min-height: 36px; padding: 0 16px; border-radius: var(--r-sm); background: var(--surface); border: var(--bw) solid var(--outline); font-weight: 600; font-size: var(--fs-sm); color: var(--text-2); }

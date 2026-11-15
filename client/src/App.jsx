@@ -158,7 +158,8 @@ export default function App() {
         {view === 'home' && <Home onPick={t => t === 'dine-in' ? (refresh(), setView('tables')) : newOrder(t)} />}
         {view === 'tables' && <TablesFloor tables={tables} onBack={goHome} onRefresh={refresh} canEditFloors={user.role === 'admin'}
           onPick={t => t.order_id ? openExisting(t.order_id) : newOrder('dine-in', t)} />}
-        {view === 'register' && order && <Register menu={menu} order={order} setOrder={setOrder} notify={notify} onDone={goHome} />}
+        {view === 'register' && order && <Register menu={menu} order={order} setOrder={setOrder} notify={notify} onDone={goHome}
+          onBack={() => order.type === 'dine-in' ? (setOrder(null), refresh(), setView('tables')) : goHome()} />}
         {view === 'orders' && <Orders onOpen={user.role === 'admin' ? null : openExisting} notify={notify} />}
         {view === 'kitchen' && <Kitchen readOnly={user.role === 'admin'} />}
         {view === 'register_session' && <RegisterSession user={user} notify={notify} />}
@@ -371,7 +372,7 @@ function ItemDetailModal({ product, category, onAdd, onClose }) {
   );
 }
 
-function Register({ menu, order, setOrder, notify, onDone }) {
+function Register({ menu, order, setOrder, notify, onDone, onBack }) {
   const { settings } = useContext(Ctx)
   const [cat, setCat] = useState(0)
   const [q, setQ] = useState('')
@@ -478,11 +479,17 @@ function Register({ menu, order, setOrder, notify, onDone }) {
   const cancel = async () => { if (order.id && await confirmBox('Cancel this order?')) await api(`/orders/${order.id}/cancel`, {}); onDone() }
 
   const typeInfo = TYPES.find(t => t.id === order.type)
+  // Back: leaves the order as it is (a saved order stays open). Items not sent to the kitchen yet would be lost, so ask.
+  const back = async () => {
+    if (order.items.some(i => !i.sent) && !await confirmBox('The items you added are not saved yet. Go back and leave them?', { title: 'Leave this order?', confirmLabel: 'Go back', cancelLabel: 'Stay' })) return
+    onBack()
+  }
 
   return (
     <section className={'register' + (cartOpen ? ' cart-open' : '')}>
       <div className="menu-side">
         <div className="menu-head">
+          <button className="ghost back-btn" onClick={back}><Icon name="back" size={16} />{order.type === 'dine-in' ? 'Tables' : 'Back'}</button>
           <input id="search" type="search" placeholder="Search menu" value={q} onChange={e => setQ(e.target.value)} />
         </div>
         <div className="cats">
