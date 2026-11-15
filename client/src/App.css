@@ -594,11 +594,12 @@ main > section { flex: 1; min-height: 0; }
 .ticket .food-ready { color: var(--ok); font-weight: 600; }
 section.delivery { display: flex; flex-direction: column; padding: 0; } /* the page; .type-card.delivery is the order-type card */
 section.delivery > .row-head { padding: 20px 24px 0; margin-bottom: 0; }
-section.delivery .kitchen { flex: 1; }
+section.delivery .kitchen { flex: 1; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.k-col.tosend h2::before { background: var(--accent); }
 .riders { display: flex; gap: 8px; flex-wrap: wrap; }
 .rider-chip { display: flex; align-items: center; gap: 8px; background: var(--surface); border: var(--bw) solid var(--outline); border-radius: var(--r-sm); padding: 8px 12px; }
 @media (max-width: 959px) {
-  .kitchen { grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); height: auto; overflow-y: auto; align-items: start; }
+  .kitchen, section.delivery .kitchen { grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); height: auto; overflow-y: auto; align-items: start; }
   section.kitchen { overflow-y: auto; }
   .k-col, .k-list { min-height: auto; }
   section.delivery { overflow-y: auto; }
@@ -780,6 +781,7 @@ h1, h2 { font-weight: 800; letter-spacing: -0.02em; }
 .ticket { border: var(--bw) solid var(--outline); box-shadow: var(--pop); background: color-mix(in srgb, var(--info) var(--tint), var(--surface)); }
 .k-col.preparing .ticket { background: color-mix(in srgb, var(--warn) var(--tint), var(--surface)); }
 .k-col.ready .ticket { background: color-mix(in srgb, var(--ok) var(--tint), var(--surface)); }
+.k-col.tosend .ticket { background: color-mix(in srgb, var(--accent) var(--tint), var(--surface)); }
 .ticket.late { background: color-mix(in srgb, var(--danger) var(--tint), var(--surface)); border-color: var(--outline); }
 .ticket.warn { border-color: var(--outline); }
 

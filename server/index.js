@@ -1078,7 +1078,9 @@ app.post('/api/orders/:id/dispatch', userErrors((req, res) => {
   if (!o) throw new UserError('Delivery order not found');
   const r = db.prepare("SELECT id FROM employees WHERE id=? AND active=1 AND lower(job) LIKE '%rider%'").get(req.body.rider_id);
   if (!r) throw new UserError('Choose a rider');
-  db.prepare("UPDATE orders SET rider_id=?, delivery_status='out', dispatched_at=? WHERE id=?").run(r.id, now(), o.id);
+  // Food was ready: the ticket leaves the kitchen board. Sent early (still cooking): it stays, so the kitchen still makes it.
+  db.prepare(`UPDATE orders SET rider_id=?, delivery_status='out', dispatched_at=?,
+    kitchen_status = CASE WHEN kitchen_status='ready' THEN 'done' ELSE kitchen_status END WHERE id=?`).run(r.id, now(), o.id);
   res.json(getOrder(o.id));
 }));
 app.post('/api/orders/:id/delivered', userErrors((req, res) => {

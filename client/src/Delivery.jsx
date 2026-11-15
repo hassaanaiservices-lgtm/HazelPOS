@@ -6,7 +6,8 @@ import { toastError, confirmBox } from './notify'
 const mins = iso => iso ? Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 60000)) : 0
 const mapUrl = address => `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address || '')}`
 
-// Dispatch board: send riders, track who is on the way, and take the cash for each delivered COD order
+// Dispatch board: In the kitchen → Ready to send (kitchen pressed "Mark ready") → On the way → Delivered.
+// Send riders, track who is on the way, and take the cash for each delivered COD order.
 export default function Delivery({ notify }) {
   const [orders, setOrders] = useState([])
   const [riders, setRiders] = useState([])
@@ -33,9 +34,15 @@ export default function Delivery({ notify }) {
     const s = await api(`/riders/${r.id}/settle`, {}); notify(`Collected ${rs(s.total)} from ${r.name}`); load()
   })
 
-  const waiting = orders.filter(o => !o.delivery_status)
+  const cooking = orders.filter(o => !o.delivery_status && !['ready', 'done'].includes(o.kitchen_status))
+  const waiting = orders.filter(o => !o.delivery_status && ['ready', 'done'].includes(o.kitchen_status))
   const out = orders.filter(o => o.delivery_status === 'out')
   const done = orders.filter(o => o.delivery_status === 'delivered')
+  const riderSelect = o => (
+    <select aria-label="Rider" value={pick[o.id] || riders[0]?.id || ''} onChange={e => setPick({ ...pick, [o.id]: e.target.value })}>
+      {riders.map(r => <option key={r.id} value={r.id}>{r.name}{r.on_road ? ` (${r.on_road} out)` : ''}</option>)}
+    </select>
+  )
   const card = (o, actions) => (
     <div key={o.id} className={'ticket' + (o.delivery_status === 'out' && mins(o.dispatched_at) > 45 ? ' late' : '')}>
       <div className="t-head"><b>#{o.id}</b><span className="pill">{o.zone || 'Delivery'}</span>
@@ -44,7 +51,9 @@ export default function Delivery({ notify }) {
       {o.address && <a className="muted addr" href={mapUrl(o.address)} target="_blank" rel="noreferrer"><Icon name="pin" size={14} />{o.address}</a>}
       <ul>{o.items.map(i => <li key={i.id}>{i.qty}× {i.name}</li>)}</ul>
       {o.rider && <div className="muted">Rider: {o.rider.name}{o.delivery_status === 'out' && `, out ${mins(o.dispatched_at)} min`}</div>}
-      {!o.delivery_status && ['new', 'preparing'].includes(o.kitchen_status) && <div className="muted">Kitchen: cooking</div>}
+      {!o.delivery_status && !o.kitchen_status && <div className="muted">Not sent to the kitchen yet</div>}
+      {!o.delivery_status && o.kitchen_status === 'new' && <div className="muted">Kitchen: waiting to start</div>}
+      {!o.delivery_status && o.kitchen_status === 'preparing' && <div className="muted">Kitchen: cooking</div>}
       {!o.delivery_status && ['ready', 'done'].includes(o.kitchen_status) && <div className="food-ready">Food ready</div>}
       <div className="t-actions">{actions}</div>
     </div>
@@ -63,12 +72,17 @@ export default function Delivery({ notify }) {
         </div>
       </div>
       <div className="kitchen">
-        <div className="k-col new"><h2>Ready to send <span className="count">{waiting.length}</span></h2><div className="k-list">
-          {!waiting.length && <div className="empty">Nothing waiting to be sent</div>}
+        <div className="k-col new"><h2>In the kitchen <span className="count">{cooking.length}</span></h2><div className="k-list">
+          {!cooking.length && <div className="empty">No delivery order cooking</div>}
+          {cooking.map(o => card(o, <>
+            <button className="ghost sm" aria-label="Print bill" title="Print bill" onClick={() => printBill(o)}><Icon name="print" size={16} /></button>
+            <button className="ghost" onClick={() => dispatch(o)}>Send rider now</button>
+          </>))}
+        </div></div>
+        <div className="k-col tosend"><h2>Ready to send <span className="count">{waiting.length}</span></h2><div className="k-list">
+          {!waiting.length && <div className="empty">Nothing ready yet. Orders move here when the kitchen presses "Mark ready"</div>}
           {waiting.map(o => card(o, <>
-            <select value={pick[o.id] || riders[0]?.id || ''} onChange={e => setPick({ ...pick, [o.id]: e.target.value })}>
-              {riders.map(r => <option key={r.id} value={r.id}>{r.name}{r.on_road ? ` (${r.on_road} out)` : ''}</option>)}
-            </select>
+            {riderSelect(o)}
             <button className="ghost sm" aria-label="Print bill" title="Print bill" onClick={() => printBill(o)}><Icon name="print" size={16} /></button>
             <button className="primary" onClick={() => dispatch(o)}>Dispatch</button>
           </>))}
