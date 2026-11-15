@@ -3,10 +3,11 @@ import { daysTo, ago } from './lib'
 // Shared labels so every screen says the same thing about a client or a branch
 
 export function Membership({ o }) {
-  if (o.suspended) return <span className="pill bad">Suspended</span>
+  if (o.cancelled) return <span className="pill bad">Cancelled</span>
+  if (o.suspended) return <span className="pill bad">Stopped</span>
   if (!o.paid_until) return <span className="pill bad">Not paid</span>
   const d = daysTo(o.paid_until)
-  if (d < 0) return <span className="pill bad">Ended {-d} day{-d === 1 ? '' : 's'} ago</span>
+  if (d < 0) return <span className={'pill ' + (o.pos_active ? 'warn' : 'bad')}>Unpaid {-d} day{-d === 1 ? '' : 's'}{!o.pos_active ? ' · POS off' : !o.ai_active ? ' · bot off' : ''}</span>
   if (d < 5) return <span className="pill warn">Due in {d} day{d === 1 ? '' : 's'}</span>
   return <span className="pill ok">Paid</span>
 }
@@ -32,9 +33,19 @@ export const LastSeen = ({ b }) => <span title={b.health_at || b.last_sync || ''
 
 // A client needs attention when: membership ends within 5 days or ended, a branch is offline/failed, or errors today
 export function needsAttention(o) {
-  const money = o.suspended || !o.paid_until || daysTo(o.paid_until) < 5
+  const money = o.suspended || o.cancelled || !o.paid_until || daysTo(o.paid_until) < 5
   const branches = o.branches.some(b => ['Offline', 'Setup failed'].includes(stageOf(b)[1]) || b.errors_24h > 0)
   return money || branches
+}
+
+// Bot / POS status for an unpaid client: "On", "Stops after 18 Nov", "Off since 18 Nov"
+export function Service({ on, until, stopped }) {
+  if (stopped) return <span className="pill bad">Off</span>
+  if (!until) return <span className="pill">—</span>
+  const left = daysTo(until)
+  if (!on) return <span className="pill bad">Off since {until}</span>
+  if (left < 7) return <span className="pill warn">Stops after {until}</span>
+  return <span className="pill ok">On</span>
 }
 
 export const Check = ({ ok, children }) => <span className={'pill ' + (ok ? 'ok' : '')}>{ok ? '✓' : '○'} {children}</span>

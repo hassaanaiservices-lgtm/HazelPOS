@@ -5,6 +5,7 @@ import Clients from './Clients'
 import Client from './Client'
 import Branch from './Branch'
 import Usage from './Usage'
+import Unpaid from './Unpaid'
 
 // Pages live in the address (#/clients, #/client/3, #/branch/5, #/usage), so Back and refresh work.
 const parse = () => {
@@ -27,8 +28,8 @@ export default function App() {
   if (auth === null) return <Notifier />
   if (!auth) return <><Login onIn={() => api('/me').then(setAuth)} /><Notifier /></>
 
-  const nav = [['clients', 'Clients', '🏪'], ['usage', 'AI usage', '📊']]
-  const section = route.page === 'usage' ? 'usage' : 'clients'
+  const nav = [['clients', 'Clients', '🏪'], ['unpaid', 'Unpaid', '⏰'], ['usage', 'AI usage', '📊']]
+  const section = ['usage', 'unpaid'].includes(route.page) ? route.page : 'clients'
   return (
     <div className="shell">
       <aside className="side">
@@ -43,6 +44,7 @@ export default function App() {
         {route.page === 'client' && route.id ? <Client id={route.id} />
           : route.page === 'branch' && route.id ? <Branch id={route.id} />
           : route.page === 'usage' ? <Usage />
+          : route.page === 'unpaid' ? <Unpaid />
           : <Clients />}
       </main>
       <Notifier />

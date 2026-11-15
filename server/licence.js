@@ -4,13 +4,14 @@
 // The install is activated with an activation code (HZ-XXXX-XXXX, from your admin app) or the long branch key. The
 // cloud's address comes with the installer (HAZEL_CLOUD_URL). Right after activation the POS downloads the restaurant's
 // setup (server/setup.js), if you prepared one. Every few
-// hours it asks the cloud "is this restaurant's membership paid?" and remembers the last answer, so billing never stops
-// because the internet dropped. Rules (see RISKS.md, L1-L3: not final):
-//   - no answer from the cloud for OFFLINE_WARN_DAYS: banner; for OFFLINE_LOCK_DAYS: new orders locked
-//   - membership ended: banner for GRACE_DAYS, then new orders locked
-//   - suspended by you: new orders locked straight away
+// hours it asks the cloud "is this restaurant's membership paid?" and remembers the last answer.
+// Rules (set per client in the admin app; defaults on the cloud: WA_GRACE_DAYS 3, POS_GRACE_DAYS 7):
+//   - paid up: everything works. Due within DUE_SOON_DAYS: a reminder banner.
+//   - unpaid: a banner; after ai_until the WhatsApp bot stops; after pos_until new orders stop
+//   - stopped now (suspended) or cancelled by you: new orders and the bot stop straight away
+// Internet doesn't matter: no answer from the cloud never locks anything; the last answer keeps applying.
 // "Locked" only stops NEW orders. Open bills can still be paid, and reports and data stay readable.
-const OFFLINE_WARN_DAYS = 3, OFFLINE_LOCK_DAYS = 7, GRACE_DAYS = 3, DUE_SOON_DAYS = 5;
+const DUE_SOON_DAYS = 5;
 const CHECK_EVERY_MS = 3 * 60 * 60 * 1000;
 const DAY = 864e5;
 
@@ -68,27 +69,39 @@ module.exports = function licence(db, cloud, { setup = null, health = () => ({})
   }
 
   // What the screens show. state: off | activate | ok | due_soon | warning | locked
+  const day = t => { const d = new Date(t); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+  const plus = (d, n) => new Date(Date.parse(d + 'T00:00:00Z') + n * DAY).toISOString().slice(0, 10);
+  const answer = () => {
+    const a = JSON.parse(get('lic_answer') || '{}');
+    if (a.paid_until && !a.pos_until) Object.assign(a, { ai_until: plus(a.paid_until, 3), pos_until: plus(a.paid_until, 7) }); // older cloud
+    return a;
+  };
+
+  // What the screens show. state: off | activate | ok | due_soon | warning | locked
   function state() {
     if (!required) return { state: 'off' };
     if (!get('url') || !get('key') || !get('lic_checked_at')) return { state: 'activate', default_url: process.env.HAZEL_CLOUD_URL || '' };
-    const t = clock();
-    const a = JSON.parse(get('lic_answer') || '{}');
-    const offlineDays = (t - +get('lic_checked_at')) / DAY;
-    const base = { paid_until: a.paid_until || null, last_check: new Date(+get('lic_checked_at')).toISOString(), error: get('lic_error') };
+    const today = day(clock()), a = answer();
+    const base = { paid_until: a.paid_until || null, ai_until: a.ai_until || null, pos_until: a.pos_until || null, last_check: new Date(+get('lic_checked_at')).toISOString(), error: get('lic_error') };
     if (a.revoked) return { ...base, state: 'locked', message: 'This branch key was removed from HazelPOS Cloud. Contact HazelPOS to reconnect.' };
-    if (a.suspended) return { ...base, state: 'locked', message: 'Your HazelPOS membership is paused. New orders are off until it is renewed. Contact HazelPOS.' };
-    if (a.active === false && !a.paid_until) return { ...base, state: 'locked', message: 'Your HazelPOS membership has not started yet. Contact HazelPOS.' };
-    if (offlineDays > OFFLINE_LOCK_DAYS) return { ...base, state: 'locked', message: `The POS hasn't reached HazelPOS Cloud for ${Math.floor(offlineDays)} days. Connect this PC to the internet to unlock new orders.` };
-    let lic = { ...base, state: 'ok' };
-    if (a.paid_until) {
-      const daysLeft = Math.floor((Date.parse(a.paid_until + 'T23:59:59') - t) / DAY); // paid_until is the last paid day
-      if (daysLeft < -GRACE_DAYS) return { ...base, state: 'locked', message: `Your HazelPOS membership ended on ${a.paid_until}. New orders are off until it is renewed.` };
-      if (daysLeft < 0) lic = { ...base, state: 'warning', message: `Your HazelPOS membership ended on ${a.paid_until}. New orders stop in ${GRACE_DAYS + daysLeft + 1} day(s) unless it is renewed.` };
-      else if (daysLeft < DUE_SOON_DAYS) lic = { ...base, state: 'due_soon', message: `Your HazelPOS membership is due on ${a.paid_until}.` };
-    }
-    if (offlineDays > OFFLINE_WARN_DAYS && lic.state !== 'warning')
-      lic = { ...base, state: 'warning', message: `The POS hasn't reached HazelPOS Cloud for ${Math.floor(offlineDays)} days. Connect to the internet: new orders stop after ${OFFLINE_LOCK_DAYS} days offline.` };
-    return lic;
+    if (a.cancelled) return { ...base, state: 'locked', message: 'Your HazelPOS membership was cancelled. New orders and the WhatsApp assistant are off. Contact HazelPOS.' };
+    if (a.suspended) return { ...base, state: 'locked', message: 'HazelPOS has paused your membership. New orders and the WhatsApp assistant are off until it is renewed. Contact HazelPOS.' };
+    if (!a.paid_until) return a.active === false ? { ...base, state: 'locked', message: 'Your HazelPOS membership has not started yet. Contact HazelPOS.' } : { ...base, state: 'ok' };
+    if (today > a.pos_until) return { ...base, state: 'locked', message: `Your HazelPOS membership ended on ${a.paid_until} and wasn't renewed. New orders and the WhatsApp assistant are off until you pay. Contact HazelPOS.` };
+    if (today > a.paid_until) return { ...base, state: 'warning', message: today > a.ai_until
+      ? `Your HazelPOS membership ended on ${a.paid_until}. The WhatsApp assistant is paused, and new orders stop after ${a.pos_until}. Please pay to keep using HazelPOS.`
+      : `Your HazelPOS membership ended on ${a.paid_until}. Please pay: the WhatsApp assistant stops after ${a.ai_until}, and new orders after ${a.pos_until}.` };
+    const daysLeft = Math.round((Date.parse(a.paid_until) - Date.parse(today)) / DAY);
+    if (daysLeft < DUE_SOON_DAYS) return { ...base, state: 'due_soon', message: `Your HazelPOS membership is due on ${a.paid_until}.` };
+    return { ...base, state: 'ok' };
+  }
+
+  // May the WhatsApp assistant reply? (server/whatsapp/assistant.js asks before every reply)
+  function aiAllowed() {
+    if (!required) return true;
+    const s = state();
+    if (['activate', 'locked'].includes(s.state)) return false;
+    return !(s.ai_until && day(clock()) > s.ai_until);
   }
 
   // First run. code: the short activation code (one use; the cloud swaps it for this branch's key) or the long key.
@@ -114,5 +127,5 @@ module.exports = function licence(db, cloud, { setup = null, health = () => ({})
   const locked = () => state().state === 'locked';
 
   if (required) { setTimeout(check, 3000).unref(); setInterval(check, CHECK_EVERY_MS).unref(); }
-  return { required, state, check, activate, locked, pullSetup };
+  return { required, state, check, activate, locked, pullSetup, aiAllowed };
 };

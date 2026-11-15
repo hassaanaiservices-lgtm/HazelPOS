@@ -17,12 +17,12 @@ module.exports = function whatsapp(app, db, pos) {
   const stt = createStt(config.stt);
   const wa = waConnection(store, { onIncoming: row => assistant.onIncoming(row), keepAudioDays: config.stt.keep_audio_days });
   const menuPictures = () => db.prepare('SELECT id, caption, mime, data FROM menu_images ORDER BY sort, id').all(); // table made in server/index.js
-  assistant = createAssistant({ store, wa, ask, cfg: config.assistant, stt, sttCfg: config.stt, menuPictures });
+  assistant = createAssistant({ store, wa, ask, cfg: config.assistant, stt, sttCfg: config.stt, menuPictures, allowed: pos.aiAllowed || (() => true) });
   const fail = (res, e, code = 400) => res.status(code).json({ error: e.message });
   const chatId = req => req.params.id;
 
   // Connection state + counts for badges and banners
-  app.get('/api/whatsapp/status', (req, res) => res.json({ ...wa.status(), ...store.counts(), assistant: assistant.enabled(), business_hours: config.assistant.business_hours, stt: stt.status() }));
+  app.get('/api/whatsapp/status', (req, res) => res.json({ ...wa.status(), ...store.counts(), assistant: assistant.enabled(), assistant_paused_unpaid: !(pos.aiAllowed?.() ?? true), business_hours: config.assistant.business_hours, stt: stt.status() }));
   app.post('/api/whatsapp/connect', async (req, res) => { try { await wa.connect(); res.json(wa.status()); } catch (e) { fail(res, e); } });
   app.post('/api/whatsapp/logout', async (req, res) => { await wa.logout(); res.json(wa.status()); });
   app.post('/api/whatsapp/assistant', (req, res) => { assistant.setEnabled(!!req.body.enabled); res.json({ assistant: assistant.enabled() }); });

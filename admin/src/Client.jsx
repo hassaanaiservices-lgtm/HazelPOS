@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api, num, ago } from './lib'
 import { run, toast, confirmBox, inputBox } from './notify'
-import { Membership, Stage, WhatsApp, LastSeen } from './ui'
+import { Membership, Stage, WhatsApp, LastSeen, Service } from './ui'
 import { go } from './App'
 
 // One client: membership (payments, suspend), their details, and their branches
@@ -10,6 +10,7 @@ export default function Client({ id }) {
   const [missing, setMissing] = useState(false)
   const [code, setCode] = useState(null)
   const [edit, setEdit] = useState(null)
+  const [grace, setGrace] = useState(null) // { wa, pos } while editing the unpaid days
   const load = async () => { const all = await api('/owners'); const x = all.find(c => c.id === id); setO(x || null); setMissing(!x) }
   useEffect(() => { run(load)() }, [id])
   if (missing) return <div className="empty">Client not found. <a href="#/clients">Back to clients</a></div>
@@ -21,8 +22,17 @@ export default function Client({ id }) {
     if (v) { await api(`/owners/${id}`, { paid_until: v }); toast(`Paid until ${v}`); load() }
   })
   const suspend = run(async () => {
-    if (!o.suspended && !await confirmBox(`Suspend ${o.name || o.email}? New orders stop on their POS at its next check (within 3 hours), and their WhatsApp assistant stops right away.`, { confirmLabel: 'Suspend', danger: true })) return
-    await api(`/owners/${id}`, { suspended: !o.suspended }); toast(o.suspended ? 'Resumed' : 'Suspended'); load()
+    if (!o.suspended && !await confirmBox(`Stop ${o.name || o.email} now? Their WhatsApp bot stops right away, and new orders stop on their POS at its next check (within 3 hours). You can resume any time.`, { confirmLabel: 'Stop now', danger: true })) return
+    await api(`/owners/${id}`, { suspended: !o.suspended }); toast(o.suspended ? 'Resumed' : 'Stopped'); load()
+  })
+  const cancel = run(async () => {
+    if (!o.cancelled && !await confirmBox(`Cancel ${o.name || o.email}'s membership? Their bot and POS stop and the client shows as Cancelled. You can reactivate later.`, { confirmLabel: 'Cancel membership', danger: true })) return
+    await api(`/owners/${id}`, { cancelled: !o.cancelled }); toast(o.cancelled ? 'Membership reactivated' : 'Membership cancelled'); load()
+  })
+  const saveGrace = run(async e => {
+    e.preventDefault()
+    await api(`/owners/${id}`, { wa_grace_days: grace.wa === '' ? null : +grace.wa, pos_grace_days: grace.pos === '' ? null : +grace.pos })
+    setGrace(null); toast('Saved'); load()
   })
   const addBranch = run(async () => {
     const name = await inputBox('Branch name', { value: o.branches.length ? '' : 'Main branch', confirmLabel: 'Add branch' })
@@ -46,14 +56,24 @@ export default function Client({ id }) {
 
       <div className="grid2">
         <div className="card"><h3>Membership</h3>
-          <p>Paid until <b>{o.paid_until || '—'}</b>{o.plan ? <span className="muted"> · {o.plan}</span> : null}</p>
+          <p>Paid until <b>{o.paid_until || '—'}</b>{o.days_overdue > 0 && <span className="err"> · {o.days_overdue} day(s) unpaid</span>}{o.plan ? <span className="muted"> · {o.plan}</span> : null}</p>
+          <div className="row" style={{ marginTop: 8 }}>WhatsApp bot <Service on={o.ai_active} until={o.ai_until} stopped={o.suspended || o.cancelled} />
+            · POS <Service on={o.pos_active} until={o.pos_until} stopped={o.suspended || o.cancelled} /></div>
           <div className="row" style={{ marginTop: 12 }}>
             <button className="primary" onClick={extend(1)}>Paid: +1 month</button>
             <button onClick={extend(3)}>+3 months</button>
             <button onClick={setDate}>Set date</button>
-            <button className={o.suspended ? '' : 'danger'} onClick={suspend}>{o.suspended ? 'Resume' : 'Suspend'}</button>
+            <button className={o.suspended ? '' : 'danger'} onClick={suspend}>{o.suspended ? 'Resume' : 'Stop now'}</button>
+            <button className={o.cancelled ? '' : 'danger'} onClick={cancel}>{o.cancelled ? 'Reactivate' : 'Cancel membership'}</button>
           </div>
-          <p className="muted small" style={{ marginTop: 12 }}>"+1 month" counts from the later of today and the current paid-until date. After it ends: 3 days of warnings on their POS, then new orders lock.</p>
+          {grace ? <form className="row" style={{ marginTop: 12, alignItems: 'flex-end' }} onSubmit={saveGrace}>
+            <label style={{ width: 170 }}>Bot stops after (days)<input type="number" min="0" max="365" value={grace.wa} placeholder={String(o.defaults?.wa_grace_days)} onChange={e => setGrace({ ...grace, wa: e.target.value })} /></label>
+            <label style={{ width: 170 }}>POS stops after (days)<input type="number" min="0" max="365" value={grace.pos} placeholder={String(o.defaults?.pos_grace_days)} onChange={e => setGrace({ ...grace, pos: e.target.value })} /></label>
+            <button className="primary">Save</button><button type="button" onClick={() => setGrace(null)}>Cancel</button>
+          </form> : <p className="muted small" style={{ marginTop: 12 }}>
+            If unpaid: the WhatsApp bot stops <b>{o.wa_grace_days}</b> days and the POS <b>{o.pos_grace_days}</b> days after the paid-until date{o.wa_grace_custom == null && o.pos_grace_custom == null ? ' (the default)' : ' (set for this client)'}.{' '}
+            <button className="link" style={{ padding: 0, minHeight: 0 }} onClick={() => setGrace({ wa: o.wa_grace_custom ?? '', pos: o.pos_grace_custom ?? '' })}>Change for this client</button>
+            <br />"+1 month" counts from the later of today and the paid-until date. No internet never stops anything.</p>}
         </div>
         <div className="card"><h3>Details</h3>
           <p>{o.email}</p>

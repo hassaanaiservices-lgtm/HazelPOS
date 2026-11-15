@@ -1574,7 +1574,7 @@ function createOrder({ type, zone_id, customer, phone, address, items, userName,
     return orderId;
   });
 }
-const waModule = require('./whatsapp')(app, db, { createOrder, getOrder, printKitchen, getSettings });
+const waModule = require('./whatsapp')(app, db, { createOrder, getOrder, printKitchen, getSettings, aiAllowed: () => lic.aiAllowed() });
 
 // ---------- Excel / CSV export (rows; the client turns them into a file) ----------
 const exportRange = req => [req.query.from || '0000-01-01', req.query.to || '9999-12-31'];

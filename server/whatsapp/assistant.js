@@ -29,7 +29,8 @@ function withinHours(hours, d = new Date()) {
 }
 
 // stt (optional): speech-to-text for voice notes ({ transcribe(file) }); sttCfg: config.stt
-function createAssistant({ store, wa, ask, cfg, stt = null, sttCfg = {}, log = console, menuPictures = () => [] }) {
+// allowed: the membership allows the bot (server/licence.js aiAllowed); unpaid past the grace days = quiet
+function createAssistant({ store, wa, ask, cfg, stt = null, sttCfg = {}, log = console, menuPictures = () => [], allowed = () => true }) {
   const batches = new Map();   // chatId -> { rows, timer }
   const chains = new Map();    // chatId -> promise (one turn at a time per chat)
   let running = 0;
@@ -45,6 +46,7 @@ function createAssistant({ store, wa, ask, cfg, stt = null, sttCfg = {}, log = c
   // Why the assistant should stay quiet for this chat right now (null = go ahead)
   function quietReason(chatId) {
     if (!enabled()) return 'switched off';
+    if (!allowed()) return 'HazelPOS membership not paid: assistant paused';
     if (!withinHours(cfg.business_hours)) return 'outside business hours';
     const chat = store.chat(chatId);
     if (chat?.bot_paused) return 'paused for this chat';

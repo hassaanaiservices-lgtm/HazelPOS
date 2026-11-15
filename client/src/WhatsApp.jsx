@@ -89,6 +89,7 @@ function Inbox({ st, notify, onStatus }) {
             {menu && <div className="wa-menu" onMouseLeave={() => setMenu(false)}><button id="wa-logout" onClick={logout}>Unlink WhatsApp</button></div>}
           </div>
         </header>
+        {st.assistant_paused_unpaid && <div className="wa-conn">The assistant is paused because the HazelPOS membership isn't paid. Customers' messages still arrive here: reply yourself, or pay to switch it back on.</div>}
         {st.stt?.state === 'failed' && <div className="wa-conn">Voice notes can't be transcribed: {st.stt.error}</div>}
         {st.status === 'reconnecting' && <div className="wa-conn">No internet, reconnecting. The POS keeps working; new messages will arrive when it's back.</div>}
         {orderChats > 0 && <button className="wa-order-alert" onClick={() => setFilter('orders')}>

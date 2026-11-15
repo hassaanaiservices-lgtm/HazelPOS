@@ -35,6 +35,10 @@ for (const sql of [
   'ALTER TABLE owners ADD COLUMN plan TEXT',
   'ALTER TABLE owners ADD COLUMN phone TEXT',
   'ALTER TABLE owners ADD COLUMN notes TEXT',
+  // Unpaid rules per client (empty = the defaults): days after paid_until before the WhatsApp bot stops / the POS stops
+  'ALTER TABLE owners ADD COLUMN wa_grace_days INTEGER',
+  'ALTER TABLE owners ADD COLUMN pos_grace_days INTEGER',
+  'ALTER TABLE owners ADD COLUMN cancelled_at TEXT',
   // Activation code (HZ-XXXX-XXXX): one use, swapped for the branch key by the installed app
   'ALTER TABLE branches ADD COLUMN code_hash TEXT',
   'ALTER TABLE branches ADD COLUMN code_created_at TEXT',
@@ -213,7 +217,7 @@ app.post('/api/activate', (req, res) => {
   const b = code && db.prepare('SELECT * FROM branches WHERE code_hash=? AND code_used_at IS NULL').get(sha(code));
   if (!b) { f.n++; if (f.n >= 10) { f.n = 0; f.until = Date.now() + 15 * 60 * 1000; } fails.set('a:' + req.ip, f); return res.status(400).json({ error: 'That activation code is wrong or was already used. Ask HazelPOS for a new one' }); }
   fails.delete('a:' + req.ip);
-  if (!membership(b.owner_id).active) return res.status(402).json({ error: 'The HazelPOS membership for this restaurant is not active yet. Contact HazelPOS' });
+  if (!membership(b.owner_id).pos_active) return res.status(402).json({ error: 'The HazelPOS membership for this restaurant is not active. Contact HazelPOS' });
   const key = 'hz_' + crypto.randomBytes(24).toString('hex');
   db.prepare('UPDATE branches SET key_hash=?, code_used_at=?, last_ip=? WHERE id=?').run(sha(key), now(), req.ip, b.id);
   res.json({ key, branch: b.name });
@@ -290,11 +294,26 @@ const VENDOR_KEY = process.env.VENDOR_API_KEY || '';
 const VENDOR = VENDOR_KEY.length >= 32;
 if (VENDOR_KEY && !VENDOR) console.error('VENDOR_API_KEY is too short (32+ characters): vendor mode is OFF');
 const today = () => new Date().toISOString().slice(0, 10);
+// Unpaid: the WhatsApp bot stops WA_GRACE days after paid_until, the POS (new orders) POS_GRACE days after.
+// Per client you can change both (owners.wa_grace_days / pos_grace_days), stop them now (suspended) or cancel.
+// Internet doesn't matter: a POS that can't reach the cloud keeps working on its last answer.
+const WA_GRACE = +process.env.WA_GRACE_DAYS || 3, POS_GRACE = +process.env.POS_GRACE_DAYS || 7;
+const addDays = (d, n) => new Date(Date.parse(d + 'T00:00:00Z') + n * 864e5).toISOString().slice(0, 10);
 function membership(ownerId) {
-  if (!VENDOR) return { active: true, paid_until: null, suspended: false };
-  const o = db.prepare('SELECT paid_until, suspended, plan FROM owners WHERE id=?').get(ownerId) || {};
-  const active = !o.suspended && !!o.paid_until && o.paid_until >= today();
-  return { active, paid_until: o.paid_until || null, suspended: !!o.suspended, plan: o.plan || null };
+  if (!VENDOR) return { active: true, ai_active: true, pos_active: true, paid_until: null, suspended: false, cancelled: false };
+  const o = db.prepare('SELECT paid_until, suspended, plan, wa_grace_days, pos_grace_days, cancelled_at FROM owners WHERE id=?').get(ownerId) || {};
+  const wa = o.wa_grace_days ?? WA_GRACE, pos = o.pos_grace_days ?? POS_GRACE;
+  const off = !!o.suspended || !!o.cancelled_at || !o.paid_until;
+  const t = today();
+  const ai_until = o.paid_until ? addDays(o.paid_until, wa) : null, pos_until = o.paid_until ? addDays(o.paid_until, pos) : null; // last working day
+  return {
+    active: !off && o.paid_until >= t, // paid up
+    ai_active: !off && ai_until >= t, pos_active: !off && pos_until >= t,
+    paid_until: o.paid_until || null, ai_until, pos_until, wa_grace_days: wa, pos_grace_days: pos,
+    days_overdue: o.paid_until && o.paid_until < t ? Math.round((Date.parse(t) - Date.parse(o.paid_until)) / 864e5) : 0,
+    suspended: !!o.suspended, cancelled: !!o.cancelled_at, cancelled_at: o.cancelled_at || null, plan: o.plan || null,
+    defaults: { wa_grace_days: WA_GRACE, pos_grace_days: POS_GRACE },
+  };
 }
 
 // ---------- Vendor API (you): used only by the admin app's server (admin/server.js), never by a browser ----------
@@ -308,7 +327,7 @@ const vendorAuth = (req, res, next) => {
 const addMonths = (from, n) => { const d = new Date(from + 'T00:00:00Z'); d.setUTCMonth(d.getUTCMonth() + n); return d.toISOString().slice(0, 10); };
 app.get('/api/vendor/owners', vendorAuth, (req, res) => {
   const month = today().slice(0, 7);
-  res.json(db.prepare('SELECT id, email, name, phone, plan, notes, paid_until, suspended, created_at FROM owners ORDER BY id DESC').all().map(o => ({
+  res.json(db.prepare('SELECT id, email, name, phone, plan, notes, paid_until, suspended, created_at, wa_grace_days AS wa_grace_custom, pos_grace_days AS pos_grace_custom FROM owners ORDER BY id DESC').all().map(o => ({
     ...o, ...membership(o.id),
     branches: db.prepare('SELECT id, name, created_at, last_sync, last_ip, code_created_at, code_used_at, health, health_at FROM branches WHERE owner_id=? ORDER BY id').all(o.id).map(b => ({
       ...b, health: JSON.parse(b.health || 'null'),
@@ -339,9 +358,14 @@ app.post('/api/vendor/owners/:id', vendorAuth, (req, res) => {
   const o = vendorOwner(req, res); if (!o) return;
   const b = req.body || {};
   if (b.paid_until !== undefined && b.paid_until !== null && !/^\d{4}-\d{2}-\d{2}$/.test(b.paid_until)) return res.status(400).json({ error: 'Date must be YYYY-MM-DD' });
-  db.prepare('UPDATE owners SET name=?, phone=?, plan=?, notes=?, paid_until=?, suspended=? WHERE id=?').run(
+  // Grace days: a number 0–365, or null = back to the default
+  const grace = (v, cur) => v === undefined ? cur : v === null || v === '' ? null : Math.max(0, Math.min(365, Math.round(+v)));
+  if ([b.wa_grace_days, b.pos_grace_days].some(v => v != null && v !== '' && !Number.isFinite(+v))) return res.status(400).json({ error: 'Days must be a number' });
+  db.prepare('UPDATE owners SET name=?, phone=?, plan=?, notes=?, paid_until=?, suspended=?, wa_grace_days=?, pos_grace_days=?, cancelled_at=? WHERE id=?').run(
     b.name ?? o.name, b.phone ?? o.phone, b.plan ?? o.plan, b.notes ?? o.notes,
-    b.paid_until === undefined ? o.paid_until : b.paid_until, b.suspended === undefined ? o.suspended : (b.suspended ? 1 : 0), o.id);
+    b.paid_until === undefined ? o.paid_until : b.paid_until, b.suspended === undefined ? o.suspended : (b.suspended ? 1 : 0),
+    grace(b.wa_grace_days, o.wa_grace_days), grace(b.pos_grace_days, o.pos_grace_days),
+    b.cancelled === undefined ? o.cancelled_at : b.cancelled ? (o.cancelled_at || now()) : null, o.id);
   res.json({ ok: true, ...membership(o.id) });
 });
 // Payment received: add months from the later of today and the current paid-until date
@@ -512,7 +536,7 @@ const aiAuth = (req, res, next) => {
   const key = (req.get('authorization') || '').replace(/^Bearer /, '');
   const b = key && db.prepare('SELECT * FROM branches WHERE key_hash=?').get(sha(key));
   if (!b) return res.status(401).json({ error: 'Unknown branch key' });
-  if (!membership(b.owner_id).active) return res.status(402).json({ error: 'HazelPOS membership is not active: the WhatsApp assistant is paused until it is renewed' });
+  if (!membership(b.owner_id).ai_active) return res.status(402).json({ error: 'HazelPOS membership is not paid: the WhatsApp assistant is paused until it is renewed' });
   const used = db.prepare('SELECT COUNT(*) c FROM ai_usage WHERE branch_id=? AND day=?').get(b.id, today()).c;
   if (used >= AI_DAILY_LIMIT) return res.status(403).json({ error: `Daily AI limit reached (${AI_DAILY_LIMIT} calls). It resets tomorrow` });
   req.branch = b;
