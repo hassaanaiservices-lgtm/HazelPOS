@@ -41,6 +41,10 @@ for (const sql of [
   'ALTER TABLE owners ADD COLUMN cancelled_at TEXT',
   // Updates to a few clients first: test clients install every new version; everyone else up to release_version
   'ALTER TABLE owners ADD COLUMN early_updates INTEGER DEFAULT 0',
+  // P1: what the client pays you: a monthly fee and a one-time installation fee
+  'ALTER TABLE owners ADD COLUMN monthly_fee REAL',
+  'ALTER TABLE owners ADD COLUMN install_fee REAL',
+  'ALTER TABLE owners ADD COLUMN install_paid INTEGER DEFAULT 0',
   // S10 phase 4: orders that arrived from a POS which should have been locked (unpaid past its days, or cancelled)
   'ALTER TABLE branches ADD COLUMN locked_orders INTEGER DEFAULT 0',
   'ALTER TABLE branches ADD COLUMN locked_orders_last TEXT',
@@ -411,7 +415,7 @@ app.get('/api/vendor/audit', vendorAuth, (req, res) => res.json(db.prepare('SELE
 const addMonths = (from, n) => { const d = new Date(from + 'T00:00:00Z'); d.setUTCMonth(d.getUTCMonth() + n); return d.toISOString().slice(0, 10); };
 app.get('/api/vendor/owners', vendorAuth, (req, res) => {
   const month = today().slice(0, 7);
-  res.json(db.prepare('SELECT id, email, name, phone, plan, notes, paid_until, suspended, created_at, wa_grace_days AS wa_grace_custom, pos_grace_days AS pos_grace_custom FROM owners ORDER BY id DESC').all().map(o => ({
+  res.json(db.prepare('SELECT id, email, name, phone, plan, notes, paid_until, suspended, created_at, wa_grace_days AS wa_grace_custom, pos_grace_days AS pos_grace_custom, monthly_fee, install_fee, install_paid FROM owners ORDER BY id DESC').all().map(o => ({
     ...o, ...membership(o.id),
     branches: db.prepare('SELECT id, name, created_at, last_sync, last_ip, code_created_at, code_used_at, health, health_at, locked_orders, locked_orders_last FROM branches WHERE owner_id=? ORDER BY id').all(o.id).map(b => ({
       ...b, health: JSON.parse(b.health || 'null'),
@@ -429,8 +433,10 @@ app.post('/api/vendor/owners', vendorAuth, (req, res) => {
   if (pass.length < 8) return res.status(400).json({ error: 'Password must be at least 8 characters' });
   if (db.prepare('SELECT 1 FROM owners WHERE email=?').get(email)) return res.status(400).json({ error: 'An account with this email already exists' });
   const paid = /^\d{4}-\d{2}-\d{2}$/.test(req.body.paid_until || '') ? req.body.paid_until : addMonths(today(), 1);
-  const id = db.prepare('INSERT INTO owners (email,name,pass,created_at,phone,plan,notes,paid_until) VALUES (?,?,?,?,?,?,?,?)')
-    .run(email, String(req.body.name || ''), hashPass(pass), now(), String(req.body.phone || ''), String(req.body.plan || ''), String(req.body.notes || ''), paid).lastInsertRowid;
+  const fee = v => v === '' || v == null ? null : Math.max(0, +v || 0);
+  const id = db.prepare('INSERT INTO owners (email,name,pass,created_at,phone,plan,notes,paid_until,monthly_fee,install_fee,install_paid) VALUES (?,?,?,?,?,?,?,?,?,?,?)')
+    .run(email, String(req.body.name || ''), hashPass(pass), now(), String(req.body.phone || ''), String(req.body.plan || ''), String(req.body.notes || ''), paid,
+      fee(req.body.monthly_fee), fee(req.body.install_fee), req.body.install_paid ? 1 : 0).lastInsertRowid;
   res.json({ id });
 });
 const vendorOwner = (req, res) => {
@@ -450,6 +456,9 @@ app.post('/api/vendor/owners/:id', vendorAuth, (req, res) => {
     b.paid_until === undefined ? o.paid_until : b.paid_until, b.suspended === undefined ? o.suspended : (b.suspended ? 1 : 0),
     grace(b.wa_grace_days, o.wa_grace_days), grace(b.pos_grace_days, o.pos_grace_days),
     b.cancelled === undefined ? o.cancelled_at : b.cancelled ? (o.cancelled_at || now()) : null, o.id);
+  const fee = (v, cur) => v === undefined ? cur : v === '' || v === null ? null : Math.max(0, +v || 0);
+  db.prepare('UPDATE owners SET monthly_fee=?, install_fee=?, install_paid=? WHERE id=?').run(fee(b.monthly_fee, o.monthly_fee), fee(b.install_fee, o.install_fee),
+    b.install_paid === undefined ? o.install_paid : b.install_paid ? 1 : 0, o.id);
   res.json({ ok: true, ...membership(o.id) });
 });
 // Payment received: add months from the later of today and the current paid-until date

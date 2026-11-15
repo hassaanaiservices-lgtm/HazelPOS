@@ -62,7 +62,7 @@ export default function Clients() {
 }
 
 function NewClient({ onClose, onDone }) {
-  const [f, setF] = useState({ name: '', phone: '', email: '', password: '', plan: '', paid_until: '', notes: '' })
+  const [f, setF] = useState({ name: '', phone: '', email: '', password: '', plan: '', paid_until: '', notes: '', monthly_fee: '', install_fee: '', install_paid: false })
   const [err, setErr] = useState('')
   const set = k => e => setF({ ...f, [k]: e.target.value })
   const submit = async e => {
@@ -78,7 +78,10 @@ function NewClient({ onClose, onDone }) {
           <label>Owner phone<input value={f.phone} onChange={set('phone')} inputMode="tel" /></label>
           <label>Owner email (their cloud dashboard login)<input type="email" value={f.email} onChange={set('email')} required /></label>
           <label>Dashboard password (8+ characters)<input value={f.password} onChange={set('password')} minLength={8} required /></label>
-          <label>Plan<input value={f.plan} onChange={set('plan')} placeholder="e.g. Rs 5,000 / month" /></label>
+          <label>Monthly fee (Rs)<input type="number" min="0" value={f.monthly_fee} onChange={set('monthly_fee')} placeholder="e.g. 5000" /></label>
+          <label>Installation fee (Rs, one time)<input type="number" min="0" value={f.install_fee} onChange={set('install_fee')} placeholder="e.g. 15000" /></label>
+          <label className="check"><input type="checkbox" checked={f.install_paid} onChange={e => setF({ ...f, install_paid: e.target.checked })} /> Installation fee paid</label>
+          <label>Plan / note on the price<input value={f.plan} onChange={set('plan')} placeholder="e.g. Standard, 1 branch" /></label>
           <label>Paid until (empty = one month from today)<input type="date" value={f.paid_until} onChange={set('paid_until')} /></label>
           <label className="wide">Notes<textarea rows={2} value={f.notes} onChange={set('notes')} /></label>
         </div>

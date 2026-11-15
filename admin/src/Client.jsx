@@ -47,7 +47,7 @@ export default function Client({ id }) {
     <>
       <div className="crumb"><a href="#/clients">Clients</a> /</div>
       <div className="page-head"><h1>{o.name || o.email}</h1><Membership o={o} /><span className="sp" />
-        <button onClick={() => setEdit({ name: o.name || '', phone: o.phone || '', plan: o.plan || '', notes: o.notes || '' })}>Edit details</button></div>
+        <button onClick={() => setEdit({ name: o.name || '', phone: o.phone || '', plan: o.plan || '', notes: o.notes || '', monthly_fee: o.monthly_fee ?? '', install_fee: o.install_fee ?? '' })}>Edit details</button></div>
 
       {code && <div className="card"><h3>Activation code for {code.name}</h3>
         <div className="code">{code.code}</div>
@@ -58,6 +58,8 @@ export default function Client({ id }) {
         ⚠ {o.branches.reduce((s, b) => s + (b.locked_orders || 0), 0)} order(s) reached the cloud from a POS that should have been locked (unpaid or cancelled). Someone may have got around the lock on that PC: check it.</p>}
       <div className="grid2">
         <div className="card"><h3>Membership</h3>
+          <p>{o.monthly_fee != null ? <>Rs {o.monthly_fee.toLocaleString()} / month · </> : null}Installation {o.install_fee != null ? `Rs ${o.install_fee.toLocaleString()}` : 'fee not set'}{' '}
+            {o.install_fee != null && (o.install_paid ? <span className="pill ok">paid</span> : <button className="link" style={{ padding: 0, minHeight: 0 }} onClick={run(async () => { await api(`/owners/${id}`, { install_paid: true }); toast('Installation fee marked paid'); load() })}><span className="pill warn">not paid: mark paid</span></button>)}</p>
           <p>Paid until <b>{o.paid_until || '—'}</b>{o.days_overdue > 0 && <span className="err"> · {o.days_overdue} day(s) unpaid</span>}{o.plan ? <span className="muted"> · {o.plan}</span> : null}</p>
           <div className="row" style={{ marginTop: 8 }}>WhatsApp bot <Service on={o.ai_active} until={o.ai_until} stopped={o.suspended || o.cancelled} />
             · POS <Service on={o.pos_active} until={o.pos_until} stopped={o.suspended || o.cancelled} /></div>
@@ -106,7 +108,11 @@ export default function Client({ id }) {
           <h2>Edit details</h2>
           <label>Restaurant name<input value={edit.name} onChange={e => setEdit({ ...edit, name: e.target.value })} autoFocus /></label>
           <label>Owner phone<input value={edit.phone} onChange={e => setEdit({ ...edit, phone: e.target.value })} inputMode="tel" /></label>
-          <label>Plan<input value={edit.plan} onChange={e => setEdit({ ...edit, plan: e.target.value })} /></label>
+          <div className="grid2">
+            <label>Monthly fee (Rs)<input type="number" min="0" value={edit.monthly_fee} onChange={e => setEdit({ ...edit, monthly_fee: e.target.value })} /></label>
+            <label>Installation fee (Rs)<input type="number" min="0" value={edit.install_fee} onChange={e => setEdit({ ...edit, install_fee: e.target.value })} /></label>
+          </div>
+          <label>Plan / note on the price<input value={edit.plan} onChange={e => setEdit({ ...edit, plan: e.target.value })} /></label>
           <label>Notes<textarea rows={3} value={edit.notes} onChange={e => setEdit({ ...edit, notes: e.target.value })} /></label>
           <div className="actions"><button type="button" onClick={() => setEdit(null)}>Cancel</button><button className="primary">Save</button></div>
         </form>
