@@ -1,8 +1,10 @@
 // Menu import from Excel (.xlsx) or CSV. No packages: an .xlsx file is a zip of XML files, and Node's zlib unzips it.
 //
 // One row per item, or per size of an item. Columns (header names, any order, case doesn't matter):
-//   Category | Item | Size | Price | Description | Emoji | Available
+//   Category | Item | Size | Price | Description | Emoji | Available | Deal items | Combo for
 // Rows with the same Category + Item and different Sizes become one item with sizes. "Available" no/0/hidden hides it.
+// Deals: "Deal items" lists what's inside, e.g. "2x Zinger Burger (Single); Fries (Regular); Coke 500ml". "Combo for"
+// names the item it's also offered with ("Make it a combo" when that item is tapped).
 const zlib = require('zlib');
 
 const COLUMNS = {
@@ -10,18 +12,47 @@ const COLUMNS = {
   item: ['item', 'name', 'item name', 'product', 'dish'],
   size: ['size', 'variant', 'portion'],
   price: ['price', 'rate', 'amount', 'price (rs)', 'rs'],
-  description: ['description', 'details', 'deal items', "what's in the deal", 'info'],
+  description: ['description', 'details', 'info'],
   emoji: ['emoji', 'icon'],
   available: ['available', 'active', 'on menu', 'show'],
+  deal: ['deal items', 'deal', 'includes', 'combo items', 'in the deal', "what's in the deal"],
+  combo_for: ['combo for', 'offer with', 'combo on', 'offer as combo on'],
 };
 const TEMPLATE = [
-  ['Category', 'Item', 'Size', 'Price', 'Description', 'Emoji', 'Available'],
-  ['Pizza', 'Chicken Tikka Pizza', 'Small', 650, 'Tikka chunks, onion, capsicum', '🍕', 'yes'],
-  ['Pizza', 'Chicken Tikka Pizza', 'Medium', 1150, '', '', ''],
-  ['Pizza', 'Chicken Tikka Pizza', 'Large', 1550, '', '', ''],
-  ['Burgers', 'Zinger Burger', '', 490, 'Crispy fillet, lettuce, mayo', '🍔', 'yes'],
-  ['Deals', 'Deal 1', '', 999, '1 Zinger burger, 1 regular fries, 1 soft drink', '🎁', 'yes'],
+  ['Category', 'Item', 'Size', 'Price', 'Description', 'Emoji', 'Available', 'Deal items', 'Combo for'],
+  ['Pizza', 'Chicken Tikka Pizza', 'Small', 650, 'Tikka chunks, onion, capsicum', '🍕', 'yes', '', ''],
+  ['Pizza', 'Chicken Tikka Pizza', 'Medium', 1150, '', '', '', '', ''],
+  ['Pizza', 'Chicken Tikka Pizza', 'Large', 1550, '', '', '', '', ''],
+  ['Burgers', 'Zinger Burger', '', 490, 'Crispy fillet, lettuce, mayo', '🍔', 'yes', '', ''],
+  ['Sides', 'Fries', '', 250, '', '🍟', 'yes', '', ''],
+  ['Drinks', 'Soft Drink', '', 120, '345 ml', '🥤', 'yes', '', ''],
+  ['Deals', 'Zinger Combo', '', 799, 'Zinger + fries + drink', '🍔', 'yes', 'Zinger Burger; Fries; Soft Drink', 'Zinger Burger'],
+  ['Deals', 'Family Deal', '', 2999, '', '🎁', 'yes', '1x Chicken Tikka Pizza (Large); 2x Zinger Burger; 2x Fries; 4x Soft Drink', ''],
 ];
+
+// "2x Zinger Burger (Single); Fries; 1 Coke 500ml" -> [{name, size, qty}]
+function parseDeal(text) {
+  return String(text || '').split(/[;\n+]|,(?![^(]*\))/).map(s => s.trim()).filter(Boolean).map(s => {
+    let qty = 1, m = /^(\d+)\s*[x×*]?\s+(.+)$/i.exec(s) || /^(\d+)\s*[x×*]\s*(.+)$/i.exec(s);
+    if (m) { qty = +m[1]; s = m[2]; } else if ((m = /^(.+?)\s*[x×*]\s*(\d+)$/i.exec(s))) { qty = +m[2]; s = m[1]; }
+    const sz = /^(.+?)\s*\(([^)]+)\)$/.exec(s);
+    return { name: (sz ? sz[1] : s).trim(), size: sz ? sz[2].trim() : '', qty: Math.max(1, qty) };
+  });
+}
+
+// Deal items must name items on this menu. names: lower-case names available (file + POS). -> [{row?, error}]
+function checkDeals(items, names = new Set(items.map(i => i.name.toLowerCase()))) {
+  const errors = [];
+  for (const it of items) {
+    for (const d of it.deal || []) {
+      if (!names.has(d.name.toLowerCase())) errors.push({ row: it.row, error: `${it.name}: "${d.name}" is not on the menu` });
+      else if (d.name.toLowerCase() === it.name.toLowerCase()) errors.push({ row: it.row, error: `${it.name}: a deal can't include itself` });
+    }
+    if (it.combo_for && !names.has(it.combo_for.toLowerCase())) errors.push({ row: it.row, error: `${it.name}: "Combo for" item "${it.combo_for}" is not on the menu` });
+    if (it.combo_for && !(it.deal || []).length) errors.push({ row: it.row, error: `${it.name}: "Combo for" needs "Deal items" too` });
+  }
+  return errors;
+}
 
 // ---------- reading the file ----------
 function unzip(buf) {
@@ -126,11 +157,13 @@ function toMenu(rows) {
       else it.sizes.push({ name: size, detail: '', price: p });
     } else it.price = p;
     it.description ||= get(r, 'description'); it.emoji ||= get(r, 'emoji');
+    if (!it.deal?.length && get(r, 'deal')) it.deal = parseDeal(get(r, 'deal'));
+    it.combo_for ||= get(r, 'combo_for'); it.row ||= line;
     if (no(get(r, 'available'))) it.active = false;
     items.set(key, it);
   });
-  const list = [...items.values()].map(it => ({ ...it, price: it.price ?? Math.min(...it.sizes.map(s => s.price)) }));
-  return { items: list, errors };
+  const list = [...items.values()].map(it => ({ ...it, deal: it.deal || [], combo_for: it.combo_for || '', price: it.price ?? Math.min(...it.sizes.map(s => s.price)) }));
+  return { items: list, errors, deals: col.deal >= 0 }; // deals:false = the file has no "Deal items" column: leave deals alone
 }
 
 // What importing would change in this POS database (dry run) or does change (apply=true).
@@ -139,11 +172,16 @@ function toMenu(rows) {
 // inTransaction: the caller already opened one (setup.js)
 function importMenu(db, menu, { apply = false, hideMissing = false, inTransaction = false } = {}) {
   const cats = db.prepare('SELECT id, name FROM categories').all();
-  const prods = db.prepare('SELECT id, name, price, category_id, sizes, description, emoji, active FROM products').all();
+  const prods = db.prepare('SELECT id, name, price, category_id, sizes, description, emoji, active, deal_items, combo_for FROM products').all();
   const catBy = new Map(cats.map(c => [c.name.toLowerCase(), c.id]));
   const prodBy = new Map(prods.map(p => [p.name.toLowerCase(), p]));
   const COLORS = ['#ff6b35', '#3ecf8e', '#6aa8ff', '#f2b44c', '#c084fc', '#ff5d6c', '#2dd4bf'];
-  const plan = { new_categories: [], added: [], updated: [], unchanged: 0, hidden: [] };
+  const plan = { new_categories: [], added: [], updated: [], unchanged: 0, hidden: [], deal_errors: [] };
+  // Deals name their items; checked against the file and what's already on the POS menu
+  plan.deal_errors = checkDeals(menu.items, new Set([...menu.items.map(i => i.name.toLowerCase()), ...prods.map(p => p.name.toLowerCase())]));
+  const nameOf = id => prods.find(p => p.id === +id)?.name.toLowerCase() || '';
+  const dealKey = list => JSON.stringify((list || []).map(d => [String(d.name ?? '').toLowerCase(), d.size || '', +d.qty || 1]));
+  const oldDealKey = p => { try { return dealKey((JSON.parse(p.deal_items || '[]') || []).map(d => ({ ...d, name: nameOf(d.product_id) }))) } catch { return '[]' } };
   const run = () => {
     for (const it of menu.items) {
       let cid = catBy.get(it.category.toLowerCase());
@@ -161,11 +199,21 @@ function importMenu(db, menu, { apply = false, hideMissing = false, inTransactio
         continue;
       }
       const next = { price: it.price, category_id: cid, sizes, description: it.description || old.description || '', emoji: it.emoji || old.emoji, active: it.active ? 1 : 0 };
-      const changed = Object.keys(next).some(k => String(next[k] ?? '') !== String(old[k] ?? ''));
+      const dealChanged = menu.deals !== false && (it.deal?.length || old.deal_items) && (dealKey(it.deal) !== oldDealKey(old) || (it.combo_for || '').toLowerCase() !== nameOf(old.combo_for));
+      const changed = dealChanged || Object.keys(next).some(k => String(next[k] ?? '') !== String(old[k] ?? ''));
       if (!changed) { plan.unchanged++; continue; }
       plan.updated.push(it.name);
       if (apply) db.prepare('UPDATE products SET price=?, category_id=?, sizes=?, description=?, emoji=?, active=? WHERE id=?')
         .run(next.price, next.category_id, next.sizes, next.description, next.emoji, next.active, old.id);
+    }
+    // Deals last: their items may have been added just above
+    if (apply && menu.deals !== false) {
+      const idBy = name => db.prepare('SELECT id FROM products WHERE lower(name)=lower(?) ORDER BY id DESC').get(name)?.id;
+      for (const it of menu.items) {
+        if (!it.deal?.length && !(prodBy.get(it.name.toLowerCase())?.deal_items)) continue;
+        const items = (it.deal || []).map(d => ({ product_id: idBy(d.name), size: d.size || '', qty: Math.max(1, +d.qty || 1) })).filter(d => d.product_id);
+        db.prepare('UPDATE products SET deal_items=?, combo_for=? WHERE id=?').run(items.length ? JSON.stringify(items) : '', items.length && it.combo_for ? idBy(it.combo_for) || null : null, idBy(it.name));
+      }
     }
     if (hideMissing) {
       const inFile = new Set(menu.items.map(it => it.name.toLowerCase()));
@@ -180,4 +228,4 @@ function importMenu(db, menu, { apply = false, hideMissing = false, inTransactio
   return plan;
 }
 
-module.exports = { readSheet, toMenu, importMenu, TEMPLATE };
+module.exports = { readSheet, toMenu, importMenu, checkDeals, parseDeal, TEMPLATE };

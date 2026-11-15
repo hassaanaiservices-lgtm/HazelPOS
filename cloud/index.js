@@ -417,6 +417,20 @@ app.post('/api/vendor/branches/:id/setup', vendorAuth, (req, res) => {
     if (String(logo_image || '').length > 400 * 1024) return res.status(400).json({ error: 'The logo picture is too large (max 300 KB)' });
     if (logo_image) data.restaurant.logo_image = logo_image;
   }
+  // The whole setup menu (the admin app's deal editor sends it back with deals added, changed or removed)
+  if (Array.isArray(body.menu)) {
+    const clean = body.menu.slice(0, 2000).map(i => ({
+      category: String(i.category || '').trim() || 'Menu', name: String(i.name || '').trim(), price: Math.max(0, +i.price || 0),
+      sizes: Array.isArray(i.sizes) ? i.sizes.map(z => ({ name: String(z.name || '').trim(), detail: String(z.detail || ''), price: +z.price || 0 })).filter(z => z.name) : [],
+      description: String(i.description || ''), emoji: String(i.emoji || ''), active: i.active !== false,
+      deal: Array.isArray(i.deal) ? i.deal.map(d => ({ name: String(d.name || '').trim(), size: String(d.size || ''), qty: Math.max(1, +d.qty || 1) })).filter(d => d.name) : [],
+      combo_for: String(i.combo_for || '').trim(),
+    })).filter(i => i.name);
+    if (new Set(clean.map(i => i.name.toLowerCase())).size !== clean.length) return res.status(400).json({ error: 'Two items on the menu have the same name' });
+    const problems = menuImport ? menuImport.checkDeals(clean) : [];
+    if (problems.length) return res.status(400).json({ error: problems.map(p => p.error).join('; ') });
+    data.menu = clean;
+  }
   if (Array.isArray(body.floors)) data.floors = [...new Set(body.floors.map(f => String(f.name ?? f).trim()).filter(Boolean))].slice(0, 30).map(name => ({ name }));
   if (Array.isArray(body.tables)) data.tables = body.tables.slice(0, 300).map(t => ({ name: String(t.name || '').trim(), seats: +t.seats || 4, floor: String(t.floor || '').trim() })).filter(t => t.name);
   if (Array.isArray(body.zones)) data.zones = body.zones.slice(0, 200).map(z => ({ name: String(z.name || '').trim(), fee: +z.fee || 0, min_order: +z.min_order || 0, free_above: +z.free_above || 0, eta_min: +z.eta_min || 45 })).filter(z => z.name);
@@ -439,6 +453,7 @@ app.post('/api/vendor/branches/:id/setup/menu', vendorAuth, (req, res) => {
   try { menu = menuImport.toMenu(menuImport.readSheet(Buffer.from(String(req.body.file || ''), 'base64'), String(req.body.name || ''))); }
   catch (e) { return res.status(400).json({ error: e.message }); }
   const categories = [...new Set(menu.items.map(i => i.category))];
+  menu.errors.push(...menuImport.checkDeals(menu.items)); // deal items must be on this menu
   const apply = !!req.body.apply && !menu.errors.length && menu.items.length > 0;
   if (apply) { const { data } = getSetup(b.id); data.menu = menu.items; saveSetup(b.id, data); }
   res.json({ applied: apply, items: menu.items.length, categories, errors: menu.errors, sample: menu.items.slice(0, 8) });

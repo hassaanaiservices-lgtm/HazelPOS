@@ -570,9 +570,11 @@ app.post('/api/menu/import', (req, res) => { // body limit 2 MB (base64), so fil
   try { menu = menuImport.toMenu(menuImport.readSheet(buf, String(req.body.name || ''))); }
   catch (e) { throw new UserError(e.message); }
   if (!menu.items.length) throw new UserError('No menu items found in this file');
-  const apply = !!req.body.apply && !menu.errors.length;
-  const plan = menuImport.importMenu(db, menu, { apply, hideMissing: !!req.body.hide_missing });
-  res.json({ applied: apply, items: menu.items.length, errors: menu.errors, ...plan });
+  const dry = menuImport.importMenu(db, menu, { hideMissing: !!req.body.hide_missing });
+  const errors = [...menu.errors, ...dry.deal_errors];
+  const apply = !!req.body.apply && !errors.length;
+  const plan = apply ? menuImport.importMenu(db, menu, { apply: true, hideMissing: !!req.body.hide_missing }) : dry;
+  res.json({ applied: apply, items: menu.items.length, ...plan, errors });
 });
 
 // ---------- Menu pictures (photos of the menu card) ----------

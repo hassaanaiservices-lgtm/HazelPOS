@@ -875,3 +875,4 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px
 .deal-incl li { display: list-item; }
 .deal-editor { display: flex; flex-direction: column; gap: 10px; padding: 12px; margin-top: 6px; border: 1px dashed var(--line-strong); border-radius: var(--r-sm); }
 .deal-row { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) 72px auto; gap: 6px; align-items: center; }
+.deal-pill { font-size: var(--fs-sm); color: var(--text); background: var(--accent-soft); border-radius: var(--r-pill); padding: 3px 10px; max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

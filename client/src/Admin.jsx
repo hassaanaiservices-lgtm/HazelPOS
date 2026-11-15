@@ -162,12 +162,21 @@ function MenuAdmin({ onChanged, notify }) {
   };
 
   const del = async p => { if (await confirmBox(`Delete ${p.name}?`)) { await api(`/products/${p.id}/delete`, {}); load(); onChanged() } }
+  // A deal starts in the "Deals" category (made the first time) with one empty item row
+  const addDeal = async () => {
+    let c = data.categories.find(x => /deal|combo/i.test(x.name))
+    if (!c) { try { c = await api('/categories', { name: 'Deals', color: '#ff6b35' }); load() } catch (e) { return toastError(e.message) } }
+    openEdit({ name: '', price: '', emoji: '🎁', category_id: c.id, active: 1, subtitle: '', description: '', ingredients_str: '', sizes_list: [] })
+    setEdit(e => ({ ...e, is_deal: true, deal_list: [{ product_id: '', size: '', qty: 1 }] }))
+  }
+  const nameOf = id => data.products.find(x => x.id === +id)?.name || '?'
   const cat = id => data.categories.find(c => c.id === id)
 
   return (
     <>
       <div className="row add">
         <button className="primary" id="add-item" onClick={() => openEdit({ name: '', price: '', emoji: '🍽️', category_id: data.categories[0]?.id, active: 1, subtitle: '', description: '', ingredients_str: '', sizes_list: [] })}>+ Add item</button>
+        <button className="primary" id="add-deal" onClick={addDeal}>+ Add deal</button>
         <button className="ghost" id="import-menu" onClick={() => setImporting(true)}><Icon name="plus" size={16} />Import from Excel</button>
       </div>
       {importing && <MenuImport onClose={() => setImporting(false)} onDone={() => { setImporting(false); load(); onChanged() }} notify={notify} />}
@@ -175,6 +184,8 @@ function MenuAdmin({ onChanged, notify }) {
         {data.products.map(p => (
           <div key={p.id} className={'admin-row' + (p.active ? '' : ' off')}>
             <span className="emoji-sm">{p.emoji}</span><b>{p.name}</b>
+            {dealItems(p).length > 0 && <span className="deal-pill" title={dealItems(p).map(d => `${d.qty}× ${nameOf(d.product_id)}${d.size ? ` (${d.size})` : ''}`).join(', ')}>
+              {+p.combo_for ? `Combo on ${nameOf(p.combo_for)}` : 'Deal'}: {dealItems(p).map(d => `${+d.qty > 1 ? d.qty + '× ' : ''}${nameOf(d.product_id)}`).join(', ')}</span>}
             <span className="pill" style={{ borderColor: cat(p.category_id)?.color }}>{cat(p.category_id)?.name}</span>
             <span className="amt">{rs(p.price)}</span>
             <span className="muted">{p.active ? 'On menu' : 'Hidden'}</span>
@@ -186,7 +197,7 @@ function MenuAdmin({ onChanged, notify }) {
       {edit && (
         <div className="modal-bg" onClick={() => setEdit(null)}>
           <div className="modal menu-edit-modal" style={{ width: 560, maxWidth: '95vw', maxHeight: '88vh', overflowY: 'auto' }} onClick={e => e.stopPropagation()}>
-            <h2>{edit.id ? 'Edit item' : 'New item'}</h2>
+            <h2>{edit.is_deal ? (edit.id ? 'Edit deal' : 'New deal') : (edit.id ? 'Edit item' : 'New item')}</h2>
             <label>Name<input autoFocus value={edit.name} onChange={e => setEdit({ ...edit, name: e.target.value })} /></label>
             <div className="two">
               <label>Base Price (Rs.)<input type="number" value={edit.price} onChange={e => setEdit({ ...edit, price: e.target.value })} /></label>
@@ -670,7 +681,7 @@ function MenuImport({ onClose, onDone, notify }) {
     <div className="modal-bg" onClick={onClose}>
       <div className="modal import-modal" onClick={e => e.stopPropagation()}>
         <h2>Import menu from Excel</h2>
-        <p className="muted">One row per item, or one row per size. Columns: Category, Item, Size, Price, Description, Emoji, Available. Items already on the menu are matched by name and updated.</p>
+        <p className="muted">One row per item, or one row per size. Columns: Category, Item, Size, Price, Description, Emoji, Available, and for deals: Deal items (e.g. "2x Zinger Burger; Fries; Soft Drink") and Combo for (the item it's offered with). Items already on the menu are matched by name and updated.</p>
         <div className="row">
           <button className="ghost" onClick={template}>Download template</button>
           <label className="primary file-btn">{file ? 'Choose another file' : 'Choose Excel file'}

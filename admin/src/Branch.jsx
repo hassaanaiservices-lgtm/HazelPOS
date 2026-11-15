@@ -32,7 +32,7 @@ export default function Branch({ id }) {
       <div className="tabs" role="tablist">{TABS.map(t => <button key={t} role="tab" aria-selected={tab === t} className={tab === t ? 'on' : ''} onClick={() => setTab(t)}>{t}</button>)}</div>
       {tab === 'Overview' && <Overview d={d} go={setTab} />}
       {tab === 'Details' && <Details r={d.setup.restaurant || {}} save={save} />}
-      {tab === 'Menu' && <><Pictures id={id} images={d.images} reload={load} /><Menu id={id} d={d} reload={load} /></>}
+      {tab === 'Menu' && <><Pictures id={id} images={d.images} reload={load} /><Menu id={id} d={d} reload={load} /><Deals menu={d.setup.menu || []} save={save} /></>}
       {tab === 'Tables' && <Tables tables={d.setup.tables || []} floors={d.setup.floors || []} save={save} />}
       {tab === 'Delivery areas' && <Zones zones={d.setup.zones || []} save={save} />}
       {tab === 'Staff' && <Staff staff={d.setup.staff || []} save={save} />}
@@ -133,11 +133,79 @@ function Menu({ id, d, reload }) {
       <div className="card"><h3>Menu ({menu.length} items{cats.length ? `, ${cats.length} categories` : ''})</h3>
         {menu.length ? <div className="scroll"><table>
           <thead><tr><th>Category</th><th>Item</th><th className="num">Price</th><th>Sizes</th><th>Description</th></tr></thead>
-          <tbody>{menu.map((i, n) => <tr key={n}><td>{i.category}</td><td>{i.emoji} {i.name} {!i.active && <span className="pill">hidden</span>}</td>
-            <td className="num">{i.price}</td><td className="muted small">{i.sizes.map(z => `${z.name} ${z.price}`).join(' · ')}</td><td className="muted small">{i.description}</td></tr>)}</tbody>
+          <tbody>{menu.map((i, n) => <tr key={n}><td>{i.category}</td><td>{i.emoji} {i.name} {!i.active && <span className="pill">hidden</span>}{i.deal?.length > 0 && <span className="pill info">{i.combo_for ? 'Combo' : 'Deal'}</span>}</td>
+            <td className="num">{i.price}</td><td className="muted small">{i.sizes.map(z => `${z.name} ${z.price}`).join(' · ')}</td>
+            <td className="muted small">{i.deal?.length ? dealText(i.deal) : i.description}</td></tr>)}</tbody>
         </table></div> : <div className="empty">No menu yet.</div>}
       </div>
     </>
+  )
+}
+
+// Deals and combos inside the client's setup menu. A deal names items on this menu; "Offer with" makes it a combo
+// that shows when that item is tapped. Sent with the rest of the setup; the POS turns names into its own items.
+const dealText = list => (list || []).map(d => `${d.qty > 1 ? d.qty + '× ' : ''}${d.name}${d.size ? ` (${d.size})` : ''}`).join(', ')
+function Deals({ menu, save }) {
+  const [edit, setEdit] = useState(null) // { index (-1 = new), name, price, emoji, category, deal: [], combo_for }
+  const deals = menu.map((it, index) => ({ ...it, index })).filter(it => it.deal?.length)
+  const items = menu.filter(it => !it.deal?.length)
+  const sizesOf = name => items.find(i => i.name === name)?.sizes || []
+  const open = it => setEdit(it ? { ...it, deal: it.deal.map(d => ({ ...d })) } : { index: -1, name: '', price: '', emoji: '🎁', category: 'Deals', deal: [{ name: '', size: '', qty: 1 }], combo_for: '', active: true, sizes: [], description: '' })
+  const row = (i, patch) => setEdit({ ...edit, deal: edit.deal.map((d, n) => n === i ? { ...d, ...patch } : d) })
+  const submit = run(async e => {
+    e.preventDefault()
+    const deal = edit.deal.filter(d => d.name)
+    if (!deal.length) throw new Error('Add at least one item to the deal')
+    const { index, ...it } = { ...edit, deal, price: +edit.price || 0 }
+    await save({ menu: index < 0 ? [...menu, it] : menu.map((m, n) => n === index ? it : m) })
+    setEdit(null)
+  })
+  const remove = run(async it => {
+    if (!await confirmBox(`Delete the deal "${it.name}"?`, { confirmLabel: 'Delete', danger: true })) return
+    await save({ menu: menu.filter((_, n) => n !== it.index) })
+  })
+  return (
+    <div className="card">
+      <div className="card-head"><h3>Deals & combos ({deals.length})</h3><span className="sp" />
+        <button className="primary" onClick={() => open(null)} disabled={!items.length} title={items.length ? '' : 'Upload the menu first'}>+ Add deal</button></div>
+      <p className="muted">A deal is several menu items for one price (shown in the Deals tab of their POS). Choose an item under "Also offer as a combo on" and it shows as "Make it a combo" when that item is tapped. The kitchen sees each item inside. You can also put deals in the Excel file ("Deal items" and "Combo for" columns, see the template).</p>
+      {!items.length && <p className="notice" style={{ marginTop: 12 }}>Upload the menu first (above). A deal is made from the items on the menu.</p>}
+      {deals.length > 0 && <div className="scroll" style={{ marginTop: 12 }}><table>
+        <thead><tr><th>Deal</th><th className="num">Price</th><th>Inside</th><th>Combo on</th><th></th></tr></thead>
+        <tbody>{deals.map(it => <tr key={it.index}><td>{it.emoji} <b>{it.name}</b></td><td className="num">{it.price}</td><td className="muted small">{dealText(it.deal)}</td>
+          <td>{it.combo_for || <span className="muted">Deals tab only</span>}</td>
+          <td><div className="row" style={{ justifyContent: 'flex-end' }}><button onClick={() => open(it)}>Edit</button><button className="danger" onClick={() => remove(it)}>Delete</button></div></td></tr>)}</tbody>
+      </table></div>}
+      {edit && <div className="modal-bg" onClick={() => setEdit(null)}>
+        <form className="modal" style={{ width: 'min(680px, 100%)' }} onClick={e => e.stopPropagation()} onSubmit={submit}>
+          <h2>{edit.index < 0 ? 'New deal' : 'Edit deal'}</h2>
+          <div className="grid3">
+            <label className="wide">Name<input value={edit.name} onChange={e => setEdit({ ...edit, name: e.target.value })} placeholder="e.g. Zinger Combo, Family Deal" required autoFocus /></label>
+            <label>Price (Rs)<input type="number" min="0" value={edit.price} onChange={e => setEdit({ ...edit, price: e.target.value })} required /></label>
+            <label>Emoji<input value={edit.emoji} onChange={e => setEdit({ ...edit, emoji: e.target.value })} /></label>
+            <label>Category<input value={edit.category} onChange={e => setEdit({ ...edit, category: e.target.value })} /></label>
+          </div>
+          <div><b>Items inside</b>
+            {edit.deal.map((dl, i) => {
+              const sizes = sizesOf(dl.name)
+              return (
+                <div key={i} className="deal-row">
+                  <select aria-label="Item" value={dl.name} onChange={e => row(i, { name: e.target.value, size: sizesOf(e.target.value)[0]?.name || '' })} required>
+                    <option value="">Choose an item…</option>{items.map(m => <option key={m.name} value={m.name}>{m.emoji} {m.name}</option>)}</select>
+                  {sizes.length > 1 ? <select aria-label="Size" value={dl.size} onChange={e => row(i, { size: e.target.value })}>{sizes.map(z => <option key={z.name}>{z.name}</option>)}</select> : <span />}
+                  <input aria-label="Quantity" type="number" min="1" value={dl.qty} onChange={e => row(i, { qty: e.target.value })} />
+                  <button type="button" className="danger" aria-label="Remove item" onClick={() => setEdit({ ...edit, deal: edit.deal.filter((_, n) => n !== i) })}>✕</button>
+                </div>
+              )
+            })}
+            <button type="button" onClick={() => setEdit({ ...edit, deal: [...edit.deal, { name: '', size: '', qty: 1 }] })}>+ Add item</button>
+          </div>
+          <label>Also offer as a combo on<select value={edit.combo_for} onChange={e => setEdit({ ...edit, combo_for: e.target.value })}>
+            <option value="">No, only in the Deals tab</option>{items.map(m => <option key={m.name} value={m.name}>{m.emoji} {m.name}</option>)}</select></label>
+          <div className="actions"><button type="button" onClick={() => setEdit(null)}>Cancel</button><button className="primary">Save deal</button></div>
+        </form>
+      </div>}
+    </div>
   )
 }
 
