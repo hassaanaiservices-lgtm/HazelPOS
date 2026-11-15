@@ -66,7 +66,7 @@ export default function Client({ id }) {
       <div className="card">
         <div className="card-head"><h3>Branches</h3><span className="sp" /><button className="primary" onClick={addBranch}>+ Add branch</button></div>
         {o.branches.length ? <div className="scroll"><table>
-          <thead><tr><th>Branch</th><th>Stage</th><th>Setup</th><th>Last seen</th><th>Version</th><th>WhatsApp</th><th className="num">Errors 24 h</th><th className="num">AI replies</th></tr></thead>
+          <thead><tr><th>Branch</th><th>Stage</th><th>Setup</th><th>Last seen</th><th>Version</th><th>WhatsApp</th><th className="num">Errors 24 h</th><th className="num">AI replies</th><th></th></tr></thead>
           <tbody>{o.branches.map(b => (
             <tr key={b.id} className="click" onClick={() => go('branch/' + b.id)} tabIndex={0} onKeyDown={e => e.key === 'Enter' && go('branch/' + b.id)}>
               <td><b>{b.name}</b><div className="muted small">{b.code_used_at ? `activated ${ago(b.code_used_at)}` : b.code_created_at ? 'code not used yet' : 'no code'}</div></td>
@@ -74,6 +74,7 @@ export default function Client({ id }) {
               <td className="muted small">{b.setup.menu} items · {b.setup.tables} tables · {b.setup.staff} staff</td>
               <td><LastSeen b={b} /></td><td>{b.health?.version || '—'}</td><td><WhatsApp h={b.health} /></td>
               <td className="num">{b.errors_24h ? <span className="pill bad">{b.errors_24h}</span> : '0'}</td><td className="num">{num(b.ai.calls)}</td>
+              <td><button className="primary" onClick={e => { e.stopPropagation(); go('branch/' + b.id) }}>Set up menu, staff… →</button></td>
             </tr>))}</tbody></table></div>
           : <div className="empty">No branch yet. Add one to prepare its setup and get the activation code.</div>}
       </div>

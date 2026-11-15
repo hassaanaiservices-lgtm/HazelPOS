@@ -104,6 +104,8 @@ tr.click { cursor: pointer; } tr.click:hover td { background: var(--surface-2); 
 .tabs { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 16px; border-bottom: 1px solid var(--line); }
 .tabs button { border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: none; color: var(--text-2); }
 .tabs button.on { color: var(--text); border-bottom-color: var(--accent); }
+.branch-link { padding: 4px 6px; min-height: 36px; color: var(--text); gap: 6px; font-weight: 600; }
+.branch-link:hover { background: var(--surface-2); }
 .checks { display: flex; gap: 8px; flex-wrap: wrap; }
 .code { font: 700 30px var(--mono); letter-spacing: 0.1em; background: var(--surface-2); padding: 14px 20px; border-radius: var(--r-sm); user-select: all; display: inline-block; margin: 8px 0; }
 .pics { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 12px; margin-top: 12px; }

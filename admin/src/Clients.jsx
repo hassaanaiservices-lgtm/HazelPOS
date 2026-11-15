@@ -40,16 +40,18 @@ export default function Clients() {
       </div>
       <div className="card scroll" style={{ padding: 0 }}>
         {shown.length ? <table>
-          <thead><tr><th>Client</th><th>Membership</th><th>Paid until</th><th>Branches</th><th>Last seen</th><th className="num">Errors 24 h</th><th className="num">AI replies</th></tr></thead>
+          <thead><tr><th>Client</th><th>Membership</th><th>Paid until</th><th>Branches</th><th>Last seen</th><th className="num">Errors 24 h</th><th className="num">AI replies</th><th></th></tr></thead>
           <tbody>{shown.map(o => (
             <tr key={o.id} className="click" onClick={() => go('client/' + o.id)} tabIndex={0} onKeyDown={e => e.key === 'Enter' && go('client/' + o.id)}>
               <td><b>{o.name || o.email}</b><div className="muted small">{o.phone || o.email}</div></td>
               <td><Membership o={o} /></td>
               <td>{o.paid_until || '—'}</td>
-              <td><div className="row">{o.branches.length ? o.branches.map(b => <span key={b.id} title={b.name}><Stage b={b} /></span>) : <span className="muted">No branch yet</span>}</div></td>
+              <td><div className="row">{o.branches.length ? o.branches.map(b => <button key={b.id} className="link branch-link" title={`Set up ${b.name}: menu, staff, tables…`}
+                onClick={e => { e.stopPropagation(); go('branch/' + b.id) }}>{b.name} <Stage b={b} /></button>) : <span className="muted">No branch yet</span>}</div></td>
               <td>{o.branches.length ? <LastSeen b={o.branches.reduce((a, b) => (Date.parse(b.health_at || b.last_sync || 0) > Date.parse(a.health_at || a.last_sync || 0) ? b : a))} /> : '—'}</td>
               <td className="num">{o.branches.reduce((s, b) => s + b.errors_24h, 0) || '0'}</td>
               <td className="num">{num(o.branches.reduce((s, b) => s + b.ai.calls, 0))}</td>
+              <td><button onClick={e => { e.stopPropagation(); go('client/' + o.id) }}>Open →</button></td>
             </tr>))}
           </tbody></table>
           : <div className="empty">{owners.length ? 'No client matches.' : 'No clients yet. Add your first one.'}</div>}
