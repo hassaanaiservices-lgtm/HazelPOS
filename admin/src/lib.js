@@ -6,7 +6,7 @@ export async function api(url, body) {
   })
   const data = await r.json().catch(() => ({}))
   if (r.status === 401 && !['/login', '/me'].includes(url)) window.dispatchEvent(new Event('admin-logout'))
-  if (!r.ok) throw new Error(data.error || `Request failed (${r.status})`)
+  if (!r.ok) throw Object.assign(new Error(data.error || `Request failed (${r.status})`), { status: r.status, data })
   return data
 }
 

@@ -154,9 +154,22 @@ function MenuPictures({ id, images, reload }) {
     const out = [...start]
     try {
       for (const [n, imgId] of ids.entries()) {
-        setBusy(`AI is reading picture ${n + 1} of ${ids.length}… (about 10–30 seconds each)`)
-        const r = await api(`/branches/${id}/setup/menu-photo`, { image_id: imgId })
-        out.push(...r.rows); setRows([...out])
+        setBusy(`AI is reading picture ${n + 1} of ${ids.length}…`)
+        let r
+        for (let tries = 0; ; tries++) { // Groq's free plan allows about one picture a minute: wait as long as it asks, then go on
+          try { r = await api(`/branches/${id}/setup/menu-photo`, { image_id: imgId }); break }
+          catch (err) {
+            if (!err.data?.retry_after || tries >= 20) throw err
+            for (let left = err.data.retry_after + 2; left > 0; left--) {
+              setBusy(`Picture ${n + 1} of ${ids.length}: waiting ${left} s for the AI's per-minute limit, then it carries on…`)
+              await new Promise(ok => setTimeout(ok, 1000))
+            }
+            setBusy(`AI is reading picture ${n + 1} of ${ids.length}…`)
+          }
+        }
+        const key = x => `${x[1]}|${x[2]}`.toLowerCase().replace(/\s+/g, ' ').trim() // same item and size = already in the list (e.g. the same page uploaded twice)
+        const have = new Set(out.map(key))
+        out.push(...r.rows.filter(x => !have.has(key(x)))); setRows([...out])
       }
       toast(`Read ${out.length} items. Check them, then Save as the menu`)
     } catch (err) { toastError(err.message) }

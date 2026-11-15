@@ -591,7 +591,7 @@ app.post('/api/vendor/branches/:id/setup/images', vendorAuth, (req, res) => {
 // The admin app collects the rows of all photos, shows them, and saves them with /setup/menu-rows (or you download
 // them as Excel to fix first). Never saved without you looking at it. Uses your Groq key (GROQ_API_KEY).
 const GROQ_BASE = (process.env.GROQ_BASE_URL || 'https://api.groq.com/openai/v1').replace(/\/+$/, '');
-const VISION_MODEL = process.env.VISION_MODEL || 'meta-llama/llama-4-scout-17b-16e-instruct';
+const VISION_MODEL = process.env.VISION_MODEL || 'qwen/qwen3.8-27b';
 const MENU_PHOTO_PROMPT = `You read photos of restaurant menus from Pakistan and turn them into data.
 Return JSON only: {"items": [{"category": "...", "name": "...", "size": "...", "price": 0, "description": "..."}]}
 Rules:
@@ -626,9 +626,17 @@ app.post('/api/vendor/branches/:id/setup/menu-photo', vendorAuth, async (req, re
     const body = await r.json().catch(() => ({}));
     const u = body.usage || {};
     logAi(b, 'vision', r.ok, t0, { in: u.prompt_tokens, out: u.completion_tokens });
+    if (r.status === 429) { // Groq's per-minute limit (small on the free plan): tell the admin app how long to wait
+      const wait = Math.ceil(+r.headers.get('retry-after') || +(/try again in ([\d.]+)s/.exec(body.error?.message || '') || [])[1] || 30);
+      return res.status(429).json({ error: `Groq's per-minute limit: try again in ${wait} seconds`, retry_after: Math.min(wait, 120) });
+    }
     if (!r.ok) return res.status(502).json({ error: `The photo reader failed: ${body.error?.message || r.status}` });
     let items;
-    try { items = JSON.parse(body.choices?.[0]?.message?.content || '{}').items; } catch { items = null; }
+    try { // {"items": [...]}, or just [...]; some models wrap it in ```json or a <think> block
+      const text = String(body.choices?.[0]?.message?.content || '').replace(/<think>[\s\S]*?<\/think>/g, '').replace(/```(json)?/g, '').trim();
+      const j = JSON.parse(text.slice(Math.min(...['{', '['].map(c => text.indexOf(c)).filter(i => i >= 0))));
+      items = Array.isArray(j) ? j : j.items;
+    } catch { items = null; }
     if (!Array.isArray(items)) return res.status(502).json({ error: "The photo reader didn't return a menu. Try a clearer photo" });
     const rows = items.filter(i => i && String(i.name || '').trim()).map(i => [String(i.category || 'Menu').trim(), String(i.name).trim(), String(i.size || '').trim(),
       i.price == null || i.price === '' ? '' : String(i.price), String(i.description || '').trim()]);
