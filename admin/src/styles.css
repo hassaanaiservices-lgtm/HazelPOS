@@ -116,6 +116,8 @@ tr.click { cursor: pointer; } tr.click:hover td { background: var(--surface-2); 
 .edit-table input.bad { border-color: var(--danger); background: var(--danger-soft); }
 .edit-table td { padding: 4px; }
 .ok-t { color: var(--ok); }
+.side-user { padding: 0 12px 4px; }
+@media (max-width: 800px) { .side-user { display: none; } }
 .checks { display: flex; gap: 8px; flex-wrap: wrap; }
 .code { font: 700 30px var(--mono); letter-spacing: 0.1em; background: var(--surface-2); padding: 14px 20px; border-radius: var(--r-sm); user-select: all; display: inline-block; margin: 8px 0; }
 .pics { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 12px; margin-top: 12px; }

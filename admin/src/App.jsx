@@ -7,6 +7,8 @@ import Branch from './Branch'
 import Usage from './Usage'
 import Unpaid from './Unpaid'
 import Updates from './Updates'
+import Team from './Team'
+import Activity from './Activity'
 
 // Pages live in the address (#/clients, #/client/3, #/branch/5, #/usage), so Back and refresh work.
 const parse = () => {
@@ -29,8 +31,9 @@ export default function App() {
   if (auth === null) return <Notifier />
   if (!auth) return <><Login onIn={() => api('/me').then(setAuth)} /><Notifier /></>
 
-  const nav = [['clients', 'Clients', '🏪'], ['unpaid', 'Unpaid', '⏰'], ['updates', 'Updates', '⬆️'], ['usage', 'AI usage', '📊']]
-  const section = ['usage', 'unpaid', 'updates'].includes(route.page) ? route.page : 'clients'
+  const nav = [['clients', 'Clients', '🏪'], ['unpaid', 'Unpaid', '⏰'], ['updates', 'Updates', '⬆️'], ['usage', 'AI usage', '📊'], ['activity', 'Activity', '🕑'],
+    ...(auth.user?.role === 'owner' ? [['team', 'Team', '👥']] : [])]
+  const section = ['usage', 'unpaid', 'updates', 'activity', 'team'].includes(route.page) ? route.page : 'clients'
   return (
     <div className="shell">
       <aside className="side">
@@ -39,6 +42,7 @@ export default function App() {
           {nav.map(([p, label, icon]) => <a key={p} href={'#/' + p} className={section === p ? 'on' : ''} aria-current={section === p ? 'page' : undefined} aria-label={label}>
             <span aria-hidden="true">{icon}</span><span className="label">{label}</span></a>)}
         </nav>
+        <div className="side-user muted small">{auth.user?.name}{auth.user?.role ? ` · ${auth.user.role}` : ''}</div>
         <button className="link" onClick={() => api('/logout', {}).finally(() => setAuth(false))}>Log out</button>
       </aside>
       <main className="content">
@@ -47,6 +51,8 @@ export default function App() {
           : route.page === 'usage' ? <Usage />
           : route.page === 'unpaid' ? <Unpaid />
           : route.page === 'updates' ? <Updates />
+          : route.page === 'activity' ? <Activity />
+          : route.page === 'team' && auth.user?.role === 'owner' ? <Team me={auth.user} />
           : <Clients />}
       </main>
       <Notifier />
@@ -55,19 +61,21 @@ export default function App() {
 }
 
 function Login({ onIn }) {
+  const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
   const submit = async e => {
     e.preventDefault(); setBusy(true); setErr('')
-    try { await api('/login', { password }); onIn() } catch (e2) { setErr(e2.message); setBusy(false) }
+    try { await api('/login', { email, password }); onIn() } catch (e2) { setErr(e2.message); setBusy(false) }
   }
   return (
     <div className="login">
       <form className="card" onSubmit={submit}>
         <h1>HazelPOS Admin</h1>
         <p className="muted">Clients, onboarding, memberships, health and AI usage.</p>
-        <label>Password<input type="password" value={password} onChange={e => setPassword(e.target.value)} autoComplete="current-password" autoFocus required /></label>
+        <label>Email (team members; the main owner leaves it empty)<input type="email" value={email} onChange={e => setEmail(e.target.value)} autoComplete="username" /></label>
+        <label>Password<input type="password" value={password} onChange={e => setPassword(e.target.value)} autoComplete="current-password" required /></label>
         {err && <div className="err" role="alert">{err}</div>}
         <button className="primary" disabled={busy}>{busy ? 'Logging in…' : 'Log in'}</button>
       </form>

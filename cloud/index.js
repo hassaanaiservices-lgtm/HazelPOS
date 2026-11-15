@@ -56,6 +56,8 @@ for (const sql of [
 // The restaurant's setup you prepare before they install (server/setup.js applies it): one per branch
 db.exec(`
 CREATE TABLE IF NOT EXISTS vendor_settings (key TEXT PRIMARY KEY, value TEXT);
+CREATE TABLE IF NOT EXISTS vendor_users (id INTEGER PRIMARY KEY, email TEXT UNIQUE, name TEXT, pass TEXT, role TEXT DEFAULT 'staff', active INTEGER DEFAULT 1, created_at TEXT, last_login TEXT);
+CREATE TABLE IF NOT EXISTS vendor_audit (id INTEGER PRIMARY KEY, at TEXT, who TEXT, action TEXT, detail TEXT);
 CREATE TABLE IF NOT EXISTS setups (branch_id INTEGER PRIMARY KEY, data TEXT, updated_at TEXT, applied_at TEXT, applied TEXT, error TEXT);
 CREATE TABLE IF NOT EXISTS setup_images (id INTEGER PRIMARY KEY, branch_id INTEGER, caption TEXT, mime TEXT, data BLOB, sort INTEGER);
 CREATE TABLE IF NOT EXISTS branch_errors (id INTEGER PRIMARY KEY, branch_id INTEGER, at TEXT, text TEXT, UNIQUE (branch_id, at, text));
@@ -334,8 +336,47 @@ const keyMatches = k => k.length === VENDOR_KEY.length && crypto.timingSafeEqual
 const vendorAuth = (req, res, next) => {
   const k = (req.get('authorization') || '').replace(/^Bearer /, '');
   if (!VENDOR || !keyMatches(k)) return res.status(401).json({ error: 'Not allowed' });
+  // Who did it: the admin app's server says which team member is logged in (only it has the key, so this is trusted)
+  req.who = String(req.get('x-vendor-user') || 'admin app').slice(0, 120);
+  if (req.method !== 'GET' && !/^\/api\/vendor\/team\/login$/.test(req.path)) res.on('finish', () => {
+    if (res.statusCode >= 400) return;
+    const { password, file, image, data, rows, menu, ...rest } = req.body || {}; // no passwords, no big files in the log
+    const extra = [file && 'file', image && 'photo', data && 'picture', rows && `${rows.length} rows`, menu && `menu of ${menu.length}`].filter(Boolean).join(', ');
+    db.prepare('INSERT INTO vendor_audit (at, who, action, detail) VALUES (?,?,?,?)')
+      .run(now(), req.who, `${req.method} ${req.path.replace('/api/vendor', '')}`, (JSON.stringify(rest) + (extra ? ` + ${extra}` : '')).slice(0, 600));
+  });
   next();
 };
+
+// ---------- Vendor team (S9): one login per team member; roles: owner (also manages the team) or staff ----------
+const publicUser = u => ({ id: u.id, email: u.email, name: u.name, role: u.role, active: !!u.active, created_at: u.created_at, last_login: u.last_login });
+app.post('/api/vendor/team/login', vendorAuth, (req, res) => {
+  const u = db.prepare('SELECT * FROM vendor_users WHERE email=?').get(String(req.body.email || '').trim().toLowerCase());
+  if (!u || !u.active || !passMatches(req.body.password || '', u.pass)) return res.status(401).json({ error: 'Wrong email or password' });
+  db.prepare('UPDATE vendor_users SET last_login=? WHERE id=?').run(now(), u.id);
+  db.prepare('INSERT INTO vendor_audit (at, who, action, detail) VALUES (?,?,?,?)').run(now(), `${u.name} <${u.email}>`, 'LOGIN', '');
+  res.json(publicUser(u));
+});
+app.get('/api/vendor/team', vendorAuth, (req, res) => res.json(db.prepare('SELECT * FROM vendor_users ORDER BY id').all().map(publicUser)));
+app.post('/api/vendor/team', vendorAuth, (req, res) => {
+  const email = String(req.body.email || '').trim().toLowerCase(), pass = String(req.body.password || '');
+  if (!/^\S+@\S+\.\S+$/.test(email)) return res.status(400).json({ error: 'Enter a valid email' });
+  if (pass.length < 10) return res.status(400).json({ error: 'Password must be at least 10 characters' });
+  if (db.prepare('SELECT 1 FROM vendor_users WHERE email=?').get(email)) return res.status(400).json({ error: 'This email is already on the team' });
+  const role = req.body.role === 'owner' ? 'owner' : 'staff';
+  const id = db.prepare('INSERT INTO vendor_users (email, name, pass, role, created_at) VALUES (?,?,?,?,?)').run(email, String(req.body.name || '').trim() || email, hashPass(pass), role, now()).lastInsertRowid;
+  res.json(publicUser(db.prepare('SELECT * FROM vendor_users WHERE id=?').get(id)));
+});
+app.post('/api/vendor/team/:id', vendorAuth, (req, res) => {
+  const u = db.prepare('SELECT * FROM vendor_users WHERE id=?').get(req.params.id);
+  if (!u) return res.status(404).json({ error: 'Not found' });
+  const b = req.body || {};
+  if (b.password !== undefined && String(b.password).length < 10) return res.status(400).json({ error: 'Password must be at least 10 characters' });
+  db.prepare('UPDATE vendor_users SET name=?, role=?, active=?, pass=? WHERE id=?').run(b.name ?? u.name, b.role === undefined ? u.role : b.role === 'owner' ? 'owner' : 'staff',
+    b.active === undefined ? u.active : b.active ? 1 : 0, b.password !== undefined ? hashPass(String(b.password)) : u.pass, u.id);
+  res.json(publicUser(db.prepare('SELECT * FROM vendor_users WHERE id=?').get(u.id)));
+});
+app.get('/api/vendor/audit', vendorAuth, (req, res) => res.json(db.prepare('SELECT * FROM vendor_audit ORDER BY id DESC LIMIT ?').all(Math.min(1000, +req.query.limit || 300))));
 const addMonths = (from, n) => { const d = new Date(from + 'T00:00:00Z'); d.setUTCMonth(d.getUTCMonth() + n); return d.toISOString().slice(0, 10); };
 app.get('/api/vendor/owners', vendorAuth, (req, res) => {
   const month = today().slice(0, 7);
