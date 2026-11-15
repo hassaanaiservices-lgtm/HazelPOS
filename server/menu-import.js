@@ -136,7 +136,8 @@ function toMenu(rows) {
 // What importing would change in this POS database (dry run) or does change (apply=true).
 // Items are matched by name (case doesn't matter); existing items keep their id, so old orders stay linked.
 // hideMissing: items on the POS menu that aren't in the file are hidden (never deleted).
-function importMenu(db, menu, { apply = false, hideMissing = false } = {}) {
+// inTransaction: the caller already opened one (setup.js)
+function importMenu(db, menu, { apply = false, hideMissing = false, inTransaction = false } = {}) {
   const cats = db.prepare('SELECT id, name FROM categories').all();
   const prods = db.prepare('SELECT id, name, price, category_id, sizes, description, emoji, active FROM products').all();
   const catBy = new Map(cats.map(c => [c.name.toLowerCase(), c.id]));
@@ -174,7 +175,7 @@ function importMenu(db, menu, { apply = false, hideMissing = false } = {}) {
       }
     }
   };
-  if (apply) { db.exec('BEGIN'); try { run(); db.exec('COMMIT'); } catch (e) { db.exec('ROLLBACK'); throw e; } }
+  if (apply && !inTransaction) { db.exec('BEGIN'); try { run(); db.exec('COMMIT'); } catch (e) { db.exec('ROLLBACK'); throw e; } }
   else run();
   return plan;
 }

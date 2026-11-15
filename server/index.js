@@ -4,6 +4,15 @@ const cors = require('cors');
 const path = require('path');
 const { DatabaseSync } = require('node:sqlite');
 
+// The last errors, so the health report to your vendor page can show what went wrong at a restaurant (server/licence.js)
+const recentErrors = [];
+const logError = console.error;
+console.error = (...a) => {
+  recentErrors.push({ at: new Date().toISOString(), text: a.map(x => x instanceof Error ? x.stack || x.message : typeof x === 'string' ? x : JSON.stringify(x)).join(' ').slice(0, 1000) });
+  if (recentErrors.length > 30) recentErrors.shift();
+  logError(...a);
+};
+
 const db = new DatabaseSync(process.env.POS_DB || path.join(__dirname, 'pos.db')); // POS_DB: run against another database (testing)
 db.exec('PRAGMA busy_timeout = 5000');
 // DEMO=1: the free demo. The login screen offers the three roles without PINs (see client/src/Login.jsx).
@@ -1459,16 +1468,29 @@ app.post('/api/cloud/disconnect', (req, res) => {
 });
 
 // ---------- Membership (installed app only: HAZEL_LICENCE=1, see server/licence.js) ----------
-const lic = require('./licence')(db, cloud);
+const setupApplier = require('./setup')(db, { hashPin });
+// What your vendor page sees about this POS. Never customer data: counts, statuses and error messages only.
+const health = () => {
+  const w = waModule?.wa.status() || {};
+  return {
+    version: process.env.HAZEL_VERSION || require('./package.json').version, platform: `${process.platform} ${process.arch}`, node: process.versions.node,
+    uptime_min: Math.round(process.uptime() / 60),
+    whatsapp: { status: w.status, connected_at: w.connected_at, error: w.error || '', assistant: waModule?.assistant.enabled() ?? null },
+    orders_today: db.prepare("SELECT COUNT(*) c FROM orders WHERE date(created_at,'localtime') = date('now','localtime')").get().c,
+    cloud_sync: (({ last_sync, last_backup, last_error, pending_orders }) => ({ last_sync, last_backup, last_error, pending_orders }))(cloud.status()),
+    errors: recentErrors.slice(-20),
+  };
+};
+const lic = require('./licence')(db, cloud, { setup: setupApplier, health });
 app.get('/api/licence', (req, res) => res.json(lic.state()));
 app.post('/api/licence/check', async (req, res) => res.json(await lic.check()));
 app.post('/api/licence/activate', async (req, res) => {
   if (!lic.required) return res.status(400).json({ error: 'This POS does not need activating' });
   // Before activation nobody can log in yet, so the screen is open; afterwards only the owner can re-point it
   if (lic.state().state !== 'activate' && req.user?.role !== 'admin') return res.status(403).json({ error: 'Already activated. Ask the owner' });
-  const url = String(req.body.url || '').trim(), key = String(req.body.key || '').trim();
-  if (!/^https?:\/\//.test(url) || !key) return res.status(400).json({ error: 'Enter the cloud address and the branch key' });
-  try { res.json(await lic.activate(url, key)); }
+  const url = String(req.body.url || '').trim(), code = String(req.body.code || req.body.key || '').trim();
+  if (!code) return res.status(400).json({ error: 'Enter the activation code' });
+  try { res.json(await lic.activate(url, code)); }
   catch (e) { res.status(502).json({ error: `Could not activate: ${e.message}` }); }
 });
 
@@ -1518,7 +1540,7 @@ function createOrder({ type, zone_id, customer, phone, address, items, userName,
     return orderId;
   });
 }
-require('./whatsapp')(app, db, { createOrder, getOrder, printKitchen, getSettings });
+const waModule = require('./whatsapp')(app, db, { createOrder, getOrder, printKitchen, getSettings });
 
 // ---------- Excel / CSV export (rows; the client turns them into a file) ----------
 const exportRange = req => [req.query.from || '0000-01-01', req.query.to || '9999-12-31'];

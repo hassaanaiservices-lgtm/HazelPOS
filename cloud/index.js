@@ -35,7 +35,20 @@ for (const sql of [
   'ALTER TABLE owners ADD COLUMN plan TEXT',
   'ALTER TABLE owners ADD COLUMN phone TEXT',
   'ALTER TABLE owners ADD COLUMN notes TEXT',
+  // Activation code (HZ-XXXX-XXXX): one use, swapped for the branch key by the installed app
+  'ALTER TABLE branches ADD COLUMN code_hash TEXT',
+  'ALTER TABLE branches ADD COLUMN code_created_at TEXT',
+  'ALTER TABLE branches ADD COLUMN code_used_at TEXT',
+  // Latest health report from the branch's POS (version, WhatsApp, errors): server/index.js health()
+  'ALTER TABLE branches ADD COLUMN health TEXT',
+  'ALTER TABLE branches ADD COLUMN health_at TEXT',
 ]) { try { db.exec(sql); } catch { /* already there */ } }
+// The restaurant's setup you prepare before they install (server/setup.js applies it): one per branch
+db.exec(`
+CREATE TABLE IF NOT EXISTS setups (branch_id INTEGER PRIMARY KEY, data TEXT, updated_at TEXT, applied_at TEXT, applied TEXT, error TEXT);
+CREATE TABLE IF NOT EXISTS setup_images (id INTEGER PRIMARY KEY, branch_id INTEGER, caption TEXT, mime TEXT, data BLOB, sort INTEGER);
+CREATE TABLE IF NOT EXISTS branch_errors (id INTEGER PRIMARY KEY, branch_id INTEGER, at TEXT, text TEXT, UNIQUE (branch_id, at, text));
+`);
 
 const now = () => new Date().toISOString();
 const sha = s => crypto.createHash('sha256').update(String(s)).digest('hex');
@@ -178,7 +191,51 @@ const branchAuth = (req, res, next) => {
 };
 app.get('/api/sync/hello', branchAuth, (req, res) => res.json({ branch: req.branch.name, id: req.branch.id }));
 // The installed POS asks this every few hours (server/licence.js) and keeps the last answer for offline days
-app.get('/api/licence', branchAuth, (req, res) => res.json({ ...membership(req.branch.owner_id), branch: req.branch.name, server_time: now() }));
+app.get('/api/licence', branchAuth, (req, res) => {
+  const st = db.prepare('SELECT updated_at, applied_at FROM setups WHERE branch_id=?').get(req.branch.id);
+  res.json({ ...membership(req.branch.owner_id), branch: req.branch.name, server_time: now(), setup_ready: !!st && !st.applied_at });
+});
+
+// ---------- Activation code + setup download (the installed app, right after activation) ----------
+// The code is one use: it's swapped for a NEW branch key, so an old install on another PC stops working.
+app.post('/api/activate', (req, res) => {
+  const f = fails.get('a:' + req.ip) || { n: 0, until: 0 };
+  if (f.until > Date.now()) return res.status(429).json({ error: 'Too many wrong codes. Try again in 15 minutes' });
+  const code = String(req.body.code || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+  const b = code && db.prepare('SELECT * FROM branches WHERE code_hash=? AND code_used_at IS NULL').get(sha(code));
+  if (!b) { f.n++; if (f.n >= 10) { f.n = 0; f.until = Date.now() + 15 * 60 * 1000; } fails.set('a:' + req.ip, f); return res.status(400).json({ error: 'That activation code is wrong or was already used. Ask HazelPOS for a new one' }); }
+  fails.delete('a:' + req.ip);
+  if (!membership(b.owner_id).active) return res.status(402).json({ error: 'The HazelPOS membership for this restaurant is not active yet. Contact HazelPOS' });
+  const key = 'hz_' + crypto.randomBytes(24).toString('hex');
+  db.prepare('UPDATE branches SET key_hash=?, code_used_at=?, last_ip=? WHERE id=?').run(sha(key), now(), req.ip, b.id);
+  res.json({ key, branch: b.name });
+});
+app.get('/api/setup', branchAuth, (req, res) => {
+  const st = db.prepare('SELECT * FROM setups WHERE branch_id=?').get(req.branch.id);
+  if (!st) return res.json({ setup: null });
+  const images = db.prepare('SELECT caption, mime, data FROM setup_images WHERE branch_id=? ORDER BY sort, id').all(req.branch.id)
+    .map(i => ({ caption: i.caption, mime: i.mime, data: Buffer.from(i.data).toString('base64') }));
+  res.json({ setup: { ...JSON.parse(st.data || '{}'), images }, updated_at: st.updated_at });
+});
+// The POS applied it (or couldn't). Staff PINs are removed from the cloud copy once they're on the PC.
+app.post('/api/setup/applied', branchAuth, (req, res) => {
+  const st = db.prepare('SELECT * FROM setups WHERE branch_id=?').get(req.branch.id);
+  if (!st) return res.json({ ok: true });
+  if (req.body.error) { db.prepare('UPDATE setups SET error=? WHERE branch_id=?').run(String(req.body.error).slice(0, 500), req.branch.id); return res.json({ ok: true }); }
+  const data = JSON.parse(st.data || '{}');
+  if (Array.isArray(data.staff)) data.staff = data.staff.map(({ pin, ...u }) => ({ ...u, pin_applied: true }));
+  db.prepare('UPDATE setups SET applied_at=?, applied=?, error=NULL, data=? WHERE branch_id=?').run(now(), JSON.stringify(req.body.done || {}), JSON.stringify(data), req.branch.id);
+  res.json({ ok: true });
+});
+// Health report every few hours (server/licence.js): kept for your vendor page; errors are kept as a short history
+app.post('/api/sync/health', branchAuth, (req, res) => {
+  const { errors = [], ...h } = req.body || {};
+  db.prepare('UPDATE branches SET health=?, health_at=? WHERE id=?').run(JSON.stringify(h).slice(0, 20000), now(), req.branch.id);
+  const ins = db.prepare('INSERT OR IGNORE INTO branch_errors (branch_id, at, text) VALUES (?,?,?)');
+  for (const e of errors.slice(-30)) ins.run(req.branch.id, String(e.at || now()), String(e.text || '').slice(0, 1000));
+  db.prepare('DELETE FROM branch_errors WHERE branch_id=? AND id NOT IN (SELECT id FROM branch_errors WHERE branch_id=? ORDER BY at DESC LIMIT 200)').run(req.branch.id, req.branch.id);
+  res.json({ ok: true });
+});
 
 // Upserts are keyed by (branch, local id), so re-sending the same batch is harmless
 app.post('/api/sync/push', branchAuth, (req, res) => {
@@ -232,7 +289,7 @@ function membership(ownerId) {
 // ---------- Vendor (you): restaurants, memberships, AI usage — page: /vendor.html ----------
 const vendorTokens = new Map(); // token -> created; in memory, so a restart means logging in again
 const vendorAuth = (req, res, next) => {
-  const t = (req.get('authorization') || '').replace(/^Bearer /, '');
+  const t = (req.get('authorization') || '').replace(/^Bearer /, '') || String(req.query.t || ''); // ?t= only for <img> previews
   const at = VENDOR && vendorTokens.get(t);
   if (!at || Date.now() - at > 7 * 864e5) return res.status(401).json({ error: 'Please log in again' });
   next();
@@ -253,8 +310,10 @@ app.get('/api/vendor/owners', vendorAuth, (req, res) => {
   const month = today().slice(0, 7);
   res.json(db.prepare('SELECT id, email, name, phone, plan, notes, paid_until, suspended, created_at FROM owners ORDER BY id DESC').all().map(o => ({
     ...o, ...membership(o.id),
-    branches: db.prepare('SELECT id, name, created_at, last_sync, last_ip FROM branches WHERE owner_id=? ORDER BY id').all(o.id).map(b => ({
-      ...b,
+    branches: db.prepare('SELECT id, name, created_at, last_sync, last_ip, code_created_at, code_used_at, health, health_at FROM branches WHERE owner_id=? ORDER BY id').all(o.id).map(b => ({
+      ...b, health: JSON.parse(b.health || 'null'),
+      setup: setupSummary(b.id),
+      errors_24h: db.prepare('SELECT COUNT(*) c FROM branch_errors WHERE branch_id=? AND at > ?').get(b.id, new Date(Date.now() - 864e5).toISOString()).c,
       ai: db.prepare(`SELECT COUNT(*) calls, COALESCE(SUM(tokens_in),0) tokens_in, COALESCE(SUM(tokens_cached),0) tokens_cached,
         COALESCE(SUM(tokens_out),0) tokens_out, COALESCE(SUM(audio_seconds),0) audio_seconds, COALESCE(SUM(ok=0),0) failed
         FROM ai_usage WHERE branch_id=? AND substr(day,1,7)=?`).get(b.id, month),
@@ -293,20 +352,116 @@ app.post('/api/vendor/owners/:id/extend', vendorAuth, (req, res) => {
   db.prepare('UPDATE owners SET paid_until=? WHERE id=?').run(addMonths(from, months), o.id);
   res.json({ ok: true, ...membership(o.id) });
 });
-// The branch key goes into the restaurant's activation screen. Shown once; only its hash is kept.
+// A new branch comes with its activation code (shown once). The branch key itself is made when the code is used.
 app.post('/api/vendor/owners/:id/branches', vendorAuth, (req, res) => {
   const o = vendorOwner(req, res); if (!o) return;
   const name = String(req.body.name || '').trim() || 'Main branch';
-  const key = 'hz_' + crypto.randomBytes(24).toString('hex');
-  const id = db.prepare('INSERT INTO branches (owner_id,name,key_hash,created_at) VALUES (?,?,?,?)').run(o.id, name, sha(key), now()).lastInsertRowid;
-  res.json({ id, name, key });
+  const code = newCode();
+  const id = db.prepare('INSERT INTO branches (owner_id,name,key_hash,created_at,code_hash,code_created_at) VALUES (?,?,?,?,?,?)')
+    .run(o.id, name, sha(crypto.randomBytes(24).toString('hex')), now(), codeHash(code), now()).lastInsertRowid;
+  res.json({ id, name, code });
 });
+app.get('/api/vendor/menu-template', vendorAuth, (req, res) => menuImport ? res.json(menuImport.TEMPLATE) : res.status(503).json({ error: 'Menu upload is off on this server' }));
 app.post('/api/vendor/branches/:id/rekey', vendorAuth, (req, res) => {
   const b = db.prepare('SELECT * FROM branches WHERE id=?').get(req.params.id);
   if (!b) return res.status(404).json({ error: 'Branch not found' });
   const key = 'hz_' + crypto.randomBytes(24).toString('hex');
   db.prepare('UPDATE branches SET key_hash=? WHERE id=?').run(sha(key), b.id);
   res.json({ id: b.id, name: b.name, key });
+});
+
+// ---------- Vendor: a branch's setup (prepared before the restaurant installs; server/setup.js applies it) ----------
+let menuImport = null; // the same reader the POS uses; needs the whole repo deployed (cloud/README.md → Railway)
+try { menuImport = require('../server/menu-import'); } catch { /* cloud deployed alone: menu upload is off */ }
+const CODE_CHARS = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'; // no 0/O, 1/I/L: read out on the phone without mistakes
+const newCode = () => { const c = Array.from(crypto.randomBytes(8), x => CODE_CHARS[x % CODE_CHARS.length]).join(''); return `HZ-${c.slice(0, 4)}-${c.slice(4)}`; };
+const codeHash = code => sha(code.toUpperCase().replace(/[^A-Z0-9]/g, ''));
+const getSetup = id => { const st = db.prepare('SELECT * FROM setups WHERE branch_id=?').get(id); return { st, data: JSON.parse(st?.data || '{}') }; };
+function saveSetup(id, data) {
+  db.prepare(`INSERT INTO setups (branch_id, data, updated_at) VALUES (?,?,?)
+    ON CONFLICT(branch_id) DO UPDATE SET data=excluded.data, updated_at=excluded.updated_at, applied_at=NULL, error=NULL`).run(id, JSON.stringify(data), now());
+}
+function setupSummary(id) {
+  const { st, data } = getSetup(id);
+  return {
+    restaurant: !!data.restaurant?.name, menu: (data.menu || []).length, tables: (data.tables || []).length, zones: (data.zones || []).length,
+    staff: (data.staff || []).length, images: db.prepare('SELECT COUNT(*) c FROM setup_images WHERE branch_id=?').get(id).c,
+    updated_at: st?.updated_at || null, applied_at: st?.applied_at || null, error: st?.error || null,
+  };
+}
+const vendorBranch = (req, res) => {
+  const b = db.prepare('SELECT * FROM branches WHERE id=?').get(req.params.id);
+  if (!b) res.status(404).json({ error: 'Branch not found' });
+  return b;
+};
+app.get('/api/vendor/branches/:id/setup', vendorAuth, (req, res) => {
+  const b = vendorBranch(req, res); if (!b) return;
+  const { st, data } = getSetup(b.id);
+  res.json({
+    branch: { id: b.id, name: b.name, code_created_at: b.code_created_at, code_used_at: b.code_used_at, last_sync: b.last_sync, health: JSON.parse(b.health || 'null'), health_at: b.health_at },
+    setup: data, summary: setupSummary(b.id), applied: JSON.parse(st?.applied || 'null'), menu_upload: !!menuImport,
+    images: db.prepare('SELECT id, caption, length(data) size FROM setup_images WHERE branch_id=? ORDER BY sort, id').all(b.id),
+    errors: db.prepare('SELECT at, text FROM branch_errors WHERE branch_id=? ORDER BY at DESC LIMIT 50').all(b.id),
+  });
+});
+// Restaurant details, tables, delivery areas, staff (any of them). Saving again re-sends the setup to a POS that has
+// no orders yet; a POS that already has orders keeps its own data.
+app.post('/api/vendor/branches/:id/setup', vendorAuth, (req, res) => {
+  const b = vendorBranch(req, res); if (!b) return;
+  const { data } = getSetup(b.id), body = req.body || {};
+  if (body.restaurant) data.restaurant = Object.fromEntries(Object.entries(body.restaurant).map(([k, v]) => [k, String(v ?? '').slice(0, 300)]));
+  if (Array.isArray(body.tables)) data.tables = body.tables.slice(0, 300).map(t => ({ name: String(t.name || '').trim(), seats: +t.seats || 4, floor: String(t.floor || '').trim() })).filter(t => t.name);
+  if (Array.isArray(body.zones)) data.zones = body.zones.slice(0, 200).map(z => ({ name: String(z.name || '').trim(), fee: +z.fee || 0, min_order: +z.min_order || 0, free_above: +z.free_above || 0, eta_min: +z.eta_min || 45 })).filter(z => z.name);
+  if (Array.isArray(body.staff)) {
+    const staff = body.staff.map(u => ({ name: String(u.name || '').trim(), role: u.role, pin: String(u.pin || '').trim() })).filter(u => u.name);
+    if (staff.some(u => !['admin', 'cashier', 'kitchen'].includes(u.role))) return res.status(400).json({ error: 'Role must be admin, cashier or kitchen' });
+    if (staff.some(u => !/^\d{4,6}$/.test(u.pin))) return res.status(400).json({ error: 'Every PIN must be 4 to 6 digits' });
+    if (new Set(staff.map(u => u.pin)).size !== staff.length) return res.status(400).json({ error: 'Two people have the same PIN' });
+    if (staff.length && !staff.some(u => u.role === 'admin')) return res.status(400).json({ error: 'Add at least one admin (the owner), or they cannot open Settings' });
+    data.staff = staff;
+  }
+  saveSetup(b.id, data);
+  res.json({ ok: true, summary: setupSummary(b.id) });
+});
+// Menu from Excel/CSV: same reader as the POS. Dry run unless apply:true; rows with errors block it.
+app.post('/api/vendor/branches/:id/setup/menu', vendorAuth, (req, res) => {
+  const b = vendorBranch(req, res); if (!b) return;
+  if (!menuImport) return res.status(503).json({ error: 'Menu upload needs the whole HazelPOS repo deployed (see cloud/README.md)' });
+  let menu;
+  try { menu = menuImport.toMenu(menuImport.readSheet(Buffer.from(String(req.body.file || ''), 'base64'), String(req.body.name || ''))); }
+  catch (e) { return res.status(400).json({ error: e.message }); }
+  const categories = [...new Set(menu.items.map(i => i.category))];
+  const apply = !!req.body.apply && !menu.errors.length && menu.items.length > 0;
+  if (apply) { const { data } = getSetup(b.id); data.menu = menu.items; saveSetup(b.id, data); }
+  res.json({ applied: apply, items: menu.items.length, categories, errors: menu.errors, sample: menu.items.slice(0, 8) });
+});
+app.post('/api/vendor/branches/:id/setup/images', vendorAuth, (req, res) => {
+  const b = vendorBranch(req, res); if (!b) return;
+  const m = /^data:(image\/(jpeg|png|webp));base64,(.+)$/.exec(String(req.body.data || ''));
+  if (!m) return res.status(400).json({ error: 'Choose a JPG, PNG or WebP picture' });
+  const data = Buffer.from(m[3], 'base64');
+  if (data.length > 1.5 * 1024 * 1024) return res.status(400).json({ error: 'That picture is too large (max 1.5 MB)' });
+  if (db.prepare('SELECT COUNT(*) c FROM setup_images WHERE branch_id=?').get(b.id).c >= 6) return res.status(400).json({ error: 'Up to 6 menu pictures' });
+  const sort = (db.prepare('SELECT MAX(sort) s FROM setup_images WHERE branch_id=?').get(b.id).s ?? 0) + 1;
+  db.prepare('INSERT INTO setup_images (branch_id, caption, mime, data, sort) VALUES (?,?,?,?,?)').run(b.id, String(req.body.caption || '').slice(0, 200), m[1], data, sort);
+  const { data: d } = getSetup(b.id); saveSetup(b.id, d); // re-send to a POS without orders
+  res.json({ ok: true });
+});
+app.post('/api/vendor/setup-images/:id/delete', vendorAuth, (req, res) => {
+  const im = db.prepare('SELECT branch_id FROM setup_images WHERE id=?').get(req.params.id);
+  if (im) { db.prepare('DELETE FROM setup_images WHERE id=?').run(req.params.id); const { data } = getSetup(im.branch_id); saveSetup(im.branch_id, data); }
+  res.json({ ok: true });
+});
+app.get('/api/vendor/setup-images/:id', vendorAuth, (req, res) => {
+  const im = db.prepare('SELECT mime, data FROM setup_images WHERE id=?').get(req.params.id);
+  im ? res.type(im.mime).send(Buffer.from(im.data)) : res.status(404).end();
+});
+// A new activation code: shown once. Using it on a PC swaps it for a new key, so any older install stops.
+app.post('/api/vendor/branches/:id/code', vendorAuth, (req, res) => {
+  const b = vendorBranch(req, res); if (!b) return;
+  const code = newCode();
+  db.prepare('UPDATE branches SET code_hash=?, code_created_at=?, code_used_at=NULL WHERE id=?').run(codeHash(code), now(), b.id);
+  res.json({ code, branch: b.name });
 });
 
 // ---------- AI proxy (Authorization: Bearer <branch key>) ----------

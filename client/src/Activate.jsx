@@ -1,19 +1,28 @@
 import { useState } from 'react'
 import { api } from './lib'
+import { toast } from './notify'
 
-// First run of the installed app: the restaurant types the HazelPOS Cloud address and the branch key you gave them.
-// Until then nobody can log in. (server/licence.js; only when the server runs with HAZEL_LICENCE=1)
+// First run of the installed app: the restaurant types the activation code you gave them (HZ-XXXX-XXXX). The POS then
+// downloads its setup (menu, tables, staff…) from HazelPOS Cloud. Until then nobody can log in.
+// (server/licence.js; only when the server runs with HAZEL_LICENCE=1)
 export default function Activate({ settings, onDone }) {
-  const [url, setUrl] = useState('https://')
-  const [key, setKey] = useState('')
+  const builtIn = settings.licence?.default_url || ''
+  const [otherUrl, setOtherUrl] = useState(!builtIn)
+  const [url, setUrl] = useState(builtIn || 'https://')
+  const [code, setCode] = useState('')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
 
   const submit = async e => {
     e.preventDefault()
     setBusy(true); setErr('')
-    try { await api('/licence/activate', { url: url.trim(), key: key.trim() }); onDone() }
-    catch (e2) { setErr(e2.message) }
+    try {
+      const r = await api('/licence/activate', { url: otherUrl ? url.trim() : '', code: code.trim() })
+      if (r.setup_error) toast(`Activated, but the setup didn't load: ${r.setup_error}`, 'error')
+      else if (r.setup_applied_at) toast('Activated. Your menu and setup are ready')
+      else toast('Activated')
+      onDone()
+    } catch (e2) { setErr(e2.message) }
     finally { setBusy(false) }
   }
 
@@ -22,11 +31,15 @@ export default function Activate({ settings, onDone }) {
       <form className="login-card activate-card" onSubmit={submit}>
         <div className="brand-mark login-logo" aria-hidden="true">{settings.logo}</div>
         <h1>Activate HazelPOS</h1>
-        <p className="muted">Enter the cloud address and branch key from HazelPOS. This PC needs internet for this step only.</p>
-        <label>Cloud address<input value={url} onChange={e => setUrl(e.target.value)} inputMode="url" autoComplete="off" required /></label>
-        <label>Branch key<input value={key} onChange={e => setKey(e.target.value)} placeholder="hz_…" autoComplete="off" spellCheck="false" required /></label>
-        {err && <div className="err">{err}</div>}
-        <button className="primary" disabled={busy}>{busy ? 'Checking…' : 'Activate'}</button>
+        <p className="muted">Type the activation code HazelPOS gave you. This PC needs internet for this step only.</p>
+        <label>Activation code
+          <input className="activate-code" value={code} onChange={e => setCode(e.target.value.toUpperCase())} placeholder="HZ-XXXX-XXXX"
+            autoComplete="off" spellCheck="false" autoFocus required /></label>
+        {otherUrl
+          ? <label>Cloud address<input value={url} onChange={e => setUrl(e.target.value)} inputMode="url" autoComplete="off" required /></label>
+          : <button type="button" className="ghost sm" onClick={() => setOtherUrl(true)}>Use a different cloud address</button>}
+        {err && <div className="err" role="alert">{err}</div>}
+        <button className="primary" disabled={busy}>{busy ? 'Activating…' : 'Activate'}</button>
       </form>
     </div>
   )

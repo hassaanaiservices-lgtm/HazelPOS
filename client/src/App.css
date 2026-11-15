@@ -311,6 +311,7 @@ main > section { flex: 1; min-height: 0; }
 .activate-card .login-logo, .activate-card h1 { align-self: center; }
 .activate-card label { text-align: left; }
 .activate-card button { min-height: 44px; }
+.activate-code { font-family: var(--mono); font-size: var(--fs-lg); letter-spacing: 0.08em; text-align: center; }
 .file-btn { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; flex-direction: row; color: var(--accent-ink); font-size: var(--fs-md); font-weight: 700; min-height: 44px; }
 .file-btn.disabled { opacity: 0.5; cursor: not-allowed; }
 .import-modal { width: 600px; max-width: 95vw; max-height: 88vh; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; }

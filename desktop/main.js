@@ -9,6 +9,8 @@ const path = require('path');
 const QRCode = require('qrcode');
 
 const PORT = 4000;
+// Your HazelPOS Cloud, built into the installer, so the restaurant only types its activation code (package.json "hazel")
+const CLOUD_URL = require('./package.json').hazel?.cloudUrl || '';
 const LOCAL = `http://localhost:${PORT}`;
 // Packaged: server/, client/dist and rag/ are copied to resources/app (see package.json "extraResources").
 const ROOT = app.isPackaged ? path.join(process.resourcesPath, 'app') : path.join(__dirname, '..');
@@ -29,7 +31,8 @@ function startServer() {
   // Electron's own Node runs the server, so the restaurant never installs Node.
   server = spawn(process.execPath, [path.join(ROOT, 'server', 'index.js')], {
     cwd: path.join(ROOT, 'server'),
-    env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', PORT: String(PORT), POS_DB: path.join(DATA, 'pos.db'), HAZEL_DATA_DIR: DATA, HAZEL_LICENCE: '1' }, // licence: server/licence.js
+    env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', PORT: String(PORT), POS_DB: path.join(DATA, 'pos.db'), HAZEL_DATA_DIR: DATA, HAZEL_LICENCE: '1', // licence: server/licence.js
+      HAZEL_VERSION: app.getVersion(), HAZEL_CLOUD_URL: CLOUD_URL },
     windowsHide: true,
   });
   server.stdout.pipe(log, { end: false });

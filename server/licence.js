@@ -1,7 +1,9 @@
 // HazelPOS membership (licence). Only on installs that need one: HAZEL_LICENCE=1, which the desktop app sets.
 // Your own PC (npm run server) and the public demo never ask for it.
 //
-// The install is activated with HazelPOS Cloud's address and the branch key (the same pair cloud sync uses). Every few
+// The install is activated with an activation code (HZ-XXXX-XXXX, from your vendor page) or the long branch key. The
+// cloud's address comes with the installer (HAZEL_CLOUD_URL). Right after activation the POS downloads the restaurant's
+// setup (server/setup.js), if you prepared one. Every few
 // hours it asks the cloud "is this restaurant's membership paid?" and remembers the last answer, so billing never stops
 // because the internet dropped. Rules (see RISKS.md, L1-L3: not final):
 //   - no answer from the cloud for OFFLINE_WARN_DAYS: banner; for OFFLINE_LOCK_DAYS: new orders locked
@@ -12,7 +14,8 @@ const OFFLINE_WARN_DAYS = 3, OFFLINE_LOCK_DAYS = 7, GRACE_DAYS = 3, DUE_SOON_DAY
 const CHECK_EVERY_MS = 3 * 60 * 60 * 1000;
 const DAY = 864e5;
 
-module.exports = function licence(db, cloud) {
+// setup: server/setup.js applier · health: () => what the POS reports to your vendor page (version, WhatsApp, errors)
+module.exports = function licence(db, cloud, { setup = null, health = () => ({}) } = {}) {
   const required = process.env.HAZEL_LICENCE === '1';
   // cloud_config is created by cloud-sync.js, which runs first
   const get = k => db.prepare('SELECT value FROM cloud_config WHERE key=?').get(k)?.value || '';
@@ -22,24 +25,52 @@ module.exports = function licence(db, cloud) {
   const clock = () => Math.max(Date.now(), +get('lic_clock') || 0);
   const tick = () => { const t = clock(); set('lic_clock', t); return t; }; // saved on each check, not on every read
 
+  const base = () => get('url').replace(/\/+$/, '');
+  async function call(urlPath, body, timeout = 20000) {
+    const r = await fetch(base() + urlPath, {
+      method: body === undefined ? 'GET' : 'POST', signal: AbortSignal.timeout(timeout),
+      headers: { Authorization: 'Bearer ' + get('key'), 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    return [r, await r.json().catch(() => ({}))];
+  }
+
   async function check() {
     if (!required || !get('url') || !get('key')) return state();
+    let data = {};
     try {
-      const r = await fetch(get('url').replace(/\/+$/, '') + '/api/licence', {
-        headers: { Authorization: 'Bearer ' + get('key') }, signal: AbortSignal.timeout(20000),
-      });
-      const data = await r.json().catch(() => ({}));
+      const [r, d] = await call('/api/licence'); data = d;
       if (r.status === 401) { set('lic_answer', JSON.stringify({ active: false, revoked: true })); set('lic_checked_at', tick()); }
-      else if (r.ok) { set('lic_answer', JSON.stringify(data)); set('lic_checked_at', tick()); set('lic_error', ''); }
-      else set('lic_error', data.error || `Cloud replied ${r.status}`);
-    } catch (e) { tick(); set('lic_error', e.name === 'TimeoutError' ? 'Cloud took too long to answer' : 'Cloud not reachable (no internet?)'); }
+      else if (r.ok) { set('lic_answer', JSON.stringify(d)); set('lic_checked_at', tick()); set('lic_error', ''); }
+      else set('lic_error', d.error || `Cloud replied ${r.status}`);
+    } catch (e) { tick(); set('lic_error', e.name === 'TimeoutError' ? 'Cloud took too long to answer' : 'Cloud not reachable (no internet?)'); return state(); }
+    // You prepared (or finished) the restaurant's setup after they activated: take it now, while there are no orders yet
+    if (data.setup_ready && setup && !setup.appliedAt() && !setup.hasOrders()) await pullSetup();
+    call('/api/sync/health', { ...health(), licence: state().state, setup_applied_at: setup?.appliedAt() || null, setup_error: get('setup_error') || null })
+      .catch(() => {}); // only for your vendor page: never matters to the POS
     return state();
+  }
+
+  // The restaurant's menu, tables, staff… from the vendor cloud (server/setup.js). Returns what was set up, or null.
+  async function pullSetup() {
+    if (!setup) return null;
+    try {
+      const [r, d] = await call('/api/setup', undefined, 60000);
+      if (!r.ok || !d.setup) return null;
+      const done = setup.apply(d.setup);
+      set('setup_error', '');
+      await call('/api/setup/applied', { done }).catch(() => {});
+      return done;
+    } catch (e) {
+      set('setup_error', e.message);
+      call('/api/setup/applied', { error: e.message }).catch(() => {});
+      return null;
+    }
   }
 
   // What the screens show. state: off | activate | ok | due_soon | warning | locked
   function state() {
     if (!required) return { state: 'off' };
-    if (!get('url') || !get('key') || !get('lic_checked_at')) return { state: 'activate' };
+    if (!get('url') || !get('key') || !get('lic_checked_at')) return { state: 'activate', default_url: process.env.HAZEL_CLOUD_URL || '' };
     const t = clock();
     const a = JSON.parse(get('lic_answer') || '{}');
     const offlineDays = (t - +get('lic_checked_at')) / DAY;
@@ -60,16 +91,28 @@ module.exports = function licence(db, cloud) {
     return lic;
   }
 
-  // First run: the cloud address + branch key you give the restaurant. Uses cloud sync's own connect.
-  async function activate(url, key) {
+  // First run. code: the short activation code (one use; the cloud swaps it for this branch's key) or the long key.
+  // url: empty = the cloud address that came with the installer. Uses cloud sync's own connect.
+  async function activate(url, code) {
+    url = String(url || process.env.HAZEL_CLOUD_URL || '').trim().replace(/\/+$/, '');
+    if (!/^https?:\/\//.test(url)) throw new Error('Enter the cloud address');
+    let key = String(code || '').trim();
+    if (/^hz-/i.test(key)) {
+      const r = await fetch(url + '/api/activate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: key }), signal: AbortSignal.timeout(20000) })
+        .catch(() => { throw new Error('Cloud not reachable (no internet?)'); });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || `Cloud replied ${r.status}`);
+      key = d.key;
+    }
     await cloud.connect(url, key);
-    const s = await check();
+    set('setup_error', '');
+    const s = await check(); // also downloads the setup if one is ready
     if (s.state === 'activate') throw new Error(get('lic_error') || 'The cloud did not confirm the membership');
-    return s;
+    return { ...s, setup_applied_at: setup?.appliedAt() || null, setup_error: get('setup_error') || null };
   }
 
   const locked = () => state().state === 'locked';
 
   if (required) { setTimeout(check, 3000).unref(); setInterval(check, CHECK_EVERY_MS).unref(); }
-  return { required, state, check, activate, locked };
+  return { required, state, check, activate, locked, pullSetup };
 };

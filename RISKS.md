@@ -15,7 +15,7 @@ Status: **open** = not decided yet, **decided** = we chose what to do (the choic
 | D4 | The WhatsApp assistant's FAQ files (`rag/data/raw/faq/`) are inside the install folder. | Every restaurant gets the same FAQ, and an update overwrites any edits. | Move the FAQ into the database, editable from Settings. | open |
 | D5 | Port 4000 is fixed. | If another program on the restaurant PC uses port 4000, HazelPOS won't start. | Make the port a setting, or try the next free port. | open |
 | D6 | Mac builds aren't signed with an Apple developer account. | macOS blocks the app (right-click → Open works). Auto-update on Mac needs signing. | Apple developer account ($99/year), or support Windows only at first. | open |
-| D7 | A fresh install starts with the demo restaurant: "Pizza Venu", its menu, sample expenses, an open cash drawer, and PINs 1234/1111/2222. | The client sees someone else's menu and fake expenses in their reports. If the PINs aren't changed, anyone who knows the defaults can log in. | A "start empty" first run (no demo data), and force the PINs to be changed on first login. | open |
+| D7 | A fresh install starts with the demo restaurant ("Pizza Venu", sample expenses, PINs 1234/1111/2222). | Partly fixed: when you prepare a setup on the admin page, activation replaces all of it. An install activated **without** a setup (or whose setup has no staff) still has the demo data and default PINs. | Always prepare a setup before giving the code, and force a PIN change on first login. | open |
 | D8 | The installer build was leaving out `server/node_modules`. | The installed app would crash on start. | Fixed in `desktop/package.json`, and checked: the packaged server starts. | fixed |
 | D9 | The installer is about 290 MB unpacked (Electron is most of it). | Slow download on weak internet. | Normal for Electron apps. The download itself is compressed, so it's smaller. | open |
 | D10 | A Windows installer built on Linux (like the test one in `desktop/dist/`) carries Linux image libraries (`sharp`). The POS still starts (checked under Wine), but WhatsApp image thumbnails may not work. | Small: only thumbnails. | Use the GitHub Actions build (each OS built on its own runner) for installers you give to clients. | open |
@@ -41,6 +41,18 @@ Status: **open** = not decided yet, **decided** = we chose what to do (the choic
 | A3 | Your cloud's data (`cloud.db`: restaurants, paid-until dates, usage) must survive redeploys. | Without a persistent volume, a redeploy wipes all memberships: every restaurant goes to "not paid" and locks within days. | Attach a Railway volume and set `DATA_DIR` to it **before** adding real restaurants. | open |
 | A4 | The daily AI limit is 3,000 calls per branch (`AI_DAILY_LIMIT`). | Too low: a busy restaurant's assistant stops in the evening. Too high: a bug can run up your DeepSeek bill. | Set it per plan. | open |
 | A5 | The vendor page shows tokens and voice minutes, not rupees. | Harder to see whether a restaurant's fee covers its AI cost. | Add an estimated cost column using the prices in `rag/config/rag.config.json`. | open |
+
+## Onboarding (admin page, activation code, setup)
+
+| # | Risk | What happens if it goes wrong | Options | Status |
+| --- | --- | --- | --- | --- |
+| O1 | Reinstalling on a new PC (new code) brings back the menu, tables and pictures, but **not** the staff PINs (they're deleted from the cloud once the first PC has them) and **not** the orders and history. | The new PC has the default PINs 1234/1111/2222 and empty reports. | A "restore from cloud backup" step during activation (the daily backup is already on the cloud). Until then: re-enter PINs on the admin page before making the new code. | open |
+| O2 | Staff PINs sit on your cloud in plain text until the restaurant activates. | If your cloud database leaks before activation, those PINs are exposed. | Short window and removed after activation. Could hash them, but then the POS can't receive them. | open |
+| O3 | The activation code is 8 characters and works once. Wrong guesses are limited to 10 per 15 minutes per address. | Guessing a valid code is practically impossible. | Fine as it is. | open |
+| O4 | The health report sends the POS's error messages to your cloud. An error message can sometimes contain an order detail or phone number. | A little customer data on your server. | Fine for support. Mention it in the client agreement. | open |
+| O5 | The cloud now needs the **whole repo** on Railway (the menu upload uses `server/menu-import.js`). | Deploying only the `cloud/` folder turns menu upload off (the page says so). | Follow the Railway steps in `cloud/README.md`. | open |
+| O6 | Menu pictures on the admin page are loaded with your login token in the address (`?t=`). | The token can end up in Railway's request logs. It expires in 7 days. | Load the pictures as part of the page data instead. | open |
+| O7 | Changes you save on the admin page reach the POS only while it has **no orders**. | After the first order, menu changes have to be made in the POS (Settings → Menu or Import from Excel). | That's on purpose, so you never overwrite the restaurant's own changes. A "push menu update" button could come later. | open |
 
 ## WhatsApp
 

@@ -42,8 +42,10 @@ On one machine: `npm --prefix desktop run dist:win` (or `dist:mac`, `dist:linux`
 
 ## Activation and AI
 
-The installed app runs with `HAZEL_LICENCE=1`. On first start it shows **Activate HazelPOS**, where the restaurant types
-your cloud's address and the branch key from your vendor page (`/vendor.html` on HazelPOS Cloud). There's no `.env` in
-the app, so the WhatsApp assistant and voice notes go through your cloud (see `cloud/README.md`).
+The installed app runs with `HAZEL_LICENCE=1`. On first start it shows **Activate HazelPOS**: the restaurant types the
+activation code from your admin page (`/vendor.html` on HazelPOS Cloud). Your cloud's address is built in: set it in
+`package.json` → `"hazel": { "cloudUrl": "https://…" }` before building. The POS then downloads the restaurant's setup
+(menu, pictures, tables, staff) and replaces the demo restaurant. There's no `.env` in the app, so the WhatsApp
+assistant and voice notes go through your cloud (see `cloud/README.md`).
 
 Open risks and decisions: [RISKS.md](../RISKS.md).

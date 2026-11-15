@@ -53,7 +53,7 @@ Customers, menus and settings stay on the branch. Re-sending is safe because the
 With `VENDOR_PASSWORD` set, open `/vendor.html`:
 
 1. **Add a restaurant**: the owner's email and password (for this dashboard), plan, and paid-until date (default: one month from today).
-2. **Add branch**: shows the branch key once. The restaurant types it, with this cloud's address, into the installed app's activation screen.
+2. **Add branch**: shows its activation code once (see Onboarding below).
 3. When they pay: **Paid: +1 month** (counts from the later of today and their current date). **Suspend** stops new orders straight away.
 4. AI usage per branch this month: replies, tokens, voice minutes, failures.
 
@@ -62,8 +62,18 @@ doesn't stop billing. The rules (offline days, grace days) are in `server/licenc
 
 ## Deploy on Railway (your vendor cloud)
 
-1. In the Railway project: **New → GitHub repo → HazelPOS**, as a new service next to the demo. Settings → **Root directory** `cloud`, start command `node index.js`.
+1. In the Railway project: **New → GitHub repo → HazelPOS**, as a new service next to the demo. Leave the root directory as the repo root (the menu upload uses `server/menu-import.js`). Build command `npm --prefix cloud ci`, start command `node cloud/index.js`.
 2. **Add a volume** to this service, mounted at `/data`. Do this before adding any restaurant: without it, every redeploy wipes `cloud.db` (memberships, keys, backups). See RISKS.md A3.
 3. Variables: `DATA_DIR=/data`, `VENDOR_PASSWORD=<long random>`, `DEEPSEEK_API_KEY=…`, `GROQ_API_KEY=…`. Railway sets `PORT` itself.
 4. Settings → Networking → **Generate domain** (HTTPS comes with it). Pick a region close to Pakistan (RISKS.md A1).
 5. Open `https://<domain>/vendor.html`, log in with the vendor password and add your first restaurant.
+6. Put the domain in `desktop/package.json` → `"hazel": { "cloudUrl": "https://<domain>" }` and build the installers. Restaurants then only type their activation code.
+
+## Onboarding a restaurant (admin page `/vendor.html`)
+
+1. **New client** (name, phone, plan, paid-until), then **Add branch**: you get its activation code (`HZ-XXXX-XXXX`, shown once).
+2. **Open** the branch and prepare everything: restaurant details, menu (their Excel, or one you typed from their photos into the template), menu pictures, tables, delivery areas, staff and PINs.
+3. Send them the installer and the code. They install, type the code, and the POS downloads the setup: the demo restaurant is replaced by theirs.
+4. The branch page then shows **Activated** and **Setup on their PC**, and every few hours a health report: app version, WhatsApp status, cloud sync, orders today and the latest errors.
+
+The code works once. For a new PC or a reinstall, make a new code: when it's used, the old PC stops working. The setup only goes to a POS with no orders yet, so it never overwrites real work.
