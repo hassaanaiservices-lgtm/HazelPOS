@@ -28,14 +28,14 @@ export const fileBase64 = file => new Promise((resolve, reject) => {
   r.readAsDataURL(file)
 })
 // Phone photos are shrunk before upload (max 1600 px, JPEG ~300 KB)
-export const shrinkImage = file => new Promise((resolve, reject) => {
+export const shrinkImage = (file, max = 1600, type = 'image/jpeg') => new Promise((resolve, reject) => {
   const img = new Image()
   img.onload = () => {
-    const k = Math.min(1, 1600 / Math.max(img.width, img.height))
+    const k = Math.min(1, max / Math.max(img.width, img.height))
     const c = Object.assign(document.createElement('canvas'), { width: Math.round(img.width * k), height: Math.round(img.height * k) })
     c.getContext('2d').drawImage(img, 0, 0, c.width, c.height)
     URL.revokeObjectURL(img.src)
-    resolve(c.toDataURL('image/jpeg', 0.85))
+    resolve(c.toDataURL(type, 0.85))
   }
   img.onerror = () => reject(new Error('That file is not a picture'))
   img.src = URL.createObjectURL(file)

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api, rs, localDate, TYPES } from './lib'
-import { Icon } from './ui'
+import { Icon, Logo } from './ui'
 import { toastError, confirmBox } from './notify'
 
 const EXP_CATEGORIES = ['Ingredients', 'Packaging', 'Utilities', 'Salaries', 'Rent', 'Maintenance', 'Marketing', 'Miscellaneous']
@@ -269,7 +269,7 @@ function TaxInvoiceModal({ order, settings, onClose }) {
         <div className="a4-invoice" id="tax-invoice">
           <div className="inv-header">
             <div>
-              <h1 className="inv-brand">{settings.logo} {settings.name}</h1>
+              <h1 className="inv-brand">{settings.logo_image ? <img className="inv-logo" src={settings.logo_image} alt="" /> : <Logo s={settings} />} {settings.name}</h1>
               <p>{settings.address}</p>
               <p>Phone: {settings.phone}</p>
               {settings.ntn && <p><b>NTN / Tax ID:</b> {settings.ntn}</p>}

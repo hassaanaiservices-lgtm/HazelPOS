@@ -91,3 +91,8 @@ export function FormModal({ title, fields, value, onChange, onSave, onClose, sav
     </div>
   )
 }
+
+// The restaurant's logo: their uploaded picture (settings.logo_image), or the emoji when there is none
+export function Logo({ s, className = '' }) {
+  return s?.logo_image ? <img className={'logo-img ' + className} src={s.logo_image} alt="" /> : <>{s?.logo}</>
+}

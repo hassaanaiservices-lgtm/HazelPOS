@@ -16,7 +16,7 @@ import Payroll from './Payroll'
 import WhatsApp from './WhatsApp'
 import { QrOrderAlerts, QrCodesModal, beep } from './QrOrders'
 import QRCode from 'qrcode'
-import { Icon } from './ui'
+import { Icon, Logo } from './ui'
 import { toast, toastError, confirmBox, promptBox } from './notify'
 
 const Ctx = createContext({})
@@ -111,7 +111,7 @@ export default function App() {
   const go = v => { setNavOpen(false); v === 'home' ? goHome() : (setOrder(null), refresh(), setView(v)) }
   const isActive = v => v === view || (v === 'home' && ['tables', 'register'].includes(view))
   const solo = nav.length === 1 // kitchen: one screen, no sidebar
-  const brand = <div className="brand" onClick={() => go(nav[0][0])}><span className="brand-mark" aria-hidden="true">{settings.logo}</span><span>{settings.name}</span></div>
+  const brand = <div className="brand" onClick={() => go(nav[0][0])}><span className={"brand-mark" + (settings.logo_image ? " has-img" : "")} aria-hidden="true"><Logo s={settings} /></span><span>{settings.name}</span></div>
   // Demo: back to the role picker. Real POS: sign out to the PIN screen.
   const lock = settings.demo
     ? <button className="ghost sm" id="logout" onClick={logout} title="Back to choose another role"><Icon name="back" size={16} />Back</button>
@@ -711,7 +711,7 @@ function Receipt({ order, onClose, notify, closeLabel = 'New Order' }) {
     <div className="modal-bg">
       <div className="modal receipt-wrap">
         <div className="receipt" id="receipt">
-          <h3>{s.logo} {s.name}</h3>
+          {s.logo_image ? <><img className="receipt-logo" src={s.logo_image} alt="" /><h3>{s.name}</h3></> : <h3>{s.logo} {s.name}</h3>}
           {s.address && <p>{s.address}</p>}
           {s.phone && <p>Tel: {s.phone}</p>}
           {s.ntn && <p>NTN: {s.ntn}</p>}

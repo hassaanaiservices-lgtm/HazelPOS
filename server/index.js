@@ -336,6 +336,7 @@ const DEFAULT_SETTINGS = {
   tax_rate: '16',
   footer: 'Thank you! Visit again 🙏',
   logo: '🍕',
+  logo_image: '', // data URL of the restaurant's logo picture; shown instead of the emoji when set
   ntn: 'NTN-8934521-7',
   bank_name: 'Meezan Bank Ltd',
   bank_account: 'PK36MEZN0001000123456789',
@@ -505,7 +506,7 @@ app.post('/api/logout', (req, res) => {
 app.get('/api/settings', (req, res) => {
   const s = getSettings();
   const licence = lic.state();
-  res.json(req.user ? { ...s, bot_behaviour_default: DEFAULT_SETTINGS.bot_behaviour, demo: DEMO, licence } : { name: s.name, logo: s.logo, demo: DEMO, licence });
+  res.json(req.user ? { ...s, bot_behaviour_default: DEFAULT_SETTINGS.bot_behaviour, demo: DEMO, licence } : { name: s.name, logo: s.logo, logo_image: s.logo_image, demo: DEMO, licence });
 });
 app.post('/api/settings', (req, res) => {
   const up = db.prepare('INSERT INTO settings (key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value');
@@ -617,7 +618,10 @@ app.post('/api/users', (req, res) => {
     if (!cur) return res.status(404).json({ error: 'Not found' });
     if (cur.role === 'admin' && role !== 'admin' && adminCount() === 1) return res.status(400).json({ error: 'Keep at least one admin' });
     db.prepare('UPDATE users SET name=?, role=? WHERE id=?').run(name.trim(), role, id);
-    if (pin) db.prepare('UPDATE users SET pin=? WHERE id=?').run(hashPin(pin), id);
+    if (pin) {
+      db.prepare('UPDATE users SET pin=? WHERE id=?').run(hashPin(pin), id);
+      if (+id !== req.user.id) db.prepare('DELETE FROM sessions WHERE user_id=?').run(id); // new PIN: that person is signed out everywhere
+    }
     db.prepare('DELETE FROM sessions WHERE user_id=? AND token != ?').run(id, req.token); // PIN/role change logs them out elsewhere
   }
   const uid = id || db.prepare('INSERT INTO users (name,pin,role) VALUES (?,?,?)').run(name.trim(), hashPin(pin), role).lastInsertRowid;
@@ -1590,7 +1594,7 @@ app.get('/api/qr/:token', (req, res) => {
   const s = getSettings();
   res.json({
     table,
-    restaurant: { name: s.name, logo: s.logo },
+    restaurant: { name: s.name, logo: s.logo, logo_image: s.logo_image },
     categories: db.prepare('SELECT * FROM categories ORDER BY id').all(),
     products: db.prepare('SELECT id, name, price, category_id, emoji, subtitle, description, ingredients, sizes, modifiers FROM products WHERE active=1 ORDER BY name').all(),
     taxRate: taxRate(),

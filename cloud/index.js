@@ -375,7 +375,7 @@ function saveSetup(id, data) {
 function setupSummary(id) {
   const { st, data } = getSetup(id);
   return {
-    restaurant: !!data.restaurant?.name, menu: (data.menu || []).length, tables: (data.tables || []).length, zones: (data.zones || []).length,
+    restaurant: !!data.restaurant?.name, logo: !!data.restaurant?.logo_image, floors: (data.floors || []).length, menu: (data.menu || []).length, tables: (data.tables || []).length, zones: (data.zones || []).length,
     staff: (data.staff || []).length, images: db.prepare('SELECT COUNT(*) c FROM setup_images WHERE branch_id=?').get(id).c,
     updated_at: st?.updated_at || null, applied_at: st?.applied_at || null, error: st?.error || null,
   };
@@ -401,13 +401,20 @@ app.get('/api/vendor/branches/:id/setup', vendorAuth, (req, res) => {
 app.post('/api/vendor/branches/:id/setup', vendorAuth, (req, res) => {
   const b = vendorBranch(req, res); if (!b) return;
   const { data } = getSetup(b.id), body = req.body || {};
-  if (body.restaurant) data.restaurant = Object.fromEntries(Object.entries(body.restaurant).map(([k, v]) => [k, String(v ?? '').slice(0, 300)]));
+  if (body.restaurant) {
+    const { logo_image, ...rest } = body.restaurant;
+    data.restaurant = Object.fromEntries(Object.entries(rest).map(([k, v]) => [k, String(v ?? '').slice(0, 300)]));
+    if (logo_image && !/^data:image\/(png|jpeg|webp);base64,/.test(logo_image)) return res.status(400).json({ error: 'The logo must be a PNG, JPG or WebP picture' });
+    if (String(logo_image || '').length > 400 * 1024) return res.status(400).json({ error: 'The logo picture is too large (max 300 KB)' });
+    if (logo_image) data.restaurant.logo_image = logo_image;
+  }
+  if (Array.isArray(body.floors)) data.floors = [...new Set(body.floors.map(f => String(f.name ?? f).trim()).filter(Boolean))].slice(0, 30).map(name => ({ name }));
   if (Array.isArray(body.tables)) data.tables = body.tables.slice(0, 300).map(t => ({ name: String(t.name || '').trim(), seats: +t.seats || 4, floor: String(t.floor || '').trim() })).filter(t => t.name);
   if (Array.isArray(body.zones)) data.zones = body.zones.slice(0, 200).map(z => ({ name: String(z.name || '').trim(), fee: +z.fee || 0, min_order: +z.min_order || 0, free_above: +z.free_above || 0, eta_min: +z.eta_min || 45 })).filter(z => z.name);
   if (Array.isArray(body.staff)) {
     const staff = body.staff.map(u => ({ name: String(u.name || '').trim(), role: u.role, pin: String(u.pin || '').trim() })).filter(u => u.name);
     if (staff.some(u => !['admin', 'cashier', 'kitchen'].includes(u.role))) return res.status(400).json({ error: 'Role must be admin, cashier or kitchen' });
-    if (staff.some(u => !/^\d{4,6}$/.test(u.pin))) return res.status(400).json({ error: 'Every PIN must be 4 to 6 digits' });
+    if (staff.some(u => !/^\d{4}$/.test(u.pin))) return res.status(400).json({ error: 'Every PIN must be exactly 4 digits (the POS login pad takes 4)' });
     if (new Set(staff.map(u => u.pin)).size !== staff.length) return res.status(400).json({ error: 'Two people have the same PIN' });
     if (staff.length && !staff.some(u => u.role === 'admin')) return res.status(400).json({ error: 'Add at least one admin (the owner), or they cannot open Settings' });
     data.staff = staff;

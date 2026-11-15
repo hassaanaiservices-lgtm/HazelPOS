@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { api, rs, parseModifiers, modsText } from './lib'
 import './CustomerOrder.css'
 import { toastError } from './notify'
+import { Logo } from './ui'
 
 // Mobile ordering page opened by scanning a table's QR code
 export default function CustomerOrder({ token }) {
@@ -79,7 +80,7 @@ export default function CustomerOrder({ token }) {
   return (
     <div className="co-page">
       <header className="co-head">
-        <div className="co-brand">{data.restaurant.logo} {data.restaurant.name}</div>
+        <div className="co-brand"><Logo s={data.restaurant} className="co-logo" /> {data.restaurant.name}</div>
         <div className="co-table">🍽️ {data.table.name}<small>{data.table.floor}</small></div>
       </header>
 

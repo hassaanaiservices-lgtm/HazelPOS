@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { api } from './lib'
 import { toast } from './notify'
+import { Logo } from './ui'
 
 // First run of the installed app: the restaurant types the activation code you gave them (HZ-XXXX-XXXX). The POS then
 // downloads its setup (menu, tables, staff…) from HazelPOS Cloud. Until then nobody can log in.
@@ -29,7 +30,7 @@ export default function Activate({ settings, onDone }) {
   return (
     <div className="login">
       <form className="login-card activate-card" onSubmit={submit}>
-        <div className="brand-mark login-logo" aria-hidden="true">{settings.logo}</div>
+        <div className={"brand-mark login-logo" + (settings.logo_image ? " has-img" : "")} aria-hidden="true"><Logo s={settings} /></div>
         <h1>Activate HazelPOS</h1>
         <p className="muted">Type the activation code HazelPOS gave you. This PC needs internet for this step only.</p>
         <label>Activation code

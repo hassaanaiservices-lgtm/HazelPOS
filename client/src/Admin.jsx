@@ -4,7 +4,7 @@ import { Icon } from './ui'
 import Integrations from './Integrations'
 import { toastError, confirmBox } from './notify'
 
-const TABS = ['Menu', 'Menu pictures', 'Categories', 'Floors', 'Tables', 'Delivery Zones', 'Restaurant', 'WhatsApp bot', 'Integrations', 'Cloud', 'Activity Log']
+const TABS = ['Menu', 'Menu pictures', 'Categories', 'Floors', 'Tables', 'Delivery Zones', 'Restaurant', 'Staff & PINs', 'WhatsApp bot', 'Integrations', 'Cloud', 'Activity Log']
 
 export default function Admin({ onChanged, notify }) {
   const [tab, setTab] = useState('Menu')
@@ -58,6 +58,7 @@ export default function Admin({ onChanged, notify }) {
         show={z => <><b>{z.name}</b><span className="pill">{rs(z.fee)}</span>{z.min_order > 0 && <span className="muted">min {rs(z.min_order)}</span>}
           {z.free_above > 0 && <span className="muted">free above {rs(z.free_above)}</span>}<span className="muted">~{z.eta_min} min</span>{!+z.active && <span className="pill sm low-pill">Off</span>}</>} />}
       {tab === 'Restaurant' && <RestaurantSettings onChanged={onChanged} notify={notify} />}
+      {tab === 'Staff & PINs' && <LoginPins notify={notify} />}
       {tab === 'WhatsApp bot' && <BotBehaviour notify={notify} />}
       {tab === 'Integrations' && <Integrations onChanged={onChanged} notify={notify} />}
       {tab === 'Cloud' && <CloudSettings notify={notify} />}
@@ -326,7 +327,17 @@ function RestaurantSettings({ onChanged, notify }) {
   }
   return (
     <div className="card settings-card">
-      <div className="two">{f('name', 'Restaurant name')}{f('logo', 'Logo (emoji)')}</div>
+      {f('name', 'Restaurant name')}
+      <div className="logo-edit">
+        <div className="logo-preview">{s.logo_image ? <img className="logo-img" src={s.logo_image} alt="Logo" /> : s.logo}</div>
+        <label className="primary file-btn">{s.logo_image ? 'Change logo' : 'Upload logo'}
+          <input type="file" accept="image/png,image/jpeg,image/webp" hidden onChange={async e => {
+            const file = e.target.files[0]; e.target.value = ''
+            if (file) try { setS({ ...s, logo_image: await shrink(file, 256, 'image/png') }) } catch (err) { toastError(err.message) }
+          }} /></label>
+        {s.logo_image && <button className="ghost danger" onClick={() => setS({ ...s, logo_image: '' })}>Remove logo</button>}
+        <span className="muted" style={{ fontSize: 13 }}>Shown on the POS, receipts, invoices and the table QR menu. Press Save settings after.</span>
+      </div>
       {f('address', 'Address')}
       <div className="two">{f('phone', 'Phone')}{f('tax_rate', 'Tax rate (%)', 'number')}</div>
       <div className="two">{f('ntn', 'NTN')}{f('strn', 'STRN (Sales tax reg. no.)')}</div>
@@ -360,7 +371,6 @@ function RestaurantSettings({ onChanged, notify }) {
           <option value="refuse">Refuse — the cashier must open the Cash Drawer first</option>
         </select></label>
       <button className="primary" onClick={async () => { await api('/settings', s); onChanged(); notify('Settings saved') }}>Save settings</button>
-      <LoginPins notify={notify} />
     </div>
   )
 }
@@ -376,8 +386,8 @@ function LoginPins({ notify }) {
   }
   return (
     <>
-      <h3 style={{ marginTop: 22 }}>Login PINs</h3>
-      <p className="muted" style={{ fontSize: 13 }}>Change the default PINs (1234, 1111, 2222) before you start using the POS.</p>
+      <h3>Staff & PINs</h3>
+      <p className="muted" style={{ fontSize: 13 }}>Only the owner (admin) sees this. Type a new 4-digit PIN to change or reset anyone's PIN, e.g. when a cashier forgets theirs or leaves. They are signed out on every screen and must use the new PIN. If you still use the default PINs (1234, 1111, 2222), change them now.</p>
       {users.map(u => (
         <div key={u.id} className="two" style={{ alignItems: 'end' }}>
           <label>{u.name} <span className="pill sm">{u.role}</span>
@@ -485,14 +495,14 @@ function CloudSettings({ notify }) {
 
 // Photos of the menu card. The WhatsApp assistant sends them when a customer asks "menu bhejo".
 // Pictures are shrunk in the browser first (max 1600 px, JPEG), so a phone photo of 5 MB becomes ~300 KB.
-const shrink = file => new Promise((resolve, reject) => {
+const shrink = (file, max = 1600, type = 'image/jpeg') => new Promise((resolve, reject) => {
   const img = new Image()
   img.onload = () => {
-    const scale = Math.min(1, 1600 / Math.max(img.width, img.height))
+    const scale = Math.min(1, max / Math.max(img.width, img.height))
     const c = Object.assign(document.createElement('canvas'), { width: Math.round(img.width * scale), height: Math.round(img.height * scale) })
     c.getContext('2d').drawImage(img, 0, 0, c.width, c.height)
     URL.revokeObjectURL(img.src)
-    resolve(c.toDataURL('image/jpeg', 0.85))
+    resolve(c.toDataURL(type, 0.85))
   }
   img.onerror = () => reject(new Error('That file is not a picture'))
   img.src = URL.createObjectURL(file)

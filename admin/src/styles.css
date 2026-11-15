@@ -106,6 +106,11 @@ tr.click { cursor: pointer; } tr.click:hover td { background: var(--surface-2); 
 .tabs button.on { color: var(--text); border-bottom-color: var(--accent); }
 .branch-link { padding: 4px 6px; min-height: 36px; color: var(--text); gap: 6px; font-weight: 600; }
 .branch-link:hover { background: var(--surface-2); }
+.floor-pill { padding: 4px 4px 4px 12px; font-size: var(--fs-md); color: var(--text); }
+.floor-pill .link { min-height: 32px; padding: 4px 8px; color: var(--text-2); }
+.logo-edit { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; grid-column: 1 / -1; }
+.logo-preview { width: 88px; height: 88px; border-radius: var(--r-sm); background: var(--surface-2); border: 1px solid var(--line); display: grid; place-items: center; overflow: hidden; }
+.logo-preview img { width: 100%; height: 100%; object-fit: contain; }
 .checks { display: flex; gap: 8px; flex-wrap: wrap; }
 .code { font: 700 30px var(--mono); letter-spacing: 0.1em; background: var(--surface-2); padding: 14px 20px; border-radius: var(--r-sm); user-select: all; display: inline-block; margin: 8px 0; }
 .pics { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 12px; margin-top: 12px; }

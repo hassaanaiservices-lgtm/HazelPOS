@@ -3,7 +3,7 @@ import { api, ago, fileBase64, shrinkImage, downloadCsv } from './lib'
 import { run, toast, toastError, confirmBox } from './notify'
 import { Stage, WhatsApp, Check } from './ui'
 
-const TABS = ['Overview', 'Details', 'Menu', 'Menu pictures', 'Tables', 'Delivery areas', 'Staff', 'Health & errors']
+const TABS = ['Overview', 'Details', 'Menu', 'Tables', 'Delivery areas', 'Staff', 'Health & errors']
 
 // One branch: prepare its setup before the restaurant installs, give the activation code, then watch its health
 export default function Branch({ id }) {
@@ -32,9 +32,8 @@ export default function Branch({ id }) {
       <div className="tabs" role="tablist">{TABS.map(t => <button key={t} role="tab" aria-selected={tab === t} className={tab === t ? 'on' : ''} onClick={() => setTab(t)}>{t}</button>)}</div>
       {tab === 'Overview' && <Overview d={d} go={setTab} />}
       {tab === 'Details' && <Details r={d.setup.restaurant || {}} save={save} />}
-      {tab === 'Menu' && <Menu id={id} d={d} reload={load} />}
-      {tab === 'Menu pictures' && <Pictures id={id} images={d.images} reload={load} />}
-      {tab === 'Tables' && <Tables tables={d.setup.tables || []} save={save} />}
+      {tab === 'Menu' && <><Pictures id={id} images={d.images} reload={load} /><Menu id={id} d={d} reload={load} /></>}
+      {tab === 'Tables' && <Tables tables={d.setup.tables || []} floors={d.setup.floors || []} save={save} />}
       {tab === 'Delivery areas' && <Zones zones={d.setup.zones || []} save={save} />}
       {tab === 'Staff' && <Staff staff={d.setup.staff || []} save={save} />}
       {tab === 'Health & errors' && <Health d={d} />}
@@ -45,13 +44,13 @@ export default function Branch({ id }) {
 function Overview({ d, go }) {
   const s = d.summary, br = d.branch
   const steps = [
-    [s.restaurant, 'Restaurant details', 'Details'], [s.menu, `Menu (${s.menu} items)`, 'Menu'], [s.images, `Menu pictures (${s.images})`, 'Menu pictures'],
-    [s.tables, `Tables (${s.tables})`, 'Tables'], [s.zones, `Delivery areas (${s.zones})`, 'Delivery areas'], [s.staff, `Staff (${s.staff})`, 'Staff'],
+    [s.restaurant, 'Restaurant details', 'Details'], [s.logo, 'Logo', 'Details'], [s.images, `Menu pictures (${s.images})`, 'Menu'], [s.menu, `Menu items (${s.menu})`, 'Menu'],
+    [s.tables, `Floors & tables (${s.floors || 0} / ${s.tables})`, 'Tables'], [s.zones, `Delivery areas (${s.zones})`, 'Delivery areas'], [s.staff, `Staff (${s.staff})`, 'Staff'],
   ]
   return (
     <>
       <div className="card"><h3>Onboarding</h3>
-        <div className="checks">{steps.map(([ok, label, t]) => <button key={t} className="link" style={{ padding: 0, minHeight: 32 }} onClick={() => go(t)}><Check ok={ok}>{label}</Check></button>)}
+        <div className="checks"> {steps.map(([ok, label, t]) => <button key={label} className="link" style={{ padding: 0, minHeight: 32 }} onClick={() => go(t)}><Check ok={ok}>{label}</Check></button>)}
           <Check ok={br.code_used_at}>Activated on their PC</Check><Check ok={s.applied_at}>Setup on their PC</Check></div>
         {s.error && <p className="notice bad" style={{ marginTop: 12 }}>Their POS couldn't apply the setup: {s.error}</p>}
         <p className="muted" style={{ marginTop: 12 }}>{s.applied_at
@@ -73,7 +72,7 @@ function Overview({ d, go }) {
 }
 
 function Details({ r, save }) {
-  const [f, setF] = useState({ name: r.name || '', phone: r.phone || '', logo: r.logo || '🍽️', address: r.address || '', tax_rate: r.tax_rate || '', ntn: r.ntn || '', strn: r.strn || '', footer: r.footer || '' })
+  const [f, setF] = useState({ name: r.name || '', phone: r.phone || '', logo_image: r.logo_image || '', address: r.address || '', tax_rate: r.tax_rate || '', ntn: r.ntn || '', strn: r.strn || '', footer: r.footer || '' })
   const set = k => e => setF({ ...f, [k]: e.target.value })
   return (
     <form className="card" onSubmit={e => { e.preventDefault(); run(() => save({ restaurant: f }))() }}>
@@ -81,7 +80,14 @@ function Details({ r, save }) {
       <div className="grid3">
         <label>Name (on receipts and the WhatsApp bot)<input value={f.name} onChange={set('name')} required /></label>
         <label>Phone<input value={f.phone} onChange={set('phone')} inputMode="tel" /></label>
-        <label>Logo (one emoji)<input value={f.logo} onChange={set('logo')} /></label>
+        <div className="logo-edit">
+          <div className="logo-preview">{f.logo_image ? <img src={f.logo_image} alt="Logo" /> : <span className="muted small">No logo</span>}</div>
+          <div className="row">
+            <label className="file-btn">{f.logo_image ? 'Change logo' : 'Upload logo'}<input type="file" accept="image/png,image/jpeg,image/webp" hidden
+              onChange={async e => { const file = e.target.files[0]; e.target.value = ''; if (file) try { const img = await shrinkImage(file, 256, 'image/png'); setF(x => ({ ...x, logo_image: img })) } catch (err) { toastError(err.message) } }} /></label>
+            {f.logo_image && <button type="button" className="danger" onClick={() => setF({ ...f, logo_image: '' })}>Remove</button>}
+          </div>
+        </div>
         <label className="wide">Address<input value={f.address} onChange={set('address')} /></label>
         <label>Tax rate % (empty = no tax)<input value={f.tax_rate} onChange={set('tax_rate')} inputMode="decimal" /></label>
         <label>NTN<input value={f.ntn} onChange={set('ntn')} /></label>
@@ -147,7 +153,7 @@ function Pictures({ id, images, reload }) {
   const del = run(async imgId => { if (await confirmBox('Delete this menu picture?', { confirmLabel: 'Delete', danger: true })) { await api(`/setup-images/${imgId}/delete`, {}); reload() } })
   return (
     <div className="card"><h3>Menu pictures ({images.length} / 6)</h3>
-      <p className="muted">Photos of their menu card. The WhatsApp assistant sends them when a customer asks for the menu.</p>
+      <p className="muted">Photos of their menu card. These are the only pictures the WhatsApp bot sends: when a customer asks for the menu or what they have ("menu bhejo", "kya kya milta hai?"), the bot replies "Ye raha hamara menu" and sends these. Questions about one item are still answered in text.</p>
       <label className={'file-btn' + (busy || images.length >= 6 ? ' off' : '')} style={{ marginTop: 12 }}>{busy ? 'Adding…' : 'Add pictures'}
         <input type="file" accept="image/jpeg,image/png,image/webp" multiple hidden disabled={busy || images.length >= 6} onChange={add} /></label>
       <div className="pics">{images.map((im, i) => <figure key={im.id}><img src={`/api/setup-images/${im.id}`} alt={`Menu picture ${i + 1}`} loading="lazy" />
@@ -160,27 +166,62 @@ function Pictures({ id, images, reload }) {
 const toLines = (rows, keys) => rows.map(r => keys.map(k => r[k]).join(', ')).join('\n')
 const fromLines = text => text.split('\n').map(l => l.split(',').map(x => x.trim())).filter(p => p[0])
 
-function Tables({ tables, save }) {
+function Tables({ tables, floors: savedFloors, save }) {
+  const [floors, setFloors] = useState(() => [...new Set([...savedFloors.map(f => f.name), ...tables.map(t => t.floor)].filter(Boolean))])
+  const [newFloor, setNewFloor] = useState('')
   const [text, setText] = useState(toLines(tables, ['name', 'seats', 'floor']))
-  const [gen, setGen] = useState({ prefix: 'T', count: '', seats: 4, floor: 'Main Dining' })
+  const [gen, setGen] = useState({ prefix: 'T', count: '', seats: 4, floor: floors[0] || '' })
+  const addFloor = e => {
+    e.preventDefault()
+    const name = newFloor.trim()
+    if (!name || floors.some(f => f.toLowerCase() === name.toLowerCase())) return
+    setFloors([...floors, name]); setNewFloor(''); if (!gen.floor) setGen({ ...gen, floor: name })
+  }
+  const removeFloor = run(async name => {
+    const used = fromLines(text).filter(([, , f]) => f === name).length
+    if (used && !await confirmBox(`${used} table(s) are on "${name}". Remove the floor and those tables?`, { confirmLabel: 'Remove', danger: true })) return
+    setFloors(floors.filter(f => f !== name))
+    setText(fromLines(text).filter(([, , f]) => f !== name).map(p => p.join(', ')).join('\n'))
+    if (gen.floor === name) setGen({ ...gen, floor: floors.find(f => f !== name) || '' })
+  })
   const add = () => {
     const n = Math.min(100, +gen.count || 0)
-    if (!n) return
-    const lines = Array.from({ length: n }, (_, i) => `${gen.prefix}${i + 1}, ${gen.seats}, ${gen.floor}`).join('\n')
-    setText(t => (t.trim() ? t.trim() + '\n' : '') + lines)
+    if (!n || !gen.floor) return
+    const taken = new Set(fromLines(text).map(([name]) => name))
+    const lines = []
+    for (let i = 1; lines.length < n && i < 1000; i++) if (!taken.has(gen.prefix + i)) lines.push(`${gen.prefix}${i}, ${gen.seats}, ${gen.floor}`)
+    setText(t => (t.trim() ? t.trim() + '\n' : '') + lines.join('\n'))
   }
+  const rows = fromLines(text)
+  const saveAll = run(() => {
+    const tbls = rows.map(([name, seats, floor]) => ({ name, seats: +seats || 4, floor: floor || floors[0] || 'Main Dining' }))
+    const allFloors = [...new Set([...floors, ...tbls.map(t => t.floor)])]
+    return save({ floors: allFloors.map(name => ({ name })), tables: tbls })
+  })
   return (
-    <div className="card"><h3>Tables ({fromLines(text).length})</h3>
-      <div className="row" style={{ marginBottom: 12, alignItems: 'flex-end' }}>
-        <label style={{ width: 90 }}>Prefix<input value={gen.prefix} onChange={e => setGen({ ...gen, prefix: e.target.value })} /></label>
-        <label style={{ width: 110 }}>How many<input type="number" min="1" max="100" value={gen.count} onChange={e => setGen({ ...gen, count: e.target.value })} /></label>
-        <label style={{ width: 90 }}>Seats<input type="number" min="1" value={gen.seats} onChange={e => setGen({ ...gen, seats: e.target.value })} /></label>
-        <label style={{ flex: 1, minWidth: 160 }}>Floor / area<input value={gen.floor} onChange={e => setGen({ ...gen, floor: e.target.value })} /></label>
-        <button onClick={add}>Add tables</button>
+    <>
+      <div className="card"><h3>Floors / areas ({floors.length})</h3>
+        <p className="muted">E.g. Ground floor, Family hall, Rooftop. Add the floors first, then their tables below.</p>
+        <div className="row" style={{ margin: '12px 0' }}>{floors.map(f => <span key={f} className="pill floor-pill">{f}
+          <button className="link" aria-label={`Remove ${f}`} onClick={() => removeFloor(f)}>✕</button></span>)}
+          {!floors.length && <span className="muted">No floors yet.</span>}</div>
+        <form className="row" onSubmit={addFloor}><input style={{ maxWidth: 320 }} placeholder="Floor name, e.g. Rooftop" value={newFloor} onChange={e => setNewFloor(e.target.value)} />
+          <button disabled={!newFloor.trim()}>+ Add floor</button></form>
       </div>
-      <label>One table per line: <code>name, seats, floor</code><textarea rows={12} value={text} onChange={e => setText(e.target.value)} /></label>
-      <div className="row" style={{ marginTop: 12 }}><button className="primary" onClick={run(() => save({ tables: fromLines(text).map(([name, seats, floor]) => ({ name, seats: +seats || 4, floor: floor || 'Main Dining' })) }))}>Save tables</button></div>
-    </div>
+      <div className="card"><h3>Tables ({rows.length})</h3>
+        <div className="row" style={{ marginBottom: 12, alignItems: 'flex-end' }}>
+          <label style={{ flex: 1, minWidth: 160 }}>Floor<select value={gen.floor} onChange={e => setGen({ ...gen, floor: e.target.value })} disabled={!floors.length}>
+            {!floors.length && <option value="">Add a floor first</option>}{floors.map(f => <option key={f}>{f}</option>)}</select></label>
+          <label style={{ width: 90 }}>Prefix<input value={gen.prefix} onChange={e => setGen({ ...gen, prefix: e.target.value })} /></label>
+          <label style={{ width: 110 }}>How many<input type="number" min="1" max="100" value={gen.count} onChange={e => setGen({ ...gen, count: e.target.value })} /></label>
+          <label style={{ width: 90 }}>Seats<input type="number" min="1" value={gen.seats} onChange={e => setGen({ ...gen, seats: e.target.value })} /></label>
+          <button onClick={add} disabled={!gen.floor || !+gen.count}>Add tables</button>
+        </div>
+        {floors.length > 0 && rows.length > 0 && <p className="muted small" style={{ marginBottom: 8 }}>{floors.map(f => `${f}: ${rows.filter(r => r[2] === f).length}`).join(' · ')}</p>}
+        <label>One table per line: <code>name, seats, floor</code><textarea rows={12} value={text} onChange={e => setText(e.target.value)} /></label>
+        <div className="row" style={{ marginTop: 12 }}><button className="primary" onClick={saveAll}>Save floors & tables</button></div>
+      </div>
+    </>
   )
 }
 
@@ -201,13 +242,13 @@ function Staff({ staff, save }) {
   const set = (i, k) => e => setRows(rows.map((r, n) => n === i ? { ...r, [k]: e.target.value } : r))
   return (
     <div className="card"><h3>Staff and PINs</h3>
-      <p className="muted">At least one admin (the owner). PINs are 4 to 6 digits, all different. Once their POS has the PINs, they're deleted from the cloud.</p>
+      <p className="muted">At least one admin (the owner). PINs are exactly 4 digits, all different. Once their POS has the PINs, they're deleted from the cloud. After that the owner changes or resets anyone's PIN in the POS: <b>Settings → Staff & PINs</b>.</p>
       {applied && <p className="notice" style={{ marginTop: 12 }}>These PINs are already on their POS and were removed from the cloud. To send new ones (for a new PC), type all PINs again.</p>}
       <div style={{ marginTop: 12 }}>{rows.map((u, i) => (
         <div className="staff-row" key={i}>
           <input aria-label="Name" placeholder="Name" value={u.name} onChange={set(i, 'name')} />
           <select aria-label="Role" value={u.role} onChange={set(i, 'role')}><option value="admin">Admin (owner)</option><option value="cashier">Cashier</option><option value="kitchen">Kitchen</option></select>
-          <input aria-label="PIN" placeholder={u.pin_applied ? 'on their POS' : 'PIN'} value={u.pin} onChange={set(i, 'pin')} inputMode="numeric" maxLength={6} />
+          <input aria-label="PIN" placeholder={u.pin_applied ? 'on their POS' : '4-digit PIN'} value={u.pin} onChange={e => set(i, 'pin')({ target: { value: e.target.value.replace(/\D/g, '').slice(0, 4) } })} inputMode="numeric" maxLength={4} />
           <button className="danger" aria-label={`Remove ${u.name || 'person'}`} onClick={() => setRows(rows.filter((_, n) => n !== i))}>✕</button>
         </div>))}</div>
       <div className="row"><button onClick={() => setRows([...rows, { name: '', role: 'cashier', pin: '' }])}>+ Add person</button>

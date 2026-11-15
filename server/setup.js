@@ -4,11 +4,11 @@
 //
 // setup = { restaurant: {name, address, phone, logo, tax_rate, ntn, strn, footer, bank_name, bank_account, bank_title},
 //           menu: [{category, name, price, sizes, description, emoji, active}]   (shape of menu-import.js toMenu().items)
-//           tables: [{name, seats, floor}], zones: [{name, fee, min_order, free_above, eta_min}],
+//           floors: [{name}], tables: [{name, seats, floor}], zones: [{name, fee, min_order, free_above, eta_min}],
 //           staff: [{name, role, pin}], images: [{caption, mime, data (base64)}] }
 const { importMenu } = require('./menu-import');
 
-const RESTAURANT_KEYS = ['name', 'address', 'phone', 'logo', 'tax_rate', 'ntn', 'strn', 'footer', 'bank_name', 'bank_account', 'bank_title'];
+const RESTAURANT_KEYS = ['name', 'address', 'phone', 'logo', 'logo_image', 'tax_rate', 'ntn', 'strn', 'footer', 'bank_name', 'bank_account', 'bank_title'];
 const ROLES = ['admin', 'cashier', 'kitchen'];
 const FLOOR_COLORS = ['#ff9f43', '#a55eea', '#26de81', '#4bcffa', '#ff6b81'];
 
@@ -29,13 +29,14 @@ module.exports = function setupApplier(db, { hashPin }) {
       const setSetting = db.prepare('INSERT INTO settings (key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value');
       // Demo bank details and NTN must not stay on a real restaurant's receipts
       for (const k of ['ntn', 'strn', 'bank_name', 'bank_account', 'bank_title']) setSetting.run(k, '');
+      if (s.restaurant?.logo_image && !/^data:image\/(png|jpeg|webp);base64,/.test(s.restaurant.logo_image)) delete s.restaurant.logo_image;
       for (const k of RESTAURANT_KEYS) if (s.restaurant?.[k] != null && String(s.restaurant[k]).trim() !== '') setSetting.run(k, String(s.restaurant[k]).trim());
       done.restaurant = s.restaurant?.name || '';
 
       if (Array.isArray(s.menu) && s.menu.length) done.menu = importMenu(db, { items: s.menu }, { apply: true, inTransaction: true }).added.length;
 
       const tables = (s.tables || []).filter(t => String(t.name || '').trim());
-      const floors = [...new Set(tables.map(t => String(t.floor || '').trim() || 'Main Dining'))];
+      const floors = [...new Set([...(s.floors || []).map(f => String(f.name || f).trim()), ...tables.map(t => String(t.floor || '').trim() || 'Main Dining')].filter(Boolean))];
       floors.forEach((f, i) => db.prepare('INSERT OR IGNORE INTO floors (name, icon, color) VALUES (?,?,?)').run(f, '🍽️', FLOOR_COLORS[i % FLOOR_COLORS.length]));
       for (const t of tables) db.prepare('INSERT INTO tables_ (name, seats, floor, shape) VALUES (?,?,?,?)')
         .run(String(t.name).trim(), Math.max(1, +t.seats || 4), String(t.floor || '').trim() || 'Main Dining', (+t.seats || 4) > 4 ? 'rect' : 'square');
@@ -51,7 +52,7 @@ module.exports = function setupApplier(db, { hashPin }) {
       done.images = (s.images || []).length;
 
       // Staff: only when the setup has an owner, so nobody is ever locked out of Settings
-      const staff = (s.staff || []).filter(u => String(u.name || '').trim() && ROLES.includes(u.role) && /^\d{4,6}$/.test(String(u.pin)));
+      const staff = (s.staff || []).filter(u => String(u.name || '').trim() && ROLES.includes(u.role) && /^\d{4}$/.test(String(u.pin))); // the login pad takes 4 digits
       if (staff.some(u => u.role === 'admin')) {
         if (new Set(staff.map(u => String(u.pin))).size !== staff.length) throw new Error('Two staff members in the setup have the same PIN');
         db.exec('DELETE FROM sessions'); db.exec('DELETE FROM users');

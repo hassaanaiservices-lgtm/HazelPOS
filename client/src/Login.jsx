@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api } from './lib'
-import { Icon } from './ui'
+import { Icon, Logo } from './ui'
 
 export default function Login({ settings, onLogin }) {
   const [pin, setPin] = useState('')
@@ -26,7 +26,7 @@ export default function Login({ settings, onLogin }) {
   return (
     <div className="login">
       <div className="login-card">
-        <div className="brand-mark login-logo" aria-hidden="true">{settings.logo}</div>
+        <div className={"brand-mark login-logo" + (settings.logo_image ? " has-img" : "")} aria-hidden="true"><Logo s={settings} /></div>
         <h1>{settings.name}</h1>
         {settings.demo ? <>
           <p className="muted">Free demo. Pick who you want to be:</p>
