@@ -1,7 +1,7 @@
 // HazelPOS membership (licence). Only on installs that need one: HAZEL_LICENCE=1, which the desktop app sets.
 // Your own PC (npm run server) and the public demo never ask for it.
 //
-// The install is activated with an activation code (HZ-XXXX-XXXX, from your vendor page) or the long branch key. The
+// The install is activated with an activation code (HZ-XXXX-XXXX, from your admin app) or the long branch key. The
 // cloud's address comes with the installer (HAZEL_CLOUD_URL). Right after activation the POS downloads the restaurant's
 // setup (server/setup.js), if you prepared one. Every few
 // hours it asks the cloud "is this restaurant's membership paid?" and remembers the last answer, so billing never stops
@@ -14,7 +14,7 @@ const OFFLINE_WARN_DAYS = 3, OFFLINE_LOCK_DAYS = 7, GRACE_DAYS = 3, DUE_SOON_DAY
 const CHECK_EVERY_MS = 3 * 60 * 60 * 1000;
 const DAY = 864e5;
 
-// setup: server/setup.js applier · health: () => what the POS reports to your vendor page (version, WhatsApp, errors)
+// setup: server/setup.js applier · health: () => what the POS reports to your admin app (version, WhatsApp, errors)
 module.exports = function licence(db, cloud, { setup = null, health = () => ({}) } = {}) {
   const required = process.env.HAZEL_LICENCE === '1';
   // cloud_config is created by cloud-sync.js, which runs first
@@ -46,7 +46,7 @@ module.exports = function licence(db, cloud, { setup = null, health = () => ({})
     // You prepared (or finished) the restaurant's setup after they activated: take it now, while there are no orders yet
     if (data.setup_ready && setup && !setup.appliedAt() && !setup.hasOrders()) await pullSetup();
     call('/api/sync/health', { ...health(), licence: state().state, setup_applied_at: setup?.appliedAt() || null, setup_error: get('setup_error') || null })
-      .catch(() => {}); // only for your vendor page: never matters to the POS
+      .catch(() => {}); // only for your admin app: never matters to the POS
     return state();
   }
 

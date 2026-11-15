@@ -4,10 +4,11 @@ const cors = require('cors');
 const path = require('path');
 const { DatabaseSync } = require('node:sqlite');
 
-// The last errors, so the health report to your vendor page can show what went wrong at a restaurant (server/licence.js)
+// The last errors, so the health report to your admin app can show what went wrong at a restaurant (server/licence.js)
 const recentErrors = [];
 const logError = console.error;
 console.error = (...a) => {
+  if (/ExperimentalWarning|--trace-warnings/.test(String(a[0]))) return logError(...a); // Node's own notices, not problems
   recentErrors.push({ at: new Date().toISOString(), text: a.map(x => x instanceof Error ? x.stack || x.message : typeof x === 'string' ? x : JSON.stringify(x)).join(' ').slice(0, 1000) });
   if (recentErrors.length > 30) recentErrors.shift();
   logError(...a);
@@ -1469,7 +1470,7 @@ app.post('/api/cloud/disconnect', (req, res) => {
 
 // ---------- Membership (installed app only: HAZEL_LICENCE=1, see server/licence.js) ----------
 const setupApplier = require('./setup')(db, { hashPin });
-// What your vendor page sees about this POS. Never customer data: counts, statuses and error messages only.
+// What your admin app sees about this POS. Never customer data: counts, statuses and error messages only.
 const health = () => {
   const w = waModule?.wa.status() || {};
   return {

@@ -10,7 +10,9 @@
     "client": "npm --prefix client run dev",
     "cloud": "node cloud/index.js",
     "demo": "node demo/start.js",
-    "demo:seed": "node demo/seed.js"
+    "demo:seed": "node demo/seed.js",
+    "admin": "node admin/server.js",
+    "admin:dev": "npm --prefix admin run dev"
   },
   "engines": {
     "node": ">=22.13"

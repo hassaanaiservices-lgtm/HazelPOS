@@ -71,8 +71,8 @@ app.post('/api/owner/signup', (req, res) => {
   const email = String(req.body.email || '').trim().toLowerCase(), pass = String(req.body.password || '');
   if (!/^\S+@\S+\.\S+$/.test(email)) return res.status(400).json({ error: 'Enter a valid email' });
   if (pass.length < 8) return res.status(400).json({ error: 'Password must be at least 8 characters' });
-  // On your vendor cloud, you create the restaurants' accounts (vendor page), so open signup is off unless ALLOW_SIGNUP=1
-  if (process.env.ALLOW_SIGNUP === '0' || (process.env.VENDOR_PASSWORD && process.env.ALLOW_SIGNUP !== '1')) return res.status(403).json({ error: 'Signups are closed on this server' });
+  // On your vendor cloud, you create the restaurants' accounts (admin app), so open signup is off unless ALLOW_SIGNUP=1
+  if (process.env.ALLOW_SIGNUP === '0' || (process.env.VENDOR_API_KEY && process.env.ALLOW_SIGNUP !== '1')) return res.status(403).json({ error: 'Signups are closed on this server' });
   if (db.prepare('SELECT 1 FROM owners WHERE email=?').get(email)) return res.status(400).json({ error: 'An account with this email already exists' });
   const id = db.prepare('INSERT INTO owners (email,name,pass,created_at) VALUES (?,?,?,?)').run(email, String(req.body.name || ''), hashPass(pass), now()).lastInsertRowid;
   res.json(session(id));
@@ -227,7 +227,7 @@ app.post('/api/setup/applied', branchAuth, (req, res) => {
   db.prepare('UPDATE setups SET applied_at=?, applied=?, error=NULL, data=? WHERE branch_id=?').run(now(), JSON.stringify(req.body.done || {}), JSON.stringify(data), req.branch.id);
   res.json({ ok: true });
 });
-// Health report every few hours (server/licence.js): kept for your vendor page; errors are kept as a short history
+// Health report every few hours (server/licence.js): kept for your admin app; errors are kept as a short history
 app.post('/api/sync/health', branchAuth, (req, res) => {
   const { errors = [], ...h } = req.body || {};
   db.prepare('UPDATE branches SET health=?, health_at=? WHERE id=?').run(JSON.stringify(h).slice(0, 20000), now(), req.branch.id);
@@ -275,9 +275,11 @@ app.post('/api/sync/backup', branchAuth, (req, res) => {
 });
 
 // ---------- Memberships ----------
-// VENDOR_PASSWORD set = this is your HazelPOS Cloud and memberships are enforced (see vendor routes below).
+// VENDOR_API_KEY set = this is your HazelPOS Cloud: memberships are enforced and your admin app (admin/) can manage it.
 // Not set = someone runs their own cloud just for their branches: nothing is enforced.
-const VENDOR = !!process.env.VENDOR_PASSWORD;
+const VENDOR_KEY = process.env.VENDOR_API_KEY || '';
+const VENDOR = VENDOR_KEY.length >= 32;
+if (VENDOR_KEY && !VENDOR) console.error('VENDOR_API_KEY is too short (32+ characters): vendor mode is OFF');
 const today = () => new Date().toISOString().slice(0, 10);
 function membership(ownerId) {
   if (!VENDOR) return { active: true, paid_until: null, suspended: false };
@@ -286,25 +288,14 @@ function membership(ownerId) {
   return { active, paid_until: o.paid_until || null, suspended: !!o.suspended, plan: o.plan || null };
 }
 
-// ---------- Vendor (you): restaurants, memberships, AI usage — page: /vendor.html ----------
-const vendorTokens = new Map(); // token -> created; in memory, so a restart means logging in again
+// ---------- Vendor API (you): used only by the admin app's server (admin/server.js), never by a browser ----------
+// One long secret, VENDOR_API_KEY, shared by this cloud and the admin server. The admin app has its own login.
+const keyMatches = k => k.length === VENDOR_KEY.length && crypto.timingSafeEqual(Buffer.from(k), Buffer.from(VENDOR_KEY));
 const vendorAuth = (req, res, next) => {
-  const t = (req.get('authorization') || '').replace(/^Bearer /, '') || String(req.query.t || ''); // ?t= only for <img> previews
-  const at = VENDOR && vendorTokens.get(t);
-  if (!at || Date.now() - at > 7 * 864e5) return res.status(401).json({ error: 'Please log in again' });
+  const k = (req.get('authorization') || '').replace(/^Bearer /, '');
+  if (!VENDOR || !keyMatches(k)) return res.status(401).json({ error: 'Not allowed' });
   next();
 };
-app.post('/api/vendor/login', (req, res) => {
-  if (!VENDOR) return res.status(404).json({ error: 'Vendor mode is off on this server' });
-  const f = fails.get('v:' + req.ip) || { n: 0, until: 0 };
-  if (f.until > Date.now()) return res.status(429).json({ error: 'Too many attempts. Try again in a few minutes' });
-  const ok = crypto.timingSafeEqual(Buffer.from(sha(req.body.password || '')), Buffer.from(sha(process.env.VENDOR_PASSWORD)));
-  if (!ok) { f.n++; if (f.n >= 5) { f.n = 0; f.until = Date.now() + 15 * 60 * 1000; } fails.set('v:' + req.ip, f); return res.status(401).json({ error: 'Wrong password' }); }
-  fails.delete('v:' + req.ip);
-  const token = crypto.randomBytes(32).toString('hex');
-  vendorTokens.set(token, Date.now());
-  res.json({ token });
-});
 const addMonths = (from, n) => { const d = new Date(from + 'T00:00:00Z'); d.setUTCMonth(d.getUTCMonth() + n); return d.toISOString().slice(0, 10); };
 app.get('/api/vendor/owners', vendorAuth, (req, res) => {
   const month = today().slice(0, 7);
@@ -398,6 +389,7 @@ app.get('/api/vendor/branches/:id/setup', vendorAuth, (req, res) => {
   const b = vendorBranch(req, res); if (!b) return;
   const { st, data } = getSetup(b.id);
   res.json({
+    owner: db.prepare("SELECT id, COALESCE(NULLIF(name,''), email) name FROM owners WHERE id=?").get(b.owner_id),
     branch: { id: b.id, name: b.name, code_created_at: b.code_created_at, code_used_at: b.code_used_at, last_sync: b.last_sync, health: JSON.parse(b.health || 'null'), health_at: b.health_at },
     setup: data, summary: setupSummary(b.id), applied: JSON.parse(st?.applied || 'null'), menu_upload: !!menuImport,
     images: db.prepare('SELECT id, caption, length(data) size FROM setup_images WHERE branch_id=? ORDER BY sort, id').all(b.id),
@@ -456,6 +448,22 @@ app.get('/api/vendor/setup-images/:id', vendorAuth, (req, res) => {
   const im = db.prepare('SELECT mime, data FROM setup_images WHERE id=?').get(req.params.id);
   im ? res.type(im.mime).send(Buffer.from(im.data)) : res.status(404).end();
 });
+// AI usage for a month, per branch and per day, with an estimated cost in USD (prices: rag/config/rag.config.json,
+// DeepSeek peak prices so the estimate errs high; Groq Whisper per audio hour). Override with AI_PRICES env (JSON).
+const PRICES = { input_miss: 0.3, input_hit: 0.006, output: 1.2, whisper_hour: 0.111, ...JSON.parse(process.env.AI_PRICES || '{}') };
+const aiCost = u => ((u.tokens_in - u.tokens_cached) * PRICES.input_miss + u.tokens_cached * PRICES.input_hit + u.tokens_out * PRICES.output) / 1e6
+  + (u.audio_seconds / 3600) * PRICES.whisper_hour;
+app.get('/api/vendor/usage', vendorAuth, (req, res) => {
+  const month = /^\d{4}-\d{2}$/.test(req.query.month || '') ? req.query.month : today().slice(0, 7);
+  const SUM = `COUNT(*) calls, COALESCE(SUM(kind='voice'),0) voice_notes, COALESCE(SUM(tokens_in),0) tokens_in, COALESCE(SUM(tokens_cached),0) tokens_cached,
+    COALESCE(SUM(tokens_out),0) tokens_out, COALESCE(SUM(audio_seconds),0) audio_seconds, COALESCE(SUM(ok=0),0) failed`;
+  const branches = db.prepare(`SELECT b.id, b.name, o.id owner_id, COALESCE(NULLIF(o.name,''), o.email) owner, o.plan FROM branches b JOIN owners o ON o.id=b.owner_id ORDER BY o.id, b.id`).all()
+    .map(b => { const u = db.prepare(`SELECT ${SUM} FROM ai_usage WHERE branch_id=? AND substr(day,1,7)=?`).get(b.id, month); return { ...b, ...u, cost_usd: +aiCost(u).toFixed(4) }; });
+  const days = db.prepare(`SELECT day, ${SUM} FROM ai_usage WHERE substr(day,1,7)=? GROUP BY day ORDER BY day`).all(month).map(d => ({ ...d, cost_usd: +aiCost(d).toFixed(4) }));
+  const months = db.prepare(`SELECT DISTINCT substr(day,1,7) m FROM ai_usage ORDER BY m DESC LIMIT 24`).all().map(r => r.m);
+  res.json({ month, months: months.includes(month) ? months : [month, ...months], prices: PRICES, branches, days });
+});
+
 // A new activation code: shown once. Using it on a PC swaps it for a new key, so any older install stops.
 app.post('/api/vendor/branches/:id/code', vendorAuth, (req, res) => {
   const b = vendorBranch(req, res); if (!b) return;
@@ -469,7 +477,7 @@ app.post('/api/vendor/branches/:id/code', vendorAuth, (req, res) => {
 // here: your keys stay on this server, every call is counted per branch, and an unpaid membership switches AI off.
 const AI_DAILY_LIMIT = +process.env.AI_DAILY_LIMIT || 3000; // calls per branch per day: a runaway loop can't empty your account
 const aiAuth = (req, res, next) => {
-  if (!VENDOR) return res.status(503).json({ error: 'The AI proxy only runs on the vendor cloud (VENDOR_PASSWORD set)' }); // else anyone who signs up uses your keys
+  if (!VENDOR) return res.status(503).json({ error: 'The AI proxy only runs on the vendor cloud (VENDOR_API_KEY set)' }); // else anyone who signs up uses your keys
   const key = (req.get('authorization') || '').replace(/^Bearer /, '');
   const b = key && db.prepare('SELECT * FROM branches WHERE key_hash=?').get(sha(key));
   if (!b) return res.status(401).json({ error: 'Unknown branch key' });
