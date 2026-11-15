@@ -23,6 +23,7 @@ Settings (environment variables):
 | `DATA_DIR` | `cloud/data` | Where `cloud.db` and the `backups/` folder live. Back this folder up. |
 | `ALLOW_SIGNUP` | on (off when `VENDOR_API_KEY` is set) | Set to `0` after you have created your owner accounts, so strangers can't sign up. On the vendor cloud, `1` turns it back on |
 | `VENDOR_API_KEY` | not set | Makes this **your** HazelPOS Cloud: memberships are enforced, the AI proxy works, and your admin app (`admin/`) can manage it. A long random secret (32+ characters), the same one the admin app uses. Make one with `openssl rand -hex 32` |
+| `METRICS_TOKEN` | not set | Turns on `/metrics` for your Grafana dashboard and alerts (see [grafana/README.md](../grafana/README.md)). 24+ characters |
 | `DEEPSEEK_API_KEY`, `GROQ_API_KEY` | not set | Your AI keys, used for every restaurant's WhatsApp assistant and voice notes (`/api/ai/chat`, `/api/ai/transcribe`). They never leave this server |
 | `AI_DAILY_LIMIT` | `3000` | AI calls per branch per day |
 

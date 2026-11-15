@@ -780,4 +780,80 @@ app.post('/api/ai/transcribe', aiAuth, async (req, res) => {
 app.use(express.static(path.join(__dirname, 'public')));
 
 const PORT = process.env.PORT || 4200;
+// ---------- Grafana: /metrics (Prometheus text format) ----------
+// Numbers about every client and branch for your own Grafana dashboard and alerts (grafana/README.md): online or not,
+// orders and sales today, errors, cheating, versions, membership, AI cost. No customer names, phones or addresses:
+// only client and branch names. Off unless METRICS_TOKEN is set (24+ characters). Grafana sends it as a Bearer token,
+// or as the password of Basic auth (any username).
+const METRICS_TOKEN = process.env.METRICS_TOKEN || '';
+const METRICS_TZ = process.env.METRICS_TZ || 'Asia/Karachi'; // the restaurants' day, for "today"
+const ONLINE_MIN = +process.env.METRICS_ONLINE_MINUTES || 10; // a POS syncs every minute; quiet longer than this = offline
+app.get('/metrics', (req, res) => {
+  if (METRICS_TOKEN.length < 24) return res.status(404).end();
+  const h = req.get('authorization') || '';
+  const given = /^Bearer /i.test(h) ? h.slice(7) : /^Basic /i.test(h) ? Buffer.from(h.slice(6), 'base64').toString().split(':').slice(1).join(':') : '';
+  if (!(given.length === METRICS_TOKEN.length && crypto.timingSafeEqual(Buffer.from(given), Buffer.from(METRICS_TOKEN)))) return res.set('WWW-Authenticate', 'Basic realm="metrics"').status(401).end();
+
+  const day = new Intl.DateTimeFormat('en-CA', { timeZone: METRICS_TZ }).format(new Date()); // YYYY-MM-DD
+  const month = day.slice(0, 7), nowMs = Date.now();
+  const esc = v => String(v ?? '').replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, ' ');
+  const lbl = o => '{' + Object.entries(o).map(([k, v]) => `${k}="${esc(v)}"`).join(',') + '}';
+  const out = [], seen = new Set();
+  const m = (name, help, labels, value) => {
+    if (!seen.has(name)) { seen.add(name); out.push(`# HELP ${name} ${help}`, `# TYPE ${name} gauge`); }
+    out.push(`${name}${labels ? lbl(labels) : ''} ${Number.isFinite(+value) ? +value : 0}`);
+  };
+
+  const owners = db.prepare("SELECT id, COALESCE(NULLIF(name,''), email) name, monthly_fee FROM owners ORDER BY id").all();
+  const branches = db.prepare(`SELECT b.id, b.name, b.owner_id, b.last_sync, b.code_used_at, b.locked_orders, b.health, b.health_at,
+    COALESCE(NULLIF(o.name,''), o.email) client FROM branches b JOIN owners o ON o.id=b.owner_id ORDER BY b.id`).all();
+  m('hazel_clients_total', 'Clients (restaurant owners)', null, owners.length);
+  m('hazel_branches_total', 'Branches', null, branches.length);
+
+  for (const o of owners) {
+    const ms = membership(o.id), L = { client_id: o.id, client: o.name };
+    m('hazel_client_days_overdue', 'Days past the paid-until date (0 = paid up)', L, ms.days_overdue || 0);
+    m('hazel_client_paid', '1 when paid up', L, ms.active ? 1 : 0);
+    m('hazel_client_bot_active', '1 while the WhatsApp bot may reply (paid or within the bot grace days)', L, ms.ai_active ? 1 : 0);
+    m('hazel_client_pos_active', '1 while the POS may take new orders', L, ms.pos_active ? 1 : 0);
+    m('hazel_client_stopped', '1 when suspended or cancelled', L, ms.suspended || ms.cancelled ? 1 : 0);
+    m('hazel_client_monthly_fee_rs', 'Monthly fee in rupees', L, o.monthly_fee || 0);
+  }
+
+  const qOrders = db.prepare(`SELECT COALESCE(SUM(status='paid'),0) paid, COALESCE(SUM(CASE WHEN status='paid' THEN total END),0) sales,
+    COALESCE(SUM(status='refunded'),0) refunded, COALESCE(SUM(status='cancelled'),0) cancelled FROM c_orders WHERE branch_id=? AND day=?`);
+  const qErr = db.prepare('SELECT COUNT(*) c FROM branch_errors WHERE branch_id=? AND at >= ?');
+  const qAi = db.prepare(`SELECT COUNT(*) calls, COALESCE(SUM(ok=0),0) failed, COALESCE(SUM(tokens_in),0) tokens_in, COALESCE(SUM(tokens_cached),0) tokens_cached,
+    COALESCE(SUM(tokens_out),0) tokens_out, COALESCE(SUM(audio_seconds),0) audio_seconds FROM ai_usage WHERE branch_id=? AND day LIKE ?`);
+  const since24h = new Date(nowMs - 864e5).toISOString();
+  let aiMonth = 0;
+  for (const b of branches) {
+    const L = { branch_id: b.id, branch: b.name, client: b.client };
+    const age = b.last_sync ? Math.max(0, (nowMs - Date.parse(b.last_sync)) / 1000) : -1;
+    const hl = JSON.parse(b.health || 'null') || {};
+    m('hazel_branch_activated', '1 once the POS has been installed and activated', L, b.code_used_at || b.last_sync ? 1 : 0);
+    m('hazel_branch_online', `1 when the POS synced in the last ${ONLINE_MIN} minutes`, L, age >= 0 && age < ONLINE_MIN * 60 ? 1 : 0);
+    m('hazel_branch_last_sync_age_seconds', 'Seconds since the POS last synced (-1 = never)', L, Math.round(age));
+    const o = qOrders.get(b.id, day);
+    m('hazel_branch_orders_today', 'Paid orders today (restaurant time)', L, o.paid);
+    m('hazel_branch_sales_today_rs', 'Sales today in rupees (paid orders)', L, o.sales);
+    m('hazel_branch_refunds_today', 'Refunded orders today', L, o.refunded);
+    m('hazel_branch_cancelled_today', 'Cancelled orders today', L, o.cancelled);
+    m('hazel_branch_errors_24h', 'Errors the POS reported in the last 24 hours', L, qErr.get(b.id, since24h).c);
+    m('hazel_branch_locked_orders', 'Orders that reached the cloud while this POS should have been locked (possible cheating)', L, b.locked_orders || 0);
+    m('hazel_branch_sync_pending_orders', 'Orders waiting on the POS to be sent to the cloud', L, hl.cloud_sync?.pending_orders || 0);
+    m('hazel_branch_whatsapp_connected', '1 when the POS last reported WhatsApp connected', L, /^(open|connected)$/.test(hl.whatsapp?.status || '') ? 1 : 0);
+    m('hazel_branch_health_age_seconds', 'Seconds since the last health report (-1 = never)', L, b.health_at ? Math.round((nowMs - Date.parse(b.health_at)) / 1000) : -1);
+    if (hl.version) m('hazel_branch_version_info', 'App version the POS runs (value is always 1)', { ...L, version: hl.version }, 1);
+    const at = qAi.get(b.id, day), am = qAi.get(b.id, month + '%');
+    m('hazel_branch_ai_calls_today', 'AI calls today (WhatsApp bot, voice notes, menu pictures)', L, at.calls);
+    m('hazel_branch_ai_failed_today', 'Failed AI calls today', L, at.failed);
+    m('hazel_branch_ai_cost_today_usd', 'Estimated AI cost today in US dollars', L, aiCost(at).toFixed(4));
+    m('hazel_branch_ai_cost_month_usd', 'Estimated AI cost this month in US dollars', L, aiCost(am).toFixed(4));
+    aiMonth += aiCost(am);
+  }
+  m('hazel_ai_cost_month_usd', 'Estimated AI cost this month, all clients, in US dollars', null, aiMonth.toFixed(4));
+  res.type('text/plain; version=0.0.4').send(out.join('\n') + '\n');
+});
+
 app.listen(PORT, '0.0.0.0', () => console.log(`HazelPOS Cloud running on http://localhost:${PORT}`));

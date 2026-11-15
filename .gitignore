@@ -33,3 +33,7 @@ rag/data/index/*
 server/whatsapp/auth/
 
 server/whatsapp/media/
+
+# Python caches (tools/)
+__pycache__/
+graphify-out/
