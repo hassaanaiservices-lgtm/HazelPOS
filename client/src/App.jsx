@@ -773,7 +773,12 @@ function Orders({ onOpen, notify }) {
           <div key={o.id} className="order-row" onClick={() => tab === 'open' && onOpen && onOpen(o.id)}>
             <b>#{o.id}</b>
             <span className="pill"><Icon name={TYPES.find(t => t.id === o.type)?.icon} size={15} />{o.type}</span>
-            <span className="muted">{o.items.reduce((s, i) => s + i.qty, 0)} items{o.customer ? `, ${o.customer}` : ''}</span>
+            <span className="order-mid">
+              <span className="muted">{o.items.reduce((s, i) => s + i.qty, 0)} items{o.customer ? `, ${o.customer}` : ''}</span>
+              {o.status === 'refunded' && <span className="refund-note" title={o.refund_reason || ''}>
+                <b>Reason:</b> {o.refund_reason || 'not given'}{o.refunded_by ? ` · by ${o.refunded_by}` : ''}{o.refunded_at ? ` · ${new Date(o.refunded_at).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}` : ''}
+              </span>}
+            </span>
             <span className="muted">{new Date(o.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
             <b className="amt">{rs(o.total)}</b>
             {tab === 'open' && onOpen && <span className="link">Open<Icon name="next" size={15} /></span>}

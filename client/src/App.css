@@ -502,6 +502,8 @@ main > section { flex: 1; min-height: 0; }
 .order-list > .empty { border: none; }
 .order-row { display: grid; grid-template-columns: 64px 130px minmax(0, 1fr) 80px 110px auto; align-items: center; gap: 12px; padding: 12px 16px; border-bottom: 1px solid var(--line); cursor: pointer; min-height: 60px; }
 .order-row:last-child { border-bottom: none; }
+.order-mid { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.refund-note { font-size: var(--fs-sm); color: var(--text); background: var(--danger-soft); border-radius: var(--r-sm); padding: 4px 8px; align-self: flex-start; max-width: 100%; overflow-wrap: anywhere; }
 .order-row:hover { background: var(--surface-2); }
 .order-row .amt { text-align: right; }
 @media (max-width: 759px) {
