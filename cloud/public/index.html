@@ -101,6 +101,7 @@ async function overview() {
       <div class="kpi"><span>Orders</span><b>${sum('orders')}</b></div>
       <div class="kpi"><span>Expenses</span><b class="red">${rs(sum('expenses'))}</b></div>
       <div class="kpi"><span>Net</span><b class="${sum('revenue') - sum('expenses') >= 0 ? 'green' : 'red'}">${rs(sum('revenue') - sum('expenses'))}</b></div>
+      <div class="kpi"><span>Refunds</span><b class="${sum('refunded') ? 'red' : ''}">${rs(sum('refunded'))}</b>${sum('refunds') ? ` <span class="muted">(${sum('refunds')})</span>` : ''}</div>
       <div class="kpi"><span>Cash short / over</span><b class="${sum('cash_difference') < 0 ? 'red' : ''}">${rs(sum('cash_difference'))}</b></div>
     </div>
     <div class="card"><h3>Branches</h3><div class="scroll"><table>
@@ -144,6 +145,10 @@ async function branchView() {
       <div class="card"><h3>Top items</h3><table>${b.topItems.map(i => `<tr><td>${esc(i.name)}</td><td class="muted">${i.qty}</td><td>${rs(i.revenue)}</td></tr>`).join('') || '<tr><td class="muted">No sales</td></tr>'}</table></div>
       <div class="card"><h3>Expenses</h3><table>${b.expenses.map(e => `<tr><td>${esc(e.category)}</td><td>${rs(e.amount)}</td></tr>`).join('') || '<tr><td class="muted">None</td></tr>'}</table></div>
     </div>
+    <div class="card"><h3>Refunds</h3><div class="scroll"><table>
+      <tr><th>Order</th><th>Amount</th><th>Refunded by</th><th>Reason</th><th>When</th></tr>
+      ${(b.refunds || []).map(r => `<tr><td>#${r.local_id}</td><td class="red">${rs(r.total)}</td><td>${esc(r.refunded_by || '—')}</td><td>${esc(r.refund_reason || '—')}</td><td class="muted">${esc((r.refunded_at || '').replace('T', ' ').slice(0, 16))}</td></tr>`).join('') || '<tr><td class="muted" colspan="5">No refunds</td></tr>'}
+    </table></div></div>
     <div class="card"><h3>Cash drawer shifts</h3><div class="scroll"><table><tr><th>Closed</th><th>Opened by</th><th>Closed by</th><th>Expected</th><th>Counted</th><th>Difference</th></tr>
       ${b.shifts.map(s => `<tr><td>${new Date(s.closed_at).toLocaleString()}</td><td>${esc(s.opened_by)}</td><td>${esc(s.closed_by)}</td><td>${rs(s.expected_cash)}</td><td>${rs(s.closing_cash)}</td>
         <td class="${s.difference < 0 ? 'red' : s.difference > 0 ? 'warn' : 'green'}">${rs(s.difference)}</td></tr>`).join('') || '<tr><td colspan="6" class="muted">No closed shifts yet</td></tr>'}</table></div></div>

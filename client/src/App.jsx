@@ -37,7 +37,7 @@ const NAV = {
     ['admin', 'Settings', 'settings'],
   ],
   cashier: [
-    ['home', 'New order', 'plus'],
+    ['home', 'Billing', 'cash'],
     ['orders', 'Orders', 'list'],
     ['kitchen', 'Kitchen', 'flame'],
     ['delivery', 'Delivery', 'bike'],

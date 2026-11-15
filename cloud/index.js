@@ -42,6 +42,10 @@ for (const sql of [
   // Latest health report from the branch's POS (version, WhatsApp, errors): server/index.js health()
   'ALTER TABLE branches ADD COLUMN health TEXT',
   'ALTER TABLE branches ADD COLUMN health_at TEXT',
+  // Refunds reach the cloud too (cloud-sync.js re-sends an order when its status changes)
+  'ALTER TABLE c_orders ADD COLUMN refunded_at TEXT',
+  'ALTER TABLE c_orders ADD COLUMN refunded_by TEXT',
+  'ALTER TABLE c_orders ADD COLUMN refund_reason TEXT',
 ]) { try { db.exec(sql); } catch { /* already there */ } }
 // The restaurant's setup you prepare before they install (server/setup.js applies it): one per branch
 db.exec(`
@@ -141,6 +145,8 @@ app.get('/api/dashboard', ownerAuth, (req, res) => {
     ...db.prepare(`SELECT COUNT(*) orders, COALESCE(SUM(total),0) revenue, COALESCE(SUM(tax),0) tax, COALESCE(SUM(discount + promo_amount + points_amount),0) discounts
       FROM c_orders WHERE branch_id=? AND status='paid' AND day BETWEEN ? AND ?`).get(b.id, from, to),
     cancelled: db.prepare(`SELECT COUNT(*) c FROM c_orders WHERE branch_id=? AND status='cancelled' AND day BETWEEN ? AND ?`).get(b.id, from, to).c,
+    ...(r => ({ refunds: r.c, refunded: r.s }))(db.prepare(`SELECT COUNT(*) c, COALESCE(SUM(total),0) s FROM c_orders WHERE branch_id=? AND status='refunded'
+      AND substr(COALESCE(refunded_at, paid_at),1,10) BETWEEN ? AND ?`).get(b.id, from, to)),
     expenses: db.prepare('SELECT COALESCE(SUM(amount),0) s FROM c_expenses WHERE branch_id=? AND date BETWEEN ? AND ?').get(b.id, from, to).s,
     cash_difference: db.prepare(`SELECT COALESCE(SUM(difference),0) s FROM c_shifts WHERE branch_id=? AND substr(closed_at,1,10) BETWEEN ? AND ?`).get(b.id, from, to).s,
     low_stock: db.prepare('SELECT COUNT(*) c FROM c_stock WHERE branch_id=? AND stock <= low_level').get(b.id).c,
@@ -170,6 +176,8 @@ app.get('/api/branches/:id', ownerAuth, (req, res) => {
       JOIN c_orders o ON o.branch_id = i.branch_id AND o.local_id = i.order_local_id
       WHERE o.branch_id=? AND o.status='paid' AND o.day BETWEEN ? AND ? GROUP BY i.name ORDER BY qty DESC LIMIT 10`).all(b.id, from, to),
     shifts: db.prepare('SELECT * FROM c_shifts WHERE branch_id=? ORDER BY closed_at DESC LIMIT 15').all(b.id),
+    refunds: db.prepare(`SELECT local_id, total, payment_method, user_name, refunded_at, refunded_by, refund_reason FROM c_orders WHERE branch_id=? AND status='refunded'
+      AND substr(COALESCE(refunded_at, paid_at),1,10) BETWEEN ? AND ? ORDER BY refunded_at DESC LIMIT 50`).all(b.id, from, to),
     lowStock: db.prepare('SELECT name, unit, stock, low_level FROM c_stock WHERE branch_id=? AND stock <= low_level ORDER BY name').all(b.id),
     expenses: db.prepare('SELECT category, SUM(amount) amount FROM c_expenses WHERE branch_id=? AND date BETWEEN ? AND ? GROUP BY category ORDER BY amount DESC').all(b.id, from, to),
     backups: db.prepare('SELECT id, at, size FROM backups WHERE branch_id=? ORDER BY id DESC').all(b.id),
@@ -242,10 +250,11 @@ app.post('/api/sync/push', branchAuth, (req, res) => {
   const b = req.branch.id, { orders = [], expenses = [], deleted_expenses = [], stock, shifts = [] } = req.body;
   tx(() => {
     const up = db.prepare(`INSERT OR REPLACE INTO c_orders (branch_id,local_id,type,status,table_name,subtotal,discount,promo_amount,points_amount,tax,total,
-      payment_method,created_at,paid_at,day,user_name) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
+      payment_method,created_at,paid_at,day,user_name,refunded_at,refunded_by,refund_reason) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
     for (const o of orders) {
       up.run(b, o.local_id, o.type, o.status, o.table_name ?? null, o.subtotal || 0, o.discount || 0, o.promo_amount || 0, o.points_amount || 0,
-        o.tax || 0, o.total || 0, o.payment_method ?? null, o.created_at, o.paid_at ?? null, o.day, o.user_name ?? '');
+        o.tax || 0, o.total || 0, o.payment_method ?? null, o.created_at, o.paid_at ?? null, o.day, o.user_name ?? '',
+        o.refunded_at ?? null, o.refunded_by ?? null, o.refund_reason ?? null);
       db.prepare('DELETE FROM c_items WHERE branch_id=? AND order_local_id=?').run(b, o.local_id);
       for (const i of o.items || []) db.prepare('INSERT INTO c_items VALUES (?,?,?,?,?)').run(b, o.local_id, i.name, i.qty, i.price);
     }

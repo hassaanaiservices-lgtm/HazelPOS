@@ -35,15 +35,17 @@ module.exports = function cloudSync(db) {
     return data;
   }
 
-  // Paid/cancelled orders never change again, so each is sent once
+  // Finished orders, sent again whenever their status changes (a paid order refunded later must reach the cloud too).
+  // sync_log.hash holds the status that was last sent.
   function pendingOrders() {
     return db.prepare(`SELECT o.*, t.name table_name, date(COALESCE(o.paid_at, o.created_at), 'localtime') day FROM orders o
       LEFT JOIN tables_ t ON t.id = o.table_id
-      WHERE o.status IN ('paid','cancelled','refunded') AND o.id NOT IN (SELECT local_id FROM sync_log WHERE tbl='orders') ORDER BY o.id LIMIT ?`).all(BATCH)
+      WHERE o.status IN ('paid','cancelled','refunded') AND o.id NOT IN (SELECT local_id FROM sync_log WHERE tbl='orders' AND hash = o.status) ORDER BY o.id LIMIT ?`).all(BATCH)
       .map(o => ({
         local_id: o.id, type: o.type, status: o.status, table_name: o.table_name, subtotal: o.subtotal, discount: o.discount,
         promo_amount: o.promo_amount, points_amount: o.points_amount, tax: o.tax, total: o.total, payment_method: o.payment_method,
         created_at: o.created_at, paid_at: o.paid_at, day: o.day, user_name: o.user_name,
+        refunded_at: o.refunded_at, refunded_by: o.refunded_by, refund_reason: o.refund_reason,
         items: db.prepare('SELECT name, qty, price FROM order_items WHERE order_id=?').all(o.id),
       }));
   }
@@ -76,7 +78,7 @@ module.exports = function cloudSync(db) {
           expenses: changed.map(e => ({ local_id: e.id, date: e.date, title: e.title, category: e.category, amount: e.amount })),
         });
         db.exec('BEGIN');
-        orders.forEach(o => mark('orders', o.local_id));
+        orders.forEach(o => mark('orders', o.local_id, o.status));
         shifts.forEach(s => mark('shifts', s.local_id));
         changed.forEach(e => mark('expenses', e.id, hash(e)));
         deleted.forEach(id => db.prepare("DELETE FROM sync_log WHERE tbl='expenses' AND local_id=?").run(id));
@@ -120,8 +122,8 @@ module.exports = function cloudSync(db) {
     return {
       connected: !!(get('url') && get('key')), url: get('url'), branch: get('branch'),
       last_sync: get('last_sync'), last_backup: get('last_backup'), last_error: get('last_error'), running,
-      pending_orders: db.prepare(`SELECT COUNT(*) c FROM orders WHERE status IN ('paid','cancelled','refunded')
-        AND id NOT IN (SELECT local_id FROM sync_log WHERE tbl='orders')`).get().c,
+      pending_orders: db.prepare(`SELECT COUNT(*) c FROM orders o WHERE status IN ('paid','cancelled','refunded')
+        AND id NOT IN (SELECT local_id FROM sync_log WHERE tbl='orders' AND hash = o.status)`).get().c,
     };
   }
   const disconnect = () => { set('url', ''); set('key', ''); set('branch', ''); linkAi(); };
