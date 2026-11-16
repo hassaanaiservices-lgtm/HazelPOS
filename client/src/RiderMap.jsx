@@ -6,7 +6,7 @@ import { api } from './lib'
 // Riders on a map. Their phones send positions through the cloud (server/rider-sync.js); the POS asks every 10 s.
 // Map tiles come from OpenStreetMap, so the map needs internet; the rest of the POS does not.
 const ago = iso => { const s = Math.round((Date.now() - Date.parse(iso)) / 1000); return s < 60 ? `${s} s ago` : s < 3600 ? `${Math.round(s / 60)} min ago` : `${Math.round(s / 3600)} h ago` }
-const esc = s => String(s).replace(/[<>&]/g, '')
+const esc = s => String(s).replace(/[<>&"']/g, '')
 
 export default function RiderMap({ height = 340 }) {
   const box = useRef(null), map = useRef(null), markers = useRef(new Map()), fitted = useRef(false)
@@ -30,7 +30,7 @@ export default function RiderMap({ height = 340 }) {
         html: `<div class="rider-pin${r.on_road ? ' busy' : ''}${stale || !r.on_duty ? ' stale' : ''}"><span>🛵</span><b>${esc(r.name)}</b></div>` })
       let m = markers.current.get(r.id)
       if (!m) { m = L.marker([r.lat, r.lng], { icon }).addTo(map.current); markers.current.set(r.id, m) } else { m.setLatLng([r.lat, r.lng]); m.setIcon(icon) }
-      m.bindTooltip(`${r.name}: ${r.on_road ? `${r.on_road} order(s) out` : r.on_duty ? 'free' : 'off duty'}, seen ${ago(r.at)}`)
+      m.bindTooltip(`${esc(r.name)}: ${r.on_road ? `${r.on_road} order(s) out` : r.on_duty ? 'free' : 'off duty'}, seen ${ago(r.at)}`)
     }
     for (const [id, m] of markers.current) if (!seen.has(id)) { m.remove(); markers.current.delete(id) }
     if (riders.length && !fitted.current) { map.current.fitBounds(riders.map(r => [r.lat, r.lng]), { padding: [40, 40], maxZoom: 15 }); fitted.current = true }

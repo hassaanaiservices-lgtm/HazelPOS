@@ -77,3 +77,26 @@ Status: **open** = not decided yet, **decided** = we chose what to do (the choic
 | R3 | Rider links and tracking links are long secrets in a URL. Anyone with a rider's link can act as that rider; anyone with a tracking link sees that one order's status and the rider's position while it is on the way. | A rider who forwards their link lets someone else accept orders in their name. | Links are shown to the owner only; "New link" kills the old one; a rider marked "not working here" loses it at once. Tracking links stop at the next day's board. | accepted |
 | R4 | The rider screen and live tracking need internet on the rider's phone and at the restaurant PC, plus the cloud. Billing still works offline; dispatching from the Delivery board still works offline. | No internet = the cashier dispatches by hand, no map, no tracking link. | Nothing to fix; it is the design (CLAUDE.md: billing never needs internet). | accepted |
 | R5 | Rider accounts count COD cash by "paid after dispatch". An order paid online before dispatch is not counted as cash with the rider. An order a cashier marks paid by hand while it is still out would count as "handed in" early. | A rare wrong line in Accounts → Cash collected. Fees and deliveries are unaffected. | Cashiers should use "Cash received" / "Collect" on the Delivery board, not Pay on the order. | accepted |
+
+## Security check, 16 Nov 2026 (S*)
+
+Found and fixed in this check (tested in two-restaurant runs: same PINs, same rider and order numbers, one cloud):
+
+| # | What was wrong | Fix | Status |
+|---|---|---|---|
+| S1 | On Railway the cloud saw every visitor as one address (the proxy), so 8 wrong owner passwords or 10 wrong activation codes from anyone locked out everyone. | `trust proxy` on the cloud: limits count per real visitor. | fixed |
+| S2 | In the public demo any visitor could change the Owner / Cashier / Kitchen / Rider PINs and break the demo for everyone until a restart. | PIN changes are ignored in demo mode. | fixed |
+| S3 | A customer's tracking link kept giving the rider's position after the order was delivered (until the next day). | Position is given only while that order is on the way. | fixed |
+| S4 | The secret in a rider or tracking link was sent to the map-tile servers as the page's referrer, and the page could be cached or framed. | `Referrer-Policy: no-referrer`, `no-store`, no framing on both pages. | fixed |
+| S5 | The cloud rewrote each branch's delivery board every 8 seconds even when nothing changed, and never deleted old rider actions. Slow with hundreds of branches. | Unchanged boards are skipped; old actions are pruned; the cloud database runs in WAL mode. | fixed |
+| S6 | No limit on trying wrong rider / tracking links. (Guessing a 128-bit link is hopeless, but a script could hammer the database.) | 30 wrong links in 10 minutes from one visitor = blocked for the rest of the 10 minutes. | fixed |
+| S7 | A rider name with HTML in it was shown unescaped in the map tooltip (only the owner can set names). | Escaped. | fixed |
+
+Still open, by design or for later:
+
+| # | Risk | What to do | Status |
+|---|---|---|---|
+| S8 | PINs are 4 digits. Inside the restaurant's Wi-Fi, someone could try PINs: 5 wrong tries lock that device out for 5 minutes, so guessing an owner PIN takes days, but it is not impossible. More logins (riders) = slightly better odds of hitting someone's PIN. A rider PIN only opens the rider screen. | Owners should not use 1234 / 1111. Later: 6-digit PIN for the owner (the login pad takes 4 today). | open |
+| S9 | The cloud is one SQLite file on one Railway volume. Fine for hundreds of branches; at thousands of busy branches it needs Postgres or several cloud instances. | Watch the Grafana dashboard (response times); plan the move when you pass ~300 active branches. | watch |
+| S10 | The first-activation public key is trusted on first use unless the installer carries it (RISKS L4). | Put `hazel.licencePublicKey` in `desktop/package.json` before building installers. | open |
+| S11 | The older test scripts (licence, onboarding, updates: e2e–e2e13) lived in a temp folder that the PC's restart wiped, so they were not re-run after this check. The rider, metrics and isolation suites (e2e14–e2e17, 115 checks, in `desktop/dist/shots/`) pass. | Rewrite the lost suites into the repo (`tests/`) so they survive and can run before every release. | open |

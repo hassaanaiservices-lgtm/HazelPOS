@@ -9,6 +9,8 @@ const { DatabaseSync } = require('node:sqlite');
 const DATA = process.env.DATA_DIR || path.join(__dirname, 'data');
 fs.mkdirSync(path.join(DATA, 'backups'), { recursive: true });
 const db = new DatabaseSync(path.join(DATA, 'cloud.db'));
+// Many branches write every few seconds: WAL makes writes several times faster and never blocks reads
+db.exec('PRAGMA journal_mode = WAL'); db.exec('PRAGMA synchronous = NORMAL'); db.exec('PRAGMA busy_timeout = 5000');
 db.exec(`
 CREATE TABLE IF NOT EXISTS owners (id INTEGER PRIMARY KEY, email TEXT UNIQUE, name TEXT, pass TEXT, created_at TEXT);
 CREATE TABLE IF NOT EXISTS owner_sessions (token TEXT PRIMARY KEY, owner_id INTEGER, created_at TEXT, last_seen TEXT);
@@ -55,7 +57,8 @@ for (const sql of [
   // Latest health report from the branch's POS (version, WhatsApp, errors): server/index.js health()
   'ALTER TABLE branches ADD COLUMN health TEXT',
   'ALTER TABLE branches ADD COLUMN health_at TEXT',
-  'ALTER TABLE branches ADD COLUMN board_at TEXT', // last rider sync from the POS: the rider page says when the POS is offline
+  'ALTER TABLE branches ADD COLUMN board_at TEXT',
+  'ALTER TABLE branches ADD COLUMN board_hash TEXT', // the last riders + board the POS sent: unchanged = nothing rewritten // last rider sync from the POS: the rider page says when the POS is offline
   // Refunds reach the cloud too (cloud-sync.js re-sends an order when its status changes)
   'ALTER TABLE c_orders ADD COLUMN refunded_at TEXT',
   'ALTER TABLE c_orders ADD COLUMN refunded_by TEXT',
@@ -96,6 +99,7 @@ const KEEP_BACKUPS = 14;
 const app = express();
 app.use('/api/sync/backup', express.raw({ type: '*/*', limit: '500mb' }));
 app.use('/api/ai/transcribe', express.raw({ type: '*/*', limit: '25mb' })); // WhatsApp voice notes are small
+app.set('trust proxy', 1); // Railway / any HTTPS proxy in front: req.ip is the real visitor, so the wrong-password limits count per visitor, not for everyone at once
 app.use(express.json({ limit: '10mb' }));
 
 // ---------- Owner accounts ----------
@@ -334,11 +338,16 @@ app.post('/api/sync/push', branchAuth, (req, res) => {
 // The POS sends its riders and today's delivery board every few seconds and takes back what riders pressed and where
 // they are. Riders' phones use /r/<token>; customers' tracking links use /track/<token>. Both hold 128-bit secrets.
 app.post('/api/sync/riders', branchAuth, (req, res) => {
-  const b = req.branch.id, riders = Array.isArray(req.body.riders) ? req.body.riders : [], board = Array.isArray(req.body.board) ? req.body.board : [];
+  const b = req.branch.id, board = Array.isArray(req.body.board) ? req.body.board : [];
+  // A rider link is a 128-bit secret made by the POS; anything weaker is never registered
+  const riders = (Array.isArray(req.body.riders) ? req.body.riders : []).filter(r => /^[0-9a-f]{32}$/.test(String(r.token || ''))).slice(0, 200);
+  const boardHash = sha(JSON.stringify([riders, board]));
+  const unchanged = boardHash === req.branch.board_hash; // most syncs: nothing changed, nothing rewritten
   tx(() => {
     // What the POS did with the last batch of phone actions (ok, or why not: the rider's phone shows it)
     const ack = db.prepare('UPDATE rider_events SET applied_at=?, result=? WHERE id=? AND branch_id=? AND applied_at IS NULL');
     for (const r of (Array.isArray(req.body.ack) ? req.body.ack : []).slice(0, 200)) ack.run(now(), String(r.result || 'ok').slice(0, 200), +r.id, b);
+    if (!unchanged) {
     const ids = riders.map(r => +r.local_id);
     db.prepare(`DELETE FROM c_riders WHERE branch_id=? AND local_id NOT IN (${ids.map(() => '?').join(',') || 'NULL'})`).run(b, ...ids);
     const up = db.prepare(`INSERT INTO c_riders (branch_id, local_id, name, phone, token_hash) VALUES (?,?,?,?,?)
@@ -352,7 +361,9 @@ app.post('/api/sync/riders', branchAuth, (req, res) => {
     // An Accept for an order that is now out or gone can never apply: close it so the rider's phone stops waiting
     db.prepare(`UPDATE rider_events SET applied_at=?, result='The order is no longer waiting' WHERE branch_id=? AND applied_at IS NULL AND type='accept'
       AND order_local_id NOT IN (SELECT local_id FROM c_delivery WHERE branch_id=? AND status IN ('ready','cooking') AND rider_local_id IS NULL)`).run(now(), b, b);
-    db.prepare('UPDATE branches SET board_at=? WHERE id=?').run(now(), b);
+    }
+    db.prepare('UPDATE branches SET board_at=?, board_hash=? WHERE id=?').run(now(), boardHash, b);
+    if (Math.random() < 0.01) db.prepare('DELETE FROM rider_events WHERE branch_id=? AND at < ?').run(b, new Date(Date.now() - 3 * 864e5).toISOString()); // old phone actions
     // Riders logged in to the POS itself share their position through it
     const pos = db.prepare('UPDATE c_riders SET lat=?, lng=?, acc=?, at=?, on_duty=? WHERE branch_id=? AND local_id=? AND (at IS NULL OR at < ?)');
     for (const p of (Array.isArray(req.body.positions) ? req.body.positions : []).slice(0, 100)) {
@@ -372,9 +383,19 @@ app.post('/api/sync/riders/ack', branchAuth, (req, res) => {
   res.json({ ok: true });
 });
 
+// Wrong rider / tracking links from one visitor: slowed down after 30 in 10 minutes (the links are 128-bit secrets, so
+// guessing is hopeless anyway; this keeps a script from hammering the database)
+const badLinks = new Map();
+const tooManyBadLinks = req => { const f = badLinks.get(req.ip); return f && f.until > Date.now() && f.n >= 30; };
+const badLink = req => {
+  const f = badLinks.get(req.ip), t = Date.now();
+  if (!f || f.until < t) badLinks.set(req.ip, { n: 1, until: t + 10 * 60e3 }); else f.n++;
+  if (badLinks.size > 5000) for (const [k, v] of badLinks) if (v.until < t) badLinks.delete(k);
+};
 const riderAuth = (req, res, next) => {
+  if (tooManyBadLinks(req)) return res.status(429).json({ error: 'Too many wrong links. Try again in a few minutes' });
   req.rider = db.prepare('SELECT r.*, b.name branch_name, b.board_at FROM c_riders r JOIN branches b ON b.id=r.branch_id WHERE r.token_hash=?').get(sha(req.params.token));
-  if (!req.rider) return res.status(404).json({ error: 'This link is not valid any more. Ask the restaurant for a new one.' });
+  if (!req.rider) { badLink(req); return res.status(404).json({ error: 'This link is not valid any more. Ask the restaurant for a new one.' }); }
   next();
 };
 const riderName = (b, id) => db.prepare('SELECT name FROM c_riders WHERE branch_id=? AND local_id=?').get(b, id)?.name || 'another rider';
@@ -438,9 +459,11 @@ app.post('/api/r/:token/duty', riderAuth, (req, res) => {
 });
 // The customer's tracking page: the order's status and, while it is on the way, the rider's position
 app.get('/api/track/:token', (req, res) => {
-  const o = db.prepare('SELECT d.*, b.name restaurant FROM c_delivery d JOIN branches b ON b.id=d.branch_id WHERE d.track_token=?').get(String(req.params.token));
-  if (!o) return res.status(404).json({ error: 'This tracking link has expired' });
-  const r = o.rider_local_id && db.prepare('SELECT name, lat, lng, acc, at FROM c_riders WHERE branch_id=? AND local_id=?').get(o.branch_id, o.rider_local_id);
+  if (tooManyBadLinks(req)) return res.status(429).json({ error: 'Too many wrong links. Try again in a few minutes' });
+  const o = /^[0-9a-f]{32}$/.test(req.params.token) && db.prepare('SELECT d.*, b.name restaurant FROM c_delivery d JOIN branches b ON b.id=d.branch_id WHERE d.track_token=?').get(req.params.token);
+  if (!o) { badLink(req); return res.status(404).json({ error: 'This tracking link has expired' }); }
+  // The rider's position is given out only while THIS order is on the way: not before, and never after it is delivered
+  const r = o.status === 'out' && o.rider_local_id && db.prepare('SELECT name, lat, lng, acc, at FROM c_riders WHERE branch_id=? AND local_id=?').get(o.branch_id, o.rider_local_id);
   const pin = /q=(-?\d+\.?\d*),(-?\d+\.?\d*)/.exec(o.address || '');
   res.json({
     order: o.local_id, restaurant: o.restaurant, status: o.status, items: o.items, total: o.total, cod: !!o.cod, dispatched_at: o.dispatched_at, delivered_at: o.delivered_at,
@@ -452,8 +475,10 @@ app.get('/api/track/:token', (req, res) => {
 app.get('/api/sync/riders/:id/trail', branchAuth, (req, res) => {
   res.json(db.prepare('SELECT lat, lng, at FROM rider_trail WHERE branch_id=? AND rider_local_id=? AND at > ? ORDER BY at').all(req.branch.id, +req.params.id, new Date(Date.now() - 24 * 3600e3).toISOString()));
 });
-app.get('/r/:token', (req, res) => res.set('X-Robots-Tag', 'noindex').sendFile(path.join(__dirname, 'public', 'rider.html')));
-app.get('/track/:token', (req, res) => res.set('X-Robots-Tag', 'noindex').sendFile(path.join(__dirname, 'public', 'track.html')));
+// The address holds the secret: never sent on to other sites (map tiles, Google Maps) as a referrer, never cached or framed
+const SECRET_PAGE = { 'X-Robots-Tag': 'noindex', 'Referrer-Policy': 'no-referrer', 'Cache-Control': 'no-store', 'X-Frame-Options': 'DENY', 'X-Content-Type-Options': 'nosniff' };
+app.get('/r/:token', (req, res) => res.set(SECRET_PAGE).sendFile(path.join(__dirname, 'public', 'rider.html')));
+app.get('/track/:token', (req, res) => res.set(SECRET_PAGE).sendFile(path.join(__dirname, 'public', 'track.html')));
 
 // Whole-database snapshot from the branch; the newest KEEP_BACKUPS are kept
 // The branch's newest backup, for a new PC or a restore (server/restore.js). 404 = none yet.

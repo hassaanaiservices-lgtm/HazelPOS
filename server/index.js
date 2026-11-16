@@ -443,6 +443,8 @@ if (DEMO) {
     const hit = req.method !== 'GET' && DEMO_ONLY.find(([re]) => re.test(req.path));
     if (hit) return res.status(403).json({ error: hit[1], code: 'demo' });
     if (req.method === 'POST' && req.path === '/settings' && req.body) for (const k of NOT_IN_DEMO) delete req.body[k];
+    // The demo's logins are fixed (the role picker uses them): a visitor can't change a PIN and lock everyone else out
+    if (req.method === 'POST' && /^\/(users|riders)$/.test(req.path) && req.body) delete req.body.pin;
     next();
   });
 }
@@ -1166,18 +1168,18 @@ app.post('/api/riders', userErrors((req, res) => {
     setRiderLogin(+rid, name.trim(), req.body.pin, on);
   });
   riderSync.poke();
-  res.json(riderRows('e.id=' + (+rid), true)[0]);
+  res.json(riderRows('e.id=' + (Math.trunc(+rid) || 0), true)[0]);
 }));
 // A new link for this rider's phone; the old one stops working at the next sync
 app.post('/api/riders/:id/link', userErrors((req, res) => {
   if (!db.prepare("SELECT 1 FROM employees WHERE id=? AND lower(job) LIKE '%rider%'").get(req.params.id)) throw new UserError('Rider not found');
   db.prepare('UPDATE employees SET rider_token=? WHERE id=?').run(newToken(), req.params.id);
   riderSync.poke();
-  res.json(riderRows('e.id=' + (+req.params.id), true)[0]);
+  res.json(riderRows('e.id=' + (Math.trunc(+req.params.id) || 0), true)[0]);
 }));
 // Send the rider their link from the restaurant's WhatsApp
 app.post('/api/riders/:id/send-link', userErrors(async (req, res) => {
-  const r = riderRows('e.id=' + (+req.params.id), true)[0];
+  const r = riderRows('e.id=' + (Math.trunc(+req.params.id) || 0), true)[0];
   if (!r) throw new UserError('Rider not found');
   if (!r.link) throw new UserError('Connect the cloud first (Settings → Cloud): the rider screen runs there');
   const jid = lowStock.toJid(r.phone);
@@ -1962,5 +1964,5 @@ app.use((err, req, res, next) => { // eslint-disable-line no-unused-vars
 });
 
 const PORT = process.env.PORT || 4000;
-if (DEMO) console.log('Demo mode: the login screen offers Owner, Cashier and Kitchen without PINs');
+if (DEMO) console.log('Demo mode: the login screen offers Owner, Cashier, Kitchen and Rider without PINs');
 app.listen(PORT, '0.0.0.0', () => console.log(`HazelPOS server running on http://localhost:${PORT}`));
