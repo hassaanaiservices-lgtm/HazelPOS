@@ -98,6 +98,13 @@ for (const sql of [
   'ALTER TABLE orders ADD COLUMN refunded_at TEXT',
   'ALTER TABLE orders ADD COLUMN refunded_by TEXT',
   'ALTER TABLE orders ADD COLUMN refund_reason TEXT',
+  // Riders (Riders section): fee per delivery, the secret in the rider's phone link; per order the fee at the time,
+  // the customer's tracking link secret, and whether the rider took it on their phone
+  'ALTER TABLE employees ADD COLUMN delivery_fee REAL DEFAULT 0',
+  'ALTER TABLE employees ADD COLUMN rider_token TEXT',
+  'ALTER TABLE orders ADD COLUMN rider_fee REAL DEFAULT 0',
+  'ALTER TABLE orders ADD COLUMN track_token TEXT',
+  'ALTER TABLE orders ADD COLUMN accepted_by_rider INTEGER DEFAULT 0',
 ]) { try { db.exec(sql); } catch { /* column exists */ } }
 
 // Product details & sizes
@@ -455,6 +462,9 @@ const ACCESS = [
   [/^GET \/customers\/lookup$/, STAFF],
   [/^POST \/promos\/check$/, STAFF],
   [/^GET \/delivery-zones$/, STAFF],
+  [/^POST \/riders$/, ADMIN], // add or edit a rider; their link, accounts and payouts: admin only
+  [/^POST \/riders\/\d+\/(link|send-link|pay)$/, ADMIN],
+  [/^(GET \/riders\/accounts|POST \/riders\/sync)$/, ADMIN],
   [/^(GET|POST) \/(deliveries|riders)(\/|$)/, STAFF],
   [/^(GET|POST) \/whatsapp\//, STAFF],
 ];
@@ -747,6 +757,7 @@ function getOrder(id) {
     o.customer_points = o.customer_id ? db.prepare('SELECT points FROM customers WHERE id=?').get(o.customer_id)?.points : null;
     o.zone = o.zone_id ? db.prepare('SELECT name, eta_min FROM delivery_zones WHERE id=?').get(o.zone_id)?.name : null;
     o.rider = o.rider_id ? db.prepare('SELECT name, phone FROM employees WHERE id=?').get(o.rider_id) : null;
+    o.track_url = o.track_token ? trackUrl(o) : null; // customer's live-tracking page on the cloud (null when not connected)
     o.promo = o.promo_code ? db.prepare('SELECT code, type, value, min_order, max_discount FROM promos WHERE code=?').get(o.promo_code) : null;
   }
   return o;
@@ -1089,36 +1100,113 @@ app.post('/api/orders/:id/split', userErrors((req, res) => {
 app.get('/api/delivery-zones', (req, res) => res.json(db.prepare('SELECT * FROM delivery_zones ORDER BY active DESC, name').all()));
 crud('delivery-zones', 'delivery_zones', ['name', 'fee', 'min_order', 'free_above', 'eta_min', 'active']);
 
-// Riders are staff whose job contains "rider"; cash_due = unpaid (COD) orders they have delivered (still on the way does not count)
-app.get('/api/riders', (req, res) => {
-  res.json(db.prepare(`SELECT e.id, e.name, e.phone,
+// Riders are staff whose job contains "rider" (the Riders section adds them with a per-delivery fee). cash_due = unpaid
+// (COD) orders they have delivered: still on the way does not count. A rider's phone screen lives on the cloud
+// (rider-sync.js); its link holds a secret, so only the admin gets the link.
+const { onTheWayMessage, statusMessage } = require('./whatsapp/messages');
+const newToken = () => crypto.randomBytes(16).toString('hex');
+const cloudBase = () => cloud.status().connected ? cloud.status().url.replace(/\/+$/, '') : null;
+const riderLink = e => e.rider_token && cloudBase() ? `${cloudBase()}/r/${e.rider_token}` : null;
+const trackUrl = o => o.track_token && cloudBase() ? `${cloudBase()}/track/${o.track_token}` : null;
+const RIDER_COLS = `e.id, e.name, e.phone, e.active, COALESCE(e.delivery_fee,0) delivery_fee, e.rider_token,
       (SELECT COUNT(*) FROM orders o WHERE o.rider_id=e.id AND o.delivery_status='out') on_road,
       (SELECT COALESCE(SUM(total),0) FROM orders o WHERE o.rider_id=e.id AND o.status='open' AND o.delivery_status='delivered') cash_due,
-      (SELECT COUNT(*) FROM orders o WHERE o.rider_id=e.id AND o.status='open' AND o.delivery_status='delivered') cod_orders
-    FROM employees e WHERE e.active=1 AND lower(e.job) LIKE '%rider%' ORDER BY e.name`).all());
+      (SELECT COUNT(*) FROM orders o WHERE o.rider_id=e.id AND o.status='open' AND o.delivery_status='delivered') cod_orders,
+      (SELECT COUNT(*) FROM orders o WHERE o.rider_id=e.id AND o.delivery_status='delivered' AND date(o.delivered_at,'localtime')=date('now','localtime')) delivered_today`;
+const riderRows = (where, admin) => {
+  const pos = riderSync.positions();
+  return db.prepare(`SELECT ${RIDER_COLS} FROM employees e WHERE lower(e.job) LIKE '%rider%' AND ${where} ORDER BY e.active DESC, e.name`).all()
+    .map(e => ({ ...e, link: admin ? riderLink(e) : undefined, rider_token: undefined, ...(pos[e.id] || {}) }));
+};
+app.get('/api/riders', (req, res) => res.json(riderRows(req.query.all ? '1' : 'e.active=1', req.user.role === 'admin')));
+// Where every rider is (from their phones, through the cloud), for the map
+app.get('/api/riders/positions', (req, res) => {
+  res.json({ cloud: !!cloudBase(), ...riderSync.status(), riders: riderRows('e.active=1', false).map(r => ({ id: r.id, name: r.name, on_road: r.on_road, lat: r.lat, lng: r.lng, acc: r.acc, at: r.at, on_duty: r.on_duty })) });
 });
+app.post('/api/riders/sync', async (req, res) => res.json(await riderSync.tick()));
+// Add or edit a rider (admin). The first save makes the secret for their phone link.
+app.post('/api/riders', userErrors((req, res) => {
+  const { id, name, phone, delivery_fee, active } = req.body;
+  if (!String(name || '').trim()) throw new UserError('Name is required');
+  const fee = Math.max(0, Math.round(+delivery_fee || 0)), on = active === false || active === 0 || active === '0' ? 0 : 1;
+  let rid = id;
+  if (id) {
+    if (!db.prepare("SELECT 1 FROM employees WHERE id=? AND lower(job) LIKE '%rider%'").get(id)) throw new UserError('Rider not found');
+    db.prepare('UPDATE employees SET name=?, phone=?, delivery_fee=?, active=?, rider_token=COALESCE(rider_token, ?) WHERE id=?').run(name.trim(), String(phone || '').trim(), fee, on, newToken(), id);
+  } else {
+    rid = db.prepare('INSERT INTO employees (name,phone,job,salary,active,joined,delivery_fee,rider_token) VALUES (?,?,?,?,?,?,?,?)')
+      .run(name.trim(), String(phone || '').trim(), 'Rider', 0, 1, today(), fee, newToken()).lastInsertRowid;
+  }
+  riderSync.poke();
+  res.json(riderRows('e.id=' + (+rid), true)[0]);
+}));
+// A new link for this rider's phone; the old one stops working at the next sync
+app.post('/api/riders/:id/link', userErrors((req, res) => {
+  if (!db.prepare("SELECT 1 FROM employees WHERE id=? AND lower(job) LIKE '%rider%'").get(req.params.id)) throw new UserError('Rider not found');
+  db.prepare('UPDATE employees SET rider_token=? WHERE id=?').run(newToken(), req.params.id);
+  riderSync.poke();
+  res.json(riderRows('e.id=' + (+req.params.id), true)[0]);
+}));
+// Send the rider their link from the restaurant's WhatsApp
+app.post('/api/riders/:id/send-link', userErrors(async (req, res) => {
+  const r = riderRows('e.id=' + (+req.params.id), true)[0];
+  if (!r) throw new UserError('Rider not found');
+  if (!r.link) throw new UserError('Connect the cloud first (Settings → Cloud): the rider screen runs there');
+  const jid = lowStock.toJid(r.phone);
+  if (!jid) throw new UserError("Add the rider's WhatsApp number first");
+  if (!waModule.wa.isConnected()) throw new UserError('WhatsApp is not connected (Settings → WhatsApp bot)');
+  await waModule.wa.send(jid, `Salam ${r.name}! ${getSettings().name} ka rider screen: ${r.link}\n\nIsay phone par kholein aur browser ke menu se "Add to Home screen" karein. Delivery ke waqt yeh screen khuli rakhein.`, 'Rider link', 'system');
+  res.json({ ok: true });
+}));
 // Board: everything not yet delivered, plus today's delivered orders
 app.get('/api/deliveries', (req, res) => {
   res.json(db.prepare(`SELECT id FROM orders WHERE type='delivery' AND status != 'cancelled' AND status != 'merged'
       AND (status='open' OR delivery_status='out' OR date(COALESCE(delivered_at, paid_at, created_at),'localtime') = date('now','localtime'))
     ORDER BY id`).all().map(r => getOrder(r.id)));
 });
-app.post('/api/orders/:id/dispatch', userErrors((req, res) => {
-  const o = db.prepare("SELECT * FROM orders WHERE id=? AND type='delivery' AND status IN ('open','paid')").get(req.params.id);
-  if (!o) throw new UserError('Delivery order not found');
-  const r = db.prepare("SELECT id FROM employees WHERE id=? AND active=1 AND lower(job) LIKE '%rider%'").get(req.body.rider_id);
+// Out with a rider: from the Delivery board, or the rider pressed Accept on their phone (byRider, via rider-sync.js)
+function dispatchOrder(orderId, riderId, { byRider = false } = {}) {
+  const o = getOrder(orderId);
+  if (!o || o.type !== 'delivery' || !['open', 'paid'].includes(o.status)) throw new UserError('Delivery order not found');
+  if (o.delivery_status === 'delivered') throw new UserError('Already delivered');
+  if (byRider && o.delivery_status === 'out') throw new UserError(o.rider_id === +riderId ? 'Already yours' : `Already taken by ${o.rider?.name || 'another rider'}`);
+  if (byRider && !['ready', 'done'].includes(o.kitchen_status)) throw new UserError('Not ready yet: the kitchen is still making it');
+  const r = db.prepare("SELECT id, name, COALESCE(delivery_fee,0) delivery_fee FROM employees WHERE id=? AND active=1 AND lower(job) LIKE '%rider%'").get(riderId);
   if (!r) throw new UserError('Choose a rider');
   // Food was ready: the ticket leaves the kitchen board. Sent early (still cooking): it stays, so the kitchen still makes it.
-  db.prepare(`UPDATE orders SET rider_id=?, delivery_status='out', dispatched_at=?,
-    kitchen_status = CASE WHEN kitchen_status='ready' THEN 'done' ELSE kitchen_status END WHERE id=?`).run(r.id, now(), o.id);
-  res.json(getOrder(o.id));
-}));
-app.post('/api/orders/:id/delivered', userErrors((req, res) => {
-  const o = db.prepare("SELECT * FROM orders WHERE id=? AND delivery_status='out'").get(req.params.id);
+  db.prepare(`UPDATE orders SET rider_id=?, rider_fee=?, delivery_status='out', dispatched_at=?, accepted_by_rider=?, track_token=COALESCE(track_token, ?),
+    kitchen_status = CASE WHEN kitchen_status='ready' THEN 'done' ELSE kitchen_status END WHERE id=?`).run(r.id, r.delivery_fee, now(), byRider ? 1 : 0, newToken(), o.id);
+  riderSync.poke();
+  notifyOnTheWay(o.id, r.name);
+  return getOrder(o.id);
+}
+function deliverOrder(orderId, { riderId = null } = {}) {
+  const o = db.prepare("SELECT * FROM orders WHERE id=? AND delivery_status='out'").get(orderId);
   if (!o) throw new UserError('This order is not out for delivery');
+  if (riderId && o.rider_id !== +riderId) throw new UserError('This order is with another rider');
   db.prepare("UPDATE orders SET delivery_status='delivered', delivered_at=? WHERE id=?").run(now(), o.id);
-  res.json(getOrder(o.id));
-}));
+  riderSync.poke();
+  return getOrder(o.id);
+}
+// A WhatsApp customer hears that their order left, with the live-tracking link when the cloud is connected
+function notifyOnTheWay(orderId, riderName) {
+  const w = waModule?.store.chatForOrder(orderId);
+  if (!w || !waModule.wa.isConnected()) return;
+  const o = getOrder(orderId);
+  waModule.wa.send(w.chat_id, onTheWayMessage(o, w.lang, riderName, trackUrl(o)), 'Order update', 'system').catch(e => console.error('On-the-way message:', e.message));
+}
+// "Where is my order?" on WhatsApp: this chat's delivery order of today, as text (null = nothing to say, the AI answers)
+function deliveryStatus(chatId, lang) {
+  const w = waModule.store.ordersFor(chatId).find(x => x.order_id && x.status === 'accepted');
+  const o = w && getOrder(w.order_id);
+  if (!o || o.type !== 'delivery' || o.status === 'cancelled' || localDay(new Date(o.created_at)) !== today()) return null;
+  const mins = iso => Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 60000));
+  if (o.delivery_status === 'delivered') return statusMessage(o, w.lang || lang, 'delivered', o.rider?.name, mins(o.delivered_at));
+  if (o.delivery_status === 'out') return statusMessage(o, w.lang || lang, 'out', o.rider?.name, mins(o.dispatched_at), trackUrl(o));
+  return statusMessage(o, w.lang || lang, ['ready', 'done'].includes(o.kitchen_status) ? 'ready' : 'cooking');
+}
+app.post('/api/orders/:id/dispatch', userErrors((req, res) => res.json(dispatchOrder(req.params.id, req.body.rider_id))));
+app.post('/api/orders/:id/delivered', userErrors((req, res) => res.json(deliverOrder(req.params.id))));
 // Rider hands over the cash: their delivered COD orders (or just order_ids) are paid in cash. Orders still on the way are never included.
 app.post('/api/riders/:id/settle', userErrors((req, res) => {
   const ids = (req.body.order_ids || []).map(Number);
@@ -1131,7 +1219,41 @@ app.post('/api/riders/:id/settle', userErrors((req, res) => {
     payOrder(o, 'cash', o.total, req.user.name);
     total += o.total;
   }
+  riderSync.poke();
   res.json({ ok: true, orders: orders.length, total });
+}));
+// Rider accounts for a month (admin): deliveries, what they earned (fee per delivery, as it was at the time), what was
+// paid out, the COD cash they collected and handed in, and what is still in their pocket right now.
+app.get('/api/riders/accounts', (req, res) => {
+  const month = /^\d{4}-\d{2}$/.test(req.query.month || '') ? req.query.month : today().slice(0, 7);
+  const M = "o.rider_id=e.id AND o.delivery_status='delivered' AND strftime('%Y-%m', o.delivered_at, 'localtime')=?";
+  const riders = db.prepare(`SELECT e.id, e.name, e.phone, e.active, COALESCE(e.delivery_fee,0) delivery_fee,
+      (SELECT COUNT(*) FROM orders o WHERE ${M}) deliveries,
+      (SELECT COALESCE(SUM(o.rider_fee),0) FROM orders o WHERE ${M}) earned,
+      (SELECT COALESCE(ROUND(AVG((julianday(o.delivered_at)-julianday(o.dispatched_at))*1440)),0) FROM orders o WHERE ${M} AND o.dispatched_at IS NOT NULL) avg_minutes,
+      (SELECT COUNT(*) FROM orders o WHERE ${M} AND (julianday(o.delivered_at)-julianday(o.dispatched_at))*1440 > 45) late,
+      (SELECT COALESCE(SUM(o.total),0) FROM orders o WHERE ${M} AND (o.status='open' OR o.paid_at > o.dispatched_at)) cash_collected,
+      (SELECT COALESCE(SUM(o.total),0) FROM orders o WHERE ${M} AND o.status='paid' AND o.paid_at > o.dispatched_at) handed_in,
+      (SELECT COALESCE(SUM(o.total),0) FROM orders o WHERE o.rider_id=e.id AND o.status='open' AND o.delivery_status='delivered') with_rider,
+      (SELECT COALESCE(SUM(p.amount),0) FROM payroll p WHERE p.employee_id=e.id AND p.month=? AND p.type='delivery') paid
+    FROM employees e WHERE lower(e.job) LIKE '%rider%' ORDER BY e.active DESC, e.name`).all(month, month, month, month, month, month, month)
+    .filter(r => r.active || r.deliveries || r.paid).map(r => ({ ...r, owed: r.earned - r.paid }));
+  const payments = db.prepare(`SELECT p.*, e.name FROM payroll p JOIN employees e ON e.id=p.employee_id WHERE p.type='delivery' AND p.month=? ORDER BY p.id DESC`).all(month);
+  res.json({ month, riders, payments });
+});
+// Pay a rider their delivery fees (goes to Expenses under Salaries, like a salary payment)
+app.post('/api/riders/:id/pay', userErrors((req, res) => {
+  const e = db.prepare("SELECT * FROM employees WHERE id=? AND lower(job) LIKE '%rider%'").get(req.params.id);
+  if (!e) throw new UserError('Rider not found');
+  const amount = Math.round(+req.body.amount || 0);
+  if (amount <= 0) throw new UserError('Enter the amount');
+  const date = req.body.date || today(), month = /^\d{4}-\d{2}$/.test(req.body.month || '') ? req.body.month : date.slice(0, 7);
+  tx(() => {
+    const id = db.prepare('INSERT INTO payroll (employee_id,month,date,type,amount,note,user_name,at) VALUES (?,?,?,?,?,?,?,?)')
+      .run(e.id, month, date, 'delivery', amount, String(req.body.note || ''), req.user.name, now()).lastInsertRowid;
+    addExpense(`Delivery fees — ${e.name} (${month})`, 'Salaries', amount, req.body.method || 'cash', date, req.user.name, `payroll:${id}`);
+  });
+  res.json({ ok: true });
 }));
 
 // ---------- Printing ----------
@@ -1485,6 +1607,7 @@ crud('promos', 'promos', ['code', 'type', 'value', 'min_order', 'max_discount', 
 // ---------- Cloud sync (admin) ----------
 // The branch key lives in its own table so it never appears in /api/settings
 const cloud = require('./cloud-sync')(db);
+const riderSync = require('./rider-sync')(db, cloud, { getOrder, dispatchOrder, deliverOrder });
 app.get('/api/cloud/status', (req, res) => res.json(cloud.status()));
 app.post('/api/cloud/connect', async (req, res) => {
   const url = String(req.body.url || '').trim(), key = String(req.body.key || '').trim();
@@ -1618,7 +1741,7 @@ function createOrder({ type, zone_id, customer, phone, address, items, userName,
     return orderId;
   });
 }
-const waModule = require('./whatsapp')(app, db, { createOrder, getOrder, printKitchen, getSettings, aiAllowed: () => lic.aiAllowed() });
+const waModule = require('./whatsapp')(app, db, { createOrder, getOrder, printKitchen, getSettings, aiAllowed: () => lic.aiAllowed(), deliveryStatus });
 const lowStock = require('./stock-alert')(db, { getSettings, wa: waModule.wa });
 // Settings → Alerts: what would be sent now, and a test send
 app.get('/api/low-stock-alert/preview', (req, res) => { const r = lowStock.report(); res.json({ low: r.low, text: r.text, enough: r.enough }); });

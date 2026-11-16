@@ -162,6 +162,7 @@ module.exports = function waStore(db) {
   const cancelCart = chatId => db.prepare("UPDATE wa_orders SET status='cancelled' WHERE chat_id=? AND status IN ('building','awaiting_customer')").run(chatId);
   const confirmDraft = id => db.prepare("UPDATE wa_orders SET status='pending_cashier', confirmed_at=? WHERE id=? AND status='awaiting_customer'").run(now(), id).changes;
   const getOrder = id => orderRow(db.prepare('SELECT * FROM wa_orders WHERE id=?').get(id));
+  const chatForOrder = orderId => db.prepare('SELECT chat_id, lang FROM wa_orders WHERE order_id=? ORDER BY id DESC LIMIT 1').get(+orderId) || null;
   const ordersFor = chatId => db.prepare("SELECT * FROM wa_orders WHERE chat_id=? AND status IN ('pending_cashier','accepted','rejected') ORDER BY id DESC LIMIT 10").all(chatId).map(orderRow);
   const pendingOrders = () => db.prepare("SELECT o.*, c.name chat_name, c.phone FROM wa_orders o JOIN wa_chats c ON c.id=o.chat_id WHERE o.status='pending_cashier' ORDER BY o.id").all().map(orderRow);
   const finishOrder = (id, status, by, extra = {}) => db.prepare(`UPDATE wa_orders SET status=?, handled_at=?, handled_by=?, order_id=?, reason=?
@@ -178,6 +179,6 @@ module.exports = function waStore(db) {
     updateMeta, message,
     meta, upsertChat, chatIdByPhone, addMessage, setStatus, resolveOffline, chats, messages, markRead, counts,
     chat, setChatFlag, historyBefore, lastOutAt, botRepliesSince, latestLocation,
-    saveDraft, openDraft, openCart, cancelCart, confirmDraft, getOrder, ordersFor, pendingOrders, finishOrder, log, spentSince, logFor,
+    saveDraft, openDraft, openCart, cancelCart, confirmDraft, getOrder, ordersFor, chatForOrder, pendingOrders, finishOrder, log, spentSince, logFor,
   };
 };

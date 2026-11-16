@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<meta name="theme-color" content="#14161a">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>HazelPOS rider</title>
+<style>
+  /* The rider's phone screen. One file, no build: big buttons, dark, works with one thumb on a cheap Android phone. */
+  :root { --bg: #14161a; --surface: #1e2127; --surface-2: #272b33; --outline: #3a3f49; --text: #f2f3f5; --muted: #a1a7b3;
+    --accent: #ff7a1a; --accent-ink: #14161a; --ok: #3ddc84; --warn: #ffb020; --err: #ff5c5c; --r: 14px; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  body { padding: 12px 12px calc(16px + env(safe-area-inset-bottom)); max-width: 560px; margin: 0 auto; }
+  h1 { font-size: 18px; margin: 0; }
+  h2 { font-size: 14px; color: var(--muted); font-weight: 600; margin: 20px 0 8px; display: flex; justify-content: space-between; align-items: center; }
+  .top { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .muted { color: var(--muted); } .small { font-size: 13px; }
+  .card { background: var(--surface); border: 1px solid var(--outline); border-radius: var(--r); padding: 14px; margin-bottom: 10px; }
+  .card.mine { border-color: var(--accent); }
+  .head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin-bottom: 6px; }
+  .head b { font-size: 18px; }
+  .pill { font-size: 12px; padding: 3px 10px; border-radius: 999px; background: var(--surface-2); color: var(--muted); white-space: nowrap; }
+  .cod { background: #3a2a10; color: var(--warn); font-weight: 700; font-size: 14px; }
+  .paid { background: #163a26; color: var(--ok); font-weight: 700; font-size: 14px; }
+  .items { color: var(--muted); font-size: 14px; margin: 6px 0; }
+  .addr { display: block; color: var(--text); text-decoration: none; margin: 6px 0; }
+  .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
+  .actions .wide { grid-column: 1 / -1; }
+  button, a.btn { min-height: 48px; border-radius: 12px; border: 1px solid var(--outline); background: var(--surface-2); color: var(--text); font: inherit; font-weight: 600;
+    display: flex; align-items: center; justify-content: center; gap: 8px; text-decoration: none; padding: 0 14px; cursor: pointer; }
+  button:disabled { opacity: .5; }
+  .primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  .ok { background: var(--ok); color: var(--accent-ink); border-color: var(--ok); }
+  .switch { display: flex; align-items: center; gap: 10px; background: var(--surface); border: 1px solid var(--outline); border-radius: 999px; padding: 6px 6px 6px 14px; min-height: 48px; }
+  .switch .dot { width: 36px; height: 36px; border-radius: 50%; background: var(--outline); display: grid; place-items: center; font-size: 18px; }
+  .switch.on { border-color: var(--ok); } .switch.on .dot { background: var(--ok); color: var(--accent-ink); }
+  .status { display: flex; gap: 12px; flex-wrap: wrap; font-size: 13px; color: var(--muted); margin: 10px 0 0; }
+  .status .bad { color: var(--err); } .status .good { color: var(--ok); }
+  .empty { color: var(--muted); padding: 18px; text-align: center; border: 1px dashed var(--outline); border-radius: var(--r); }
+  .today { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .today .card { margin: 0; text-align: center; } .today b { font-size: 24px; display: block; }
+  .toast { position: fixed; left: 12px; right: 12px; bottom: calc(16px + env(safe-area-inset-bottom)); background: var(--err); color: #fff; padding: 12px 16px; border-radius: 12px; font-weight: 600; display: none; z-index: 9; }
+  .toast.show { display: block; }
+  .note { background: #2b2410; border: 1px solid #5a4a1a; color: var(--warn); border-radius: var(--r); padding: 10px 12px; font-size: 13px; margin-top: 10px; }
+</style>
+</head>
+<body>
+  <div class="top">
+    <div><h1 id="restaurant">HazelPOS</h1><div class="muted small" id="rider">…</div></div>
+    <button class="switch" id="duty" aria-pressed="false"><span id="dutyText">Off duty</span><span class="dot">🛵</span></button>
+  </div>
+  <div class="status"><span id="pos"></span><span id="loc"></span></div>
+  <div class="note" id="note" hidden>Keep this screen open while you are delivering, so the restaurant and the customer can see where you are. Phone band karne par location ruk jati hai.</div>
+
+  <h2>My deliveries <span id="mineCount" class="pill"></span></h2>
+  <div id="mine"></div>
+
+  <h2>Ready to pick up <span id="readyCount" class="pill"></span></h2>
+  <div id="ready"></div>
+
+  <h2>Today</h2>
+  <div class="today">
+    <div class="card"><b id="doneCount">0</b><span class="muted small">delivered</span></div>
+    <div class="card"><b id="doneCash">Rs 0</b><span class="muted small">cash to hand in</span></div>
+  </div>
+  <p class="muted small" id="others"></p>
+  <div class="toast" id="toast"></div>
+
+<script>
+(() => {
+  const token = location.pathname.split('/').pop();
+  const API = '/api/r/' + token;
+  const $ = id => document.getElementById(id);
+  const rs = n => 'Rs ' + Math.round(+n || 0).toLocaleString('en-PK');
+  const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const mins = iso => iso ? Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 60000)) : 0;
+  const ago = iso => { const s = Math.round((Date.now() - Date.parse(iso)) / 1000); return s < 60 ? s + ' s ago' : Math.round(s / 60) + ' min ago'; };
+  let toastTimer;
+  const toast = msg => { $('toast').textContent = msg; $('toast').classList.add('show'); clearTimeout(toastTimer); toastTimer = setTimeout(() => $('toast').classList.remove('show'), 4000); };
+  const post = async (p, body) => {
+    const r = await fetch(API + p, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body || {}) });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(d.error || 'Something went wrong');
+    return d;
+  };
+  const navUrl = address => { const m = /q=(-?\d+\.?\d*),(-?\d+\.?\d*)/.exec(address || ''); return 'https://www.google.com/maps/dir/?api=1&destination=' + (m ? m[1] + ',' + m[2] : encodeURIComponent(address || '')); };
+
+  // --- Duty and location ---
+  let onDuty = false, watchId = null, lastSent = 0, lastPos = null, wakeLock = null, locState = '';
+  const setLoc = (text, cls) => { $('loc').textContent = text; $('loc').className = cls || ''; };
+  const sendPos = async (p, force) => {
+    if (!onDuty) return;
+    const moved = !lastPos || Math.abs(p.coords.latitude - lastPos.lat) + Math.abs(p.coords.longitude - lastPos.lng) > 0.0002;
+    if (!force && Date.now() - lastSent < (moved ? 8000 : 30000)) return;
+    lastSent = Date.now(); lastPos = { lat: p.coords.latitude, lng: p.coords.longitude };
+    try { await post('/location', { lat: p.coords.latitude, lng: p.coords.longitude, acc: p.coords.accuracy }); setLoc('Location on · sent ' + ago(new Date(lastSent).toISOString()), 'good'); }
+    catch (e) { setLoc('Location not sent: ' + e.message, 'bad'); }
+  };
+  const startLoc = () => {
+    if (!navigator.geolocation) return setLoc('This phone has no location', 'bad');
+    setLoc('Getting your location…');
+    const why = e => e.code === 1 ? 'Allow location for this page (phone settings → browser → location)' : e.code === 3 ? 'Still looking for GPS… go outside or near a window' : 'Turn on Location (GPS) on the phone';
+    watchId = navigator.geolocation.watchPosition(p => sendPos(p), e => setLoc(why(e), 'bad'),
+      { enableHighAccuracy: true, maximumAge: 5000, timeout: 20000 });
+  };
+  const stopLoc = () => { if (watchId != null) navigator.geolocation.clearWatch(watchId); watchId = null; setLoc(''); };
+  const keepAwake = async on => {
+    try { if (on && 'wakeLock' in navigator && !wakeLock) { wakeLock = await navigator.wakeLock.request('screen'); wakeLock.addEventListener('release', () => { wakeLock = null; }); }
+      if (!on && wakeLock) { await wakeLock.release(); wakeLock = null; } } catch { /* not supported */ }
+  };
+  const setDuty = async on => {
+    onDuty = on;
+    $('duty').classList.toggle('on', on); $('duty').setAttribute('aria-pressed', on); $('dutyText').textContent = on ? 'On duty' : 'Off duty';
+    $('note').hidden = !on;
+    try { await post('/duty', { on }); } catch (e) { toast(e.message); }
+    on ? (startLoc(), keepAwake(true)) : (stopLoc(), keepAwake(false));
+    try { localStorage.setItem('hz_duty', on ? '1' : '0'); } catch { /* ignore */ }
+  };
+  $('duty').onclick = () => setDuty(!onDuty);
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && onDuty) { keepAwake(true); if (lastPos) sendPos({ coords: { latitude: lastPos.lat, longitude: lastPos.lng, accuracy: 0 } }, true); } });
+
+  // --- Orders ---
+  const seenFails = new Set();
+  const act = async (p, body, busyText, btn) => {
+    btn.disabled = true; const t = btn.textContent; btn.textContent = busyText;
+    try { await post(p, body); await load(); } catch (e) { toast(e.message); btn.disabled = false; btn.textContent = t; }
+  };
+  const card = (o, mine) => {
+    const el = document.createElement('div'); el.className = 'card' + (mine ? ' mine' : '');
+    const money = o.cod ? `<span class="pill cod">Collect ${rs(o.total)} cash</span>` : `<span class="pill paid">Paid ${rs(o.total)}</span>`;
+    el.innerHTML = `<div class="head"><b>#${o.local_id}</b>${money}</div>
+      <div><b>${esc(o.customer || 'Customer')}</b> ${o.zone ? `<span class="pill">${esc(o.zone)}</span>` : ''}</div>
+      ${o.address ? `<a class="addr" href="${navUrl(o.address)}" target="_blank" rel="noreferrer">📍 ${esc(o.address)}</a>` : ''}
+      <div class="items">${esc(o.items)}</div>`;
+    const actions = document.createElement('div'); actions.className = 'actions';
+    if (mine) {
+      if (o.pending) actions.innerHTML = `<div class="wide muted small">Waiting for the restaurant to confirm… (${ago(o.created_at)})</div>`;
+      else actions.innerHTML = `<a class="btn" href="${navUrl(o.address)}" target="_blank" rel="noreferrer">🧭 Navigate</a>` + (o.phone ? `<a class="btn" href="tel:${esc(o.phone)}">📞 Call</a>` : '<span></span>')
+        + `<div class="wide muted small">Out for ${mins(o.dispatched_at)} min</div>`;
+      const b = document.createElement('button'); b.className = 'ok wide'; b.textContent = o.delivering ? 'Marking delivered…' : '✓ Delivered'; b.disabled = !!o.delivering;
+      // Tap twice: the first tap asks, the second confirms (no pop-ups; a thumb on a moving bike)
+      let armed = null;
+      b.onclick = () => {
+        if (armed) { clearTimeout(armed); armed = null; return act('/delivered', { order: o.local_id }, 'Sending…', b); }
+        b.textContent = `Tap again: delivered${o.cod ? ', ' + rs(o.total) + ' collected' : ''}`; b.classList.add('primary');
+        armed = setTimeout(() => { armed = null; b.textContent = '✓ Delivered'; b.classList.remove('primary'); }, 4000);
+      };
+      actions.appendChild(b);
+    } else {
+      const b = document.createElement('button'); b.className = 'primary wide';
+      if (o.taken_by) { b.textContent = `Taken by ${o.taken_by}`; b.disabled = true; }
+      else if (o.status !== 'ready') { b.textContent = 'Still cooking · abhi tayyar nahi'; b.disabled = true; }
+      else { b.textContent = '✋ Accept · main le jata hoon'; b.onclick = () => act('/accept', { order: o.local_id }, 'Accepting…', b); }
+      actions.appendChild(b);
+    }
+    el.appendChild(actions); return el;
+  };
+  const fill = (id, list, mine, empty) => { const box = $(id); box.innerHTML = ''; if (!list.length) { box.innerHTML = `<div class="empty">${empty}</div>`; return; } list.forEach(o => box.appendChild(card(o, mine))); };
+  async function load() {
+    let d;
+    try { const r = await fetch(API); d = await r.json(); if (!r.ok) throw new Error(d.error); }
+    catch (e) { $('pos').textContent = e.message.includes('valid') ? e.message : 'No internet: trying again…'; $('pos').className = 'bad'; return; }
+    document.title = d.restaurant + ' · rider';
+    $('restaurant').textContent = d.restaurant; $('rider').textContent = d.rider.name;
+    $('pos').textContent = d.pos_online ? 'Restaurant connected' : 'Restaurant POS is offline: this list may be old'; $('pos').className = d.pos_online ? 'good' : 'bad';
+    if (d.rider.on_duty !== onDuty && !watchId) setDuty(d.rider.on_duty);
+    fill('mine', d.mine, true, 'Nothing with you right now'); $('mineCount').textContent = d.mine.length || '';
+    fill('ready', d.ready, false, 'No order waiting. New delivery orders appear here when the kitchen marks them ready.'); $('readyCount').textContent = d.ready.length || '';
+    $('doneCount').textContent = d.today.delivered; $('doneCash').textContent = rs(d.today.cash);
+    $('others').textContent = d.others_out ? `${d.others_out} other delivery${d.others_out > 1 ? 'ies' : ''} out with other riders` : '';
+    for (const f of d.failed) if (!seenFails.has(f.id)) { seenFails.add(f.id); toast(`#${f.order_local_id}: ${f.result}`); }
+  }
+  load(); setInterval(load, 5000);
+  try { if (localStorage.getItem('hz_duty') === '1') setDuty(true); } catch { /* ignore */ }
+})();
+</script>
+</body>
+</html>

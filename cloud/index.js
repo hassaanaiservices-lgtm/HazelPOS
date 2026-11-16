@@ -55,6 +55,7 @@ for (const sql of [
   // Latest health report from the branch's POS (version, WhatsApp, errors): server/index.js health()
   'ALTER TABLE branches ADD COLUMN health TEXT',
   'ALTER TABLE branches ADD COLUMN health_at TEXT',
+  'ALTER TABLE branches ADD COLUMN board_at TEXT', // last rider sync from the POS: the rider page says when the POS is offline
   // Refunds reach the cloud too (cloud-sync.js re-sends an order when its status changes)
   'ALTER TABLE c_orders ADD COLUMN refunded_at TEXT',
   'ALTER TABLE c_orders ADD COLUMN refunded_by TEXT',
@@ -68,6 +69,18 @@ CREATE TABLE IF NOT EXISTS vendor_audit (id INTEGER PRIMARY KEY, at TEXT, who TE
 CREATE TABLE IF NOT EXISTS setups (branch_id INTEGER PRIMARY KEY, data TEXT, updated_at TEXT, applied_at TEXT, applied TEXT, error TEXT);
 CREATE TABLE IF NOT EXISTS setup_images (id INTEGER PRIMARY KEY, branch_id INTEGER, caption TEXT, mime TEXT, data BLOB, sort INTEGER);
 CREATE TABLE IF NOT EXISTS branch_errors (id INTEGER PRIMARY KEY, branch_id INTEGER, at TEXT, text TEXT, UNIQUE (branch_id, at, text));
+-- Riders (server/rider-sync.js): the branch's riders with the secret of their phone link, where they are, today's delivery
+-- board as the POS last sent it, what riders pressed on their phones, and the day's trail for the owner's map
+CREATE TABLE IF NOT EXISTS c_riders (branch_id INTEGER, local_id INTEGER, name TEXT, phone TEXT, token_hash TEXT, on_duty INTEGER DEFAULT 0,
+  lat REAL, lng REAL, acc REAL, at TEXT, PRIMARY KEY (branch_id, local_id));
+CREATE INDEX IF NOT EXISTS c_riders_token ON c_riders (token_hash);
+CREATE TABLE IF NOT EXISTS c_delivery (branch_id INTEGER, local_id INTEGER, status TEXT, rider_local_id INTEGER, customer TEXT, phone TEXT, address TEXT,
+  zone TEXT, total REAL, cod INTEGER, items TEXT, created_at TEXT, dispatched_at TEXT, delivered_at TEXT, track_token TEXT, PRIMARY KEY (branch_id, local_id));
+CREATE INDEX IF NOT EXISTS c_delivery_track ON c_delivery (track_token);
+CREATE TABLE IF NOT EXISTS rider_events (id INTEGER PRIMARY KEY, branch_id INTEGER, rider_local_id INTEGER, order_local_id INTEGER, type TEXT, at TEXT, applied_at TEXT, result TEXT);
+CREATE INDEX IF NOT EXISTS rider_events_open ON rider_events (branch_id, applied_at);
+CREATE TABLE IF NOT EXISTS rider_trail (branch_id INTEGER, rider_local_id INTEGER, lat REAL, lng REAL, at TEXT);
+CREATE INDEX IF NOT EXISTS rider_trail_r ON rider_trail (branch_id, rider_local_id, at);
 `);
 
 const now = () => new Date().toISOString();
@@ -316,6 +329,124 @@ app.post('/api/sync/push', branchAuth, (req, res) => {
   });
   res.json({ ok: true, received: { orders: orders.length, expenses: expenses.length, shifts: shifts.length } });
 });
+
+// ---------- Riders: the POS <-> riders' phones relay (server/rider-sync.js, public/rider.html, public/track.html) ----------
+// The POS sends its riders and today's delivery board every few seconds and takes back what riders pressed and where
+// they are. Riders' phones use /r/<token>; customers' tracking links use /track/<token>. Both hold 128-bit secrets.
+app.post('/api/sync/riders', branchAuth, (req, res) => {
+  const b = req.branch.id, riders = Array.isArray(req.body.riders) ? req.body.riders : [], board = Array.isArray(req.body.board) ? req.body.board : [];
+  tx(() => {
+    // What the POS did with the last batch of phone actions (ok, or why not: the rider's phone shows it)
+    const ack = db.prepare('UPDATE rider_events SET applied_at=?, result=? WHERE id=? AND branch_id=? AND applied_at IS NULL');
+    for (const r of (Array.isArray(req.body.ack) ? req.body.ack : []).slice(0, 200)) ack.run(now(), String(r.result || 'ok').slice(0, 200), +r.id, b);
+    const ids = riders.map(r => +r.local_id);
+    db.prepare(`DELETE FROM c_riders WHERE branch_id=? AND local_id NOT IN (${ids.map(() => '?').join(',') || 'NULL'})`).run(b, ...ids);
+    const up = db.prepare(`INSERT INTO c_riders (branch_id, local_id, name, phone, token_hash) VALUES (?,?,?,?,?)
+      ON CONFLICT(branch_id, local_id) DO UPDATE SET name=excluded.name, phone=excluded.phone, token_hash=excluded.token_hash`);
+    for (const r of riders) up.run(b, +r.local_id, String(r.name || '').slice(0, 80), String(r.phone || '').slice(0, 30), sha(String(r.token || '')));
+    db.prepare('DELETE FROM c_delivery WHERE branch_id=?').run(b);
+    const ins = db.prepare('INSERT INTO c_delivery VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)');
+    for (const o of board.slice(0, 500)) ins.run(b, +o.local_id, String(o.status || 'cooking'), o.rider_local_id ? +o.rider_local_id : null, String(o.customer || '').slice(0, 80),
+      String(o.phone || '').slice(0, 30), String(o.address || '').slice(0, 300), String(o.zone || '').slice(0, 60), +o.total || 0, o.cod ? 1 : 0,
+      String(o.items || '').slice(0, 300), o.created_at || null, o.dispatched_at || null, o.delivered_at || null, o.track_token || null);
+    // An Accept for an order that is now out or gone can never apply: close it so the rider's phone stops waiting
+    db.prepare(`UPDATE rider_events SET applied_at=?, result='The order is no longer waiting' WHERE branch_id=? AND applied_at IS NULL AND type='accept'
+      AND order_local_id NOT IN (SELECT local_id FROM c_delivery WHERE branch_id=? AND status IN ('ready','cooking') AND rider_local_id IS NULL)`).run(now(), b, b);
+    db.prepare('UPDATE branches SET board_at=? WHERE id=?').run(now(), b);
+  });
+  res.json({
+    events: db.prepare('SELECT id, rider_local_id, order_local_id, type FROM rider_events WHERE branch_id=? AND applied_at IS NULL ORDER BY id LIMIT 100').all(b),
+    positions: db.prepare('SELECT local_id rider_local_id, lat, lng, acc, at, on_duty FROM c_riders WHERE branch_id=? AND at > ?').all(b, new Date(Date.now() - 12 * 3600e3).toISOString()),
+  });
+});
+app.post('/api/sync/riders/ack', branchAuth, (req, res) => {
+  const up = db.prepare('UPDATE rider_events SET applied_at=?, result=? WHERE id=? AND branch_id=?');
+  for (const r of (req.body.results || []).slice(0, 200)) up.run(now(), String(r.result || 'ok').slice(0, 200), +r.id, req.branch.id);
+  res.json({ ok: true });
+});
+
+const riderAuth = (req, res, next) => {
+  req.rider = db.prepare('SELECT r.*, b.name branch_name, b.board_at FROM c_riders r JOIN branches b ON b.id=r.branch_id WHERE r.token_hash=?').get(sha(req.params.token));
+  if (!req.rider) return res.status(404).json({ error: 'This link is not valid any more. Ask the restaurant for a new one.' });
+  next();
+};
+const riderName = (b, id) => db.prepare('SELECT name FROM c_riders WHERE branch_id=? AND local_id=?').get(b, id)?.name || 'another rider';
+const PUBLIC_ORDER = ['local_id', 'status', 'customer', 'address', 'zone', 'total', 'cod', 'items', 'created_at', 'dispatched_at', 'delivered_at'];
+const pub = o => Object.fromEntries(PUBLIC_ORDER.map(k => [k, o[k]]));
+// The rider's screen: what is waiting, what is theirs, today's count and cash
+app.get('/api/r/:token', riderAuth, (req, res) => {
+  const r = req.rider, b = r.branch_id, me = r.local_id;
+  const pending = db.prepare("SELECT * FROM rider_events WHERE branch_id=? AND applied_at IS NULL").all(b);
+  const taken = new Map(pending.filter(e => e.type === 'accept').map(e => [e.order_local_id, e.rider_local_id]));
+  const rows = db.prepare('SELECT * FROM c_delivery WHERE branch_id=? ORDER BY local_id').all(b);
+  const mine = rows.filter(o => (o.rider_local_id === me && o.status === 'out') || (!o.rider_local_id && taken.get(o.local_id) === me))
+    .map(o => ({ ...pub(o), phone: o.phone, pending: !o.rider_local_id, delivering: pending.some(e => e.type === 'delivered' && e.order_local_id === o.local_id && e.rider_local_id === me) }));
+  const ready = rows.filter(o => ['ready', 'cooking'].includes(o.status) && !o.rider_local_id && taken.get(o.local_id) !== me)
+    .map(o => ({ ...pub(o), taken_by: taken.has(o.local_id) ? riderName(b, taken.get(o.local_id)) : null }));
+  const done = rows.filter(o => o.rider_local_id === me && o.status === 'delivered');
+  const failed = db.prepare("SELECT id, type, order_local_id, result FROM rider_events WHERE branch_id=? AND rider_local_id=? AND applied_at > ? AND result != 'ok' ORDER BY id DESC LIMIT 3")
+    .all(b, me, new Date(Date.now() - 5 * 60e3).toISOString());
+  res.json({
+    rider: { name: r.name, on_duty: !!r.on_duty, at: r.at }, restaurant: r.branch_name,
+    pos_online: !!r.board_at && Date.now() - Date.parse(r.board_at) < 150e3, board_at: r.board_at,
+    mine, ready, today: { delivered: done.length, cash: done.filter(o => o.cod).reduce((s, o) => s + o.total, 0) },
+    others_out: rows.filter(o => o.status === 'out' && o.rider_local_id !== me).length, failed,
+  });
+});
+app.post('/api/r/:token/accept', riderAuth, (req, res) => {
+  const r = req.rider, b = r.branch_id, o = db.prepare('SELECT * FROM c_delivery WHERE branch_id=? AND local_id=?').get(b, +req.body.order);
+  if (!o) return res.status(404).json({ error: 'That order is not on the board any more' });
+  if (o.rider_local_id || o.status === 'out') return res.status(409).json({ error: `Already taken by ${riderName(b, o.rider_local_id)}` });
+  if (o.status === 'delivered') return res.status(409).json({ error: 'Already delivered' });
+  if (o.status !== 'ready') return res.status(409).json({ error: 'Not ready yet: the kitchen is still making it' });
+  const p = db.prepare("SELECT rider_local_id FROM rider_events WHERE branch_id=? AND order_local_id=? AND type='accept' AND applied_at IS NULL").get(b, o.local_id);
+  if (p && p.rider_local_id !== r.local_id) return res.status(409).json({ error: `${riderName(b, p.rider_local_id)} just took it` });
+  if (!p) db.prepare('INSERT INTO rider_events (branch_id, rider_local_id, order_local_id, type, at) VALUES (?,?,?,?,?)').run(b, r.local_id, o.local_id, 'accept', now());
+  res.json({ ok: true });
+});
+app.post('/api/r/:token/delivered', riderAuth, (req, res) => {
+  const r = req.rider, b = r.branch_id, o = db.prepare('SELECT * FROM c_delivery WHERE branch_id=? AND local_id=?').get(b, +req.body.order);
+  if (!o) return res.status(404).json({ error: 'That order is not on the board any more' });
+  if (o.status === 'delivered') return res.json({ ok: true });
+  const mineAccept = !o.rider_local_id && db.prepare("SELECT 1 FROM rider_events WHERE branch_id=? AND order_local_id=? AND rider_local_id=? AND type='accept' AND applied_at IS NULL").get(b, o.local_id, r.local_id);
+  if (!(o.rider_local_id === r.local_id && o.status === 'out') && !mineAccept) return res.status(409).json({ error: 'This order is not yours' });
+  if (!db.prepare("SELECT 1 FROM rider_events WHERE branch_id=? AND order_local_id=? AND rider_local_id=? AND type='delivered' AND applied_at IS NULL").get(b, o.local_id, r.local_id))
+    db.prepare('INSERT INTO rider_events (branch_id, rider_local_id, order_local_id, type, at) VALUES (?,?,?,?,?)').run(b, r.local_id, o.local_id, 'delivered', now());
+  res.json({ ok: true });
+});
+// Where the rider is (their phone sends this every few seconds while on duty); the day's trail is kept for the map
+app.post('/api/r/:token/location', riderAuth, (req, res) => {
+  const r = req.rider, lat = +req.body.lat, lng = +req.body.lng, acc = Math.min(9999, Math.max(0, +req.body.acc || 0));
+  if (!(Math.abs(lat) <= 90 && Math.abs(lng) <= 180)) return res.status(400).json({ error: 'Bad position' });
+  if (r.at && Date.now() - Date.parse(r.at) < 3000) return res.json({ ok: true, skipped: true });
+  const at = now();
+  db.prepare('UPDATE c_riders SET lat=?, lng=?, acc=?, at=?, on_duty=1 WHERE branch_id=? AND local_id=?').run(lat, lng, acc, at, r.branch_id, r.local_id);
+  db.prepare('INSERT INTO rider_trail VALUES (?,?,?,?,?)').run(r.branch_id, r.local_id, lat, lng, at);
+  if (Math.random() < 0.02) db.prepare('DELETE FROM rider_trail WHERE at < ?').run(new Date(Date.now() - 24 * 3600e3).toISOString());
+  res.json({ ok: true });
+});
+app.post('/api/r/:token/duty', riderAuth, (req, res) => {
+  db.prepare('UPDATE c_riders SET on_duty=? WHERE branch_id=? AND local_id=?').run(req.body.on ? 1 : 0, req.rider.branch_id, req.rider.local_id);
+  res.json({ ok: true, on_duty: !!req.body.on });
+});
+// The customer's tracking page: the order's status and, while it is on the way, the rider's position
+app.get('/api/track/:token', (req, res) => {
+  const o = db.prepare('SELECT d.*, b.name restaurant FROM c_delivery d JOIN branches b ON b.id=d.branch_id WHERE d.track_token=?').get(String(req.params.token));
+  if (!o) return res.status(404).json({ error: 'This tracking link has expired' });
+  const r = o.rider_local_id && db.prepare('SELECT name, lat, lng, acc, at FROM c_riders WHERE branch_id=? AND local_id=?').get(o.branch_id, o.rider_local_id);
+  const pin = /q=(-?\d+\.?\d*),(-?\d+\.?\d*)/.exec(o.address || '');
+  res.json({
+    order: o.local_id, restaurant: o.restaurant, status: o.status, items: o.items, total: o.total, cod: !!o.cod, dispatched_at: o.dispatched_at, delivered_at: o.delivered_at,
+    rider: r ? { name: r.name.split(' ')[0], lat: r.lat, lng: r.lng, acc: r.acc, at: r.at } : null,
+    customer: pin ? { lat: +pin[1], lng: +pin[2] } : null,
+  });
+});
+// The owner's map: today's trail of one rider
+app.get('/api/sync/riders/:id/trail', branchAuth, (req, res) => {
+  res.json(db.prepare('SELECT lat, lng, at FROM rider_trail WHERE branch_id=? AND rider_local_id=? AND at > ? ORDER BY at').all(req.branch.id, +req.params.id, new Date(Date.now() - 24 * 3600e3).toISOString()));
+});
+app.get('/r/:token', (req, res) => res.set('X-Robots-Tag', 'noindex').sendFile(path.join(__dirname, 'public', 'rider.html')));
+app.get('/track/:token', (req, res) => res.set('X-Robots-Tag', 'noindex').sendFile(path.join(__dirname, 'public', 'track.html')));
 
 // Whole-database snapshot from the branch; the newest KEEP_BACKUPS are kept
 // The branch's newest backup, for a new PC or a restore (server/restore.js). 404 = none yet.

@@ -144,5 +144,5 @@ module.exports = function cloudSync(db) {
 
   setInterval(syncNow, 60 * 1000).unref();
   setTimeout(syncNow, 5000).unref();
-  return { syncNow, backupNow, connect, disconnect, status, downloadLatestBackup, hold };
+  return { syncNow, backupNow, connect, disconnect, status, downloadLatestBackup, hold, call, isHeld: () => held };
 };

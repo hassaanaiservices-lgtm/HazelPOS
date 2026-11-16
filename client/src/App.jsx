@@ -12,6 +12,7 @@ import TablesFloor from './TablesFloor'
 import Inventory from './Inventory'
 import Customers from './Customers'
 import Delivery from './Delivery'
+import Riders from './Riders'
 import Payroll from './Payroll'
 import WhatsApp from './WhatsApp'
 import { QrOrderAlerts, beep } from './QrOrders'
@@ -27,7 +28,7 @@ const NAV = {
     ['dashboard', 'Dashboard', 'chart'],
     ['orders', 'Orders', 'list'],
     ['kitchen', 'Kitchen', 'flame'],
-    ['delivery', 'Delivery', 'bike'],
+    ['riders', 'Riders', 'bike'],
     ['menu', 'Menu', 'book'],
     ['places', 'Tables & delivery', 'table'],
     ['register_session', 'Cash drawer', 'wallet'],
@@ -188,7 +189,8 @@ export default function App() {
         {view === 'customers' && user.role === 'admin' && <Customers notify={notify} />}
         {view === 'staff' && user.role === 'admin' && <section className="admin"><div className="row-head"><h2>Staff</h2>
           <span className="muted">Salaries and advances are added to Expenses automatically.</span></div><Payroll notify={notify} /></section>}
-        {view === 'delivery' && <Delivery notify={notify} />}
+        {view === 'delivery' && user.role === 'cashier' && <Delivery notify={notify} />}
+        {view === 'riders' && user.role === 'admin' && <Riders notify={notify} />}
         {view === 'whatsapp' && user.role !== 'kitchen' && <WhatsApp notify={notify} />}
         {view === 'menu' && user.role === 'admin' && <MenuSection onChanged={reloadAll} notify={notify} />}
         {view === 'places' && user.role === 'admin' && <PlacesSection onChanged={reloadAll} notify={notify} />}

@@ -30,7 +30,11 @@ function withinHours(hours, d = new Date()) {
 
 // stt (optional): speech-to-text for voice notes ({ transcribe(file) }); sttCfg: config.stt
 // allowed: the membership allows the bot (server/licence.js aiAllowed); unpaid past the grace days = quiet
-function createAssistant({ store, wa, ask, cfg, stt = null, sttCfg = {}, log = console, menuPictures = () => [], allowed = () => true }) {
+// "Where is my order / how long / is the rider coming?" in English, Roman Urdu or Urdu. Only acted on when this chat has a
+// delivery order today (deliveryStatus returns text), so an ordinary "where are you located?" still goes to the AI.
+const WHERE_RE = /\b(where|kahan|kaha+n?|kidhar|kidar|kitni der|kitna time|kab tak|kab (?:aa|pohnch|pahunch)|track|location|rider|late|der ho|status|pohncha|pahuncha)\b|کہاں|کدھر|کتنی دیر|کب|رائیڈر|لوکیشن/i;
+
+function createAssistant({ store, wa, ask, cfg, stt = null, sttCfg = {}, log = console, menuPictures = () => [], allowed = () => true, deliveryStatus = () => null }) {
   const batches = new Map();   // chatId -> { rows, timer }
   const chains = new Map();    // chatId -> promise (one turn at a time per chat)
   let running = 0;
@@ -130,6 +134,15 @@ function createAssistant({ store, wa, ask, cfg, stt = null, sttCfg = {}, log = c
         store.confirmDraft(draft.id);
         await reply(chatId, pick('confirmed', draft.lang), t0);
         return store.log({ ...base, action: `order ${draft.id} confirmed by customer`, order_json: JSON.stringify(draft.items), ms_total: Date.now() - t0 });
+      }
+
+      // "Where is my order?": answered by code with the live delivery status (and the tracking link)
+      if (WHERE_RE.test(text)) {
+        const status = deliveryStatus(chatId, typedLang(chatId, rows[0].id));
+        if (status) {
+          await reply(chatId, status, t0);
+          return store.log({ ...base, action: 'delivery status (by code)', reply: status, ms_total: Date.now() - t0 });
+        }
       }
 
       const since = minutesAgo(cfg.order_confirm_window_minutes);

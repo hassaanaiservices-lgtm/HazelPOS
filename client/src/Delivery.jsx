@@ -1,14 +1,18 @@
 import { useEffect, useState } from 'react'
 import { api, rs, run } from './lib'
 import { Icon } from './ui'
-import { toastError, confirmBox } from './notify'
+import { toast, toastError, confirmBox } from './notify'
+import RiderMap from './RiderMap'
 
 const mins = iso => iso ? Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 60000)) : 0
 const mapUrl = address => `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address || '')}`
 
 // Dispatch board: In the kitchen → Ready to send (kitchen pressed "Mark ready") → On the way → Delivered.
 // Send riders, track who is on the way, and take the cash for each delivered COD order.
-export default function Delivery({ notify }) {
+export default function Delivery({ notify, embedded }) {
+  const [showMap, setShowMap] = useState(() => { try { return localStorage.getItem('pos_delivery_map') === '1' } catch { return false } })
+  const toggleMap = () => { setShowMap(v => { try { localStorage.setItem('pos_delivery_map', v ? '0' : '1') } catch { /* ignore */ } return !v }) }
+  const copyTrack = run(async o => { await navigator.clipboard.writeText(o.track_url); toast('Tracking link copied: send it to the customer') })
   const [orders, setOrders] = useState([])
   const [riders, setRiders] = useState([])
   const [pick, setPick] = useState({})
@@ -50,7 +54,7 @@ export default function Delivery({ notify }) {
       <div><b>{o.customer || 'Customer'}</b> {o.phone && <a href={`tel:${o.phone}`} className="muted">{o.phone}</a>}</div>
       {o.address && <a className="muted addr" href={mapUrl(o.address)} target="_blank" rel="noreferrer"><Icon name="pin" size={14} />{o.address}</a>}
       <ul>{o.items.map(i => <li key={i.id}>{i.qty}× {i.name}</li>)}</ul>
-      {o.rider && <div className="muted">Rider: {o.rider.name}{o.delivery_status === 'out' && `, out ${mins(o.dispatched_at)} min`}</div>}
+      {o.rider && <div className="muted">Rider: {o.rider.name}{o.delivery_status === 'out' && `, out ${mins(o.dispatched_at)} min`}{o.accepted_by_rider ? ' · accepted on phone' : ''}</div>}
       {!o.delivery_status && !o.kitchen_status && <div className="muted">Not sent to the kitchen yet</div>}
       {!o.delivery_status && o.kitchen_status === 'new' && <div className="muted">Kitchen: waiting to start</div>}
       {!o.delivery_status && o.kitchen_status === 'preparing' && <div className="muted">Kitchen: cooking</div>}
@@ -60,17 +64,19 @@ export default function Delivery({ notify }) {
   )
   return (
     <section className="delivery">
-      <div className="row-head"><h2>Delivery</h2>
+      <div className="row-head">{embedded ? <span /> : <h2>Delivery</h2>}
+        <button className={'ghost sm' + (showMap ? ' active' : '')} onClick={toggleMap} aria-pressed={showMap}><Icon name="pin" size={16} />{showMap ? 'Hide map' : 'Map'}</button>
         <div className="riders">
           {!riders.length && <span className="muted">No riders yet — add staff with job "Rider" under Staff</span>}
           {riders.map(r => (
             <div key={r.id} className="rider-chip">
-              <b>{r.name}</b><small className="muted">{r.on_road ? `${r.on_road} on the road` : 'At shop'}</small>
+              <b>{r.name}</b><small className="muted">{r.on_road ? `${r.on_road} on the road` : r.on_duty ? 'On duty' : 'Off duty'}</small>
               {r.cash_due > 0 && <button className="primary sm" onClick={() => settle(r)}>Collect {rs(r.cash_due)}</button>}
             </div>
           ))}
         </div>
       </div>
+      {showMap && <div className="delivery-map"><RiderMap height={280} /></div>}
       <div className="kitchen">
         <div className="k-col new"><h2>In the kitchen <span className="count">{cooking.length}</span></h2><div className="k-list">
           {!cooking.length && <div className="empty">No delivery order cooking</div>}
@@ -90,6 +96,7 @@ export default function Delivery({ notify }) {
         <div className="k-col preparing"><h2>On the way <span className="count">{out.length}</span></h2><div className="k-list">
           {!out.length && <div className="empty">No rider on the way</div>}
           {out.map(o => card(o, <>
+            {o.track_url && <button className="ghost sm" title="Copy the customer's live-tracking link" onClick={() => copyTrack(o)}><Icon name="pin" size={16} />Tracking link</button>}
             <button className="primary" onClick={() => delivered(o)}>Delivered</button>
           </>))}
         </div></div>

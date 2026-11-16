@@ -32,6 +32,32 @@ const T = {
   tax: { en: 'Tax', roman_ur: 'Tax', ur: 'ٹیکس' },
   total: { en: 'Total', roman_ur: 'Total', ur: 'کل' },
   thanks: { en: 'Thank you for ordering from {name}!', roman_ur: '{name} se order karne ka shukriya!', ur: '{name} سے آرڈر کرنے کا شکریہ!' },
+  on_the_way: {
+    en: '🛵 Your order #{id} is on its way with {rider}!',
+    roman_ur: '🛵 Aapka order #{id} rider {rider} ke saath nikal gaya hai!',
+    ur: '🛵 آپ کا آرڈر #{id} رائیڈر {rider} کے ساتھ نکل گیا ہے!',
+  },
+  track: { en: 'See where the rider is: {link}', roman_ur: 'Rider kahan hai, yahan dekhein: {link}', ur: 'رائیڈر کہاں ہے، یہاں دیکھیں: {link}' },
+  status_out: {
+    en: '🛵 Your order #{id} is on its way with {rider}, left {min} min ago.',
+    roman_ur: '🛵 Aapka order #{id} raste mein hai, rider {rider} {min} min pehle nikla hai.',
+    ur: '🛵 آپ کا آرڈر #{id} راستے میں ہے، رائیڈر {rider} {min} منٹ پہلے نکلا ہے۔',
+  },
+  status_delivered: {
+    en: '✅ Your order #{id} was delivered {min} min ago. Enjoy your meal!',
+    roman_ur: '✅ Aapka order #{id} {min} min pehle deliver ho gaya hai. Khana mazay se khayein!',
+    ur: '✅ آپ کا آرڈر #{id} {min} منٹ پہلے ڈیلیور ہو گیا ہے۔ کھانا مزے سے کھائیں!',
+  },
+  status_ready: {
+    en: '👨‍🍳 Your order #{id} is packed and the rider is about to leave.',
+    roman_ur: '👨‍🍳 Aapka order #{id} tayyar hai, rider abhi nikalne wala hai.',
+    ur: '👨‍🍳 آپ کا آرڈر #{id} تیار ہے، رائیڈر ابھی نکلنے والا ہے۔',
+  },
+  status_cooking: {
+    en: '👨‍🍳 Your order #{id} is being prepared in the kitchen; a rider will leave soon.',
+    roman_ur: '👨‍🍳 Aapka order #{id} kitchen mein ban raha hai, thori der mein rider nikal jayega.',
+    ur: '👨‍🍳 آپ کا آرڈر #{id} کچن میں بن رہا ہے، تھوڑی دیر میں رائیڈر نکل جائے گا۔',
+  },
   rejected: {
     en: 'Sorry, we can\'t take this order right now.{reason} You can order something else here any time.',
     roman_ur: 'Maazrat, hum abhi yeh order nahi le sakte.{reason} Aap yahin kuch aur order kar sakte hain.',
@@ -48,6 +74,12 @@ function acceptedMessage(order, lang, restaurantName) {
   return [`✅ *${pick('accepted_title', lang).replace('{id}', order.id)}*`, ...lines, `*${pick('total', lang)}: ${money(order.total)}*`,
     pick('thanks', lang).replace('{name}', restaurantName || '')].join('\n');
 }
+const fill = (key, lang, vars) => Object.entries(vars).reduce((t, [k, v]) => t.split(`{${k}}`).join(String(v ?? '')), pick(key, lang));
+// The order just left: who is bringing it, and the live-tracking link when the cloud is connected
+const onTheWayMessage = (order, lang, riderName, link) => [fill('on_the_way', lang, { id: order.id, rider: riderName }), link && fill('track', lang, { link })].filter(Boolean).join('\n');
+// "Where is my order?": its live status (status = cooking | ready | out | delivered)
+const statusMessage = (order, lang, status, riderName, minutes, link) => [fill('status_' + status, lang, { id: order.id, rider: riderName || '', min: minutes }),
+  status === 'out' && link && fill('track', lang, { link })].filter(Boolean).join('\n');
 const rejectedMessage = (lang, reason) => pick('rejected', lang).replace('{reason}', reason ? ` (${reason})` : '');
 
-module.exports = { pick, acceptedMessage, rejectedMessage };
+module.exports = { pick, acceptedMessage, rejectedMessage, onTheWayMessage, statusMessage };

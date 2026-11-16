@@ -64,7 +64,7 @@ export default function Payroll({ notify }) {
             {!history.length && <tr><td colSpan={7} className="muted">No payments yet</td></tr>}
             {history.map(p => (
               <tr key={p.id}>
-                <td className="muted">{p.date}</td><td>{p.name}</td><td>{p.type === 'advance' ? 'Advance' : 'Salary'}</td>
+                <td className="muted">{p.date}</td><td>{p.name}</td><td>{{ advance: 'Advance', salary: 'Salary', delivery: 'Delivery fees' }[p.type] || p.type}</td>
                 <td>{p.month}</td><td>{rs(p.amount)}</td><td className="muted">{p.note}</td>
                 <td><button className="ghost sm danger" onClick={() => undo(p)} aria-label="Remove"><Icon name="x" size={16} /></button></td>
               </tr>

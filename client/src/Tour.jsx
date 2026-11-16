@@ -9,7 +9,7 @@ const STEPS = {
     ['#nav-dashboard', 'Dashboard', "Today's sales, expenses and profit, best-selling items, tax invoices, and Excel downloads for any day or month."],
     ['#nav-orders', 'Orders', 'Every order: open, paid, refunded and cancelled. Reprint a receipt or refund a paid order (with a reason).'],
     ['#nav-kitchen', 'Kitchen', 'The kitchen screen: New → Preparing → Ready. Open it on a screen in the kitchen.'],
-    ['#nav-delivery', 'Delivery', 'Delivery orders: In the kitchen → Ready to send → On the way → Delivered. Pick a rider and collect the cash when they return.'],
+    ['#nav-riders', 'Riders', 'The delivery board, your riders and the link for their phone screen (they accept orders and share their location), a map of where they are, and their monthly accounts: deliveries, fees, cash collected and handed in.'],
     ['#nav-menu', 'Menu', 'Your items, sizes and prices, categories, deals and combos, and the menu pictures the WhatsApp bot sends. You can also import the whole menu from Excel.'],
     ['#nav-places', 'Tables & delivery', 'Floors and tables (and each table\'s QR code to print), plus your delivery areas with fees and minimum orders.'],
     ['#nav-register_session', 'Cash drawer', 'The cash in the drawer for this shift. Close the shift at night to get the Z-report.'],

@@ -68,3 +68,14 @@ doesn't stop billing. The rules (offline days, grace days) are in `server/licenc
 ## Onboarding a restaurant
 
 Done in the admin app: see [admin/README.md](../admin/README.md).
+
+## Riders (phones and tracking links)
+
+The POS pushes its riders and today's delivery board to `POST /api/sync/riders` every few seconds while deliveries are on (`server/rider-sync.js`) and takes back what riders pressed on their phones and where they are. Pages served here:
+
+| Page | Who | What |
+|---|---|---|
+| `/r/<token>` | a rider's phone | Accept ready orders, navigate, call, mark delivered, share location while "On duty". The token is the secret the owner gets from Riders → Phone link in the POS. |
+| `/track/<token>` | the customer | The order's status and, while on the way, the rider on a map. Sent by WhatsApp when the order leaves. Expires with the next day's board. |
+
+Rider positions and the day's trail live in `c_riders` / `rider_trail` (24 h). No customer phone numbers reach these pages: the rider sees the phone of an order only after accepting it; the tracking page never shows one. Map tiles come from OpenStreetMap (RISKS R2).
