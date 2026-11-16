@@ -8,7 +8,7 @@ const STEPS = {
     [null, 'Welcome to HazelPOS', 'A quick tour of what you, the owner, can do. It takes a minute. You can skip it and play it again any time from Help.'],
     ['#nav-dashboard', 'Dashboard', "Today's sales, expenses and profit, best-selling items, tax invoices, and Excel downloads for any day or month."],
     ['#nav-orders', 'Orders', 'Every order: open, paid, refunded and cancelled. Reprint a receipt or refund a paid order (with a reason).'],
-    ['#nav-kitchen', 'Kitchen', 'The kitchen screen: New → Preparing → Ready. Open it on a screen in the kitchen.'],
+    ['#nav-kitchen', 'Kitchen', 'The kitchen screen: New → Cooking → Ready. Open it on a screen in the kitchen.'],
     ['#nav-riders', 'Riders', 'The delivery board, your riders and the link for their phone screen (they accept orders and share their location), a map of where they are, and their monthly accounts: deliveries, fees, cash collected and handed in.'],
     ['#nav-menu', 'Menu', 'Your items, sizes and prices, categories, deals and combos, and the menu pictures the WhatsApp bot sends. You can also import the whole menu from Excel.'],
     ['#nav-places', 'Tables & delivery', 'Floors and tables (and each table\'s QR code to print), plus your delivery areas with fees and minimum orders.'],
@@ -33,7 +33,7 @@ const STEPS = {
     [null, 'Your rider screen', 'Press "On duty" when you start, so the restaurant and customers can see where you are. Orders appear under "Ready to pick up": press Accept to take one. Navigate and Call help you find the customer; press Delivered twice when you hand it over. Your earnings and the cash you must hand in are at the top. You can see this again from Help.'],
   ],
   kitchen: [
-    [null, 'Kitchen screen', 'New orders appear on the left with a beep. Press "Start cooking", then "Mark ready" when the food is done. Dine-in: the counter is told, and "Served" clears it. Takeaway: "Picked up" clears it. Delivery: it leaves by itself when a rider takes it. For a deal, every item inside is listed. You can see this again from Help.'],
+    [null, 'Kitchen screen', 'Your only job is cooking. New orders appear on the left with a beep. Press "Start cooking", then "Ready" when the food is done. That\'s it: the order goes to the counter (dine-in, takeaway) or to the riders (delivery) by itself. Pressed Ready by mistake? Undo it in the "Ready, waiting" list. You can see this again from Help.'],
   ],
 }
 const doneKey = role => `pos_tour_done_${role}`

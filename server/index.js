@@ -1013,8 +1013,8 @@ function payOrder(o, method, paidRaw, userName) {
       .run(method, paid, paid - o.total, now(), o.id);
   });
   afterPaid(o.id);
-  // Takeaway paid at the counter after the food was ready = handed over: off the kitchen board
-  if (o.type === 'takeaway') db.prepare("UPDATE orders SET kitchen_status='done' WHERE id=? AND kitchen_status='ready'").run(o.id);
+  // Dine-in / takeaway paid after the food was ready = handed over: off the counter's Food-ready strip
+  if (o.type !== 'delivery') db.prepare("UPDATE orders SET kitchen_status='done' WHERE id=? AND kitchen_status='ready'").run(o.id);
 }
 const afterPaidHooks = [];
 const afterPaid = id => afterPaidHooks.forEach(fn => { try { fn(id); } catch (e) { console.error('after-paid hook:', e.message); } });

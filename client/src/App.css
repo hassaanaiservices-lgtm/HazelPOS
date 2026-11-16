@@ -953,3 +953,15 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px
 .ready-chip-text { display: flex; flex-direction: column; line-height: 1.2; }
 .ready-chip .primary.sm { min-height: 44px; }
 @media (max-width: 640px) { .ready-strip { left: 8px; right: 8px; transform: none; max-width: none; bottom: 8px; } .ready-chip { flex: 1 1 100%; justify-content: space-between; } }
+
+/* ---------- Kitchen K1: New, Cooking, and a read-only Ready-waiting list ---------- */
+.kitchen.kitchen-2 { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(220px, 300px); }
+.k-col.k-waiting h2::before { background: var(--ok); }
+.k-ready-btn { flex: 1; min-height: 52px; font-size: var(--fs-lg); display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+.k-wait { background: var(--surface-2); border: var(--bw) solid var(--outline); border-radius: var(--r-md); padding: 8px 10px; display: flex; flex-direction: column; gap: 2px; }
+.k-wait.type-dine-in { border-left: 4px solid var(--info); } .k-wait.type-takeaway { border-left: 4px solid var(--warn); } .k-wait.type-delivery { border-left: 4px solid var(--accent); }
+.k-wait.late .timer { color: var(--danger); }
+.k-wait-top { display: flex; align-items: center; gap: 6px; } .k-wait-top .timer { margin-left: auto; font-size: var(--fs-sm); }
+.k-wait-to { font-size: var(--fs-sm); color: var(--ok); font-weight: 600; }
+.k-wait .link { align-self: flex-start; min-height: 32px; padding: 0; font-size: var(--fs-sm); background: none; border: 0; box-shadow: none; }
+@media (max-width: 900px) { .kitchen.kitchen-2 { grid-template-columns: 1fr; height: auto; } }
