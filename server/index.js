@@ -1610,8 +1610,17 @@ const cloud = require('./cloud-sync')(db);
 const riderSync = require('./rider-sync')(db, cloud, { getOrder, dispatchOrder, deliverOrder });
 app.get('/api/cloud/status', (req, res) => res.json(cloud.status()));
 app.post('/api/cloud/connect', async (req, res) => {
-  const url = String(req.body.url || '').trim(), key = String(req.body.key || '').trim();
-  if (!/^https?:\/\//.test(url) || !key) return res.status(400).json({ error: 'Enter the cloud address and the branch key' });
+  const url = String(req.body.url || '').trim().replace(/\/+$/, ''); let key = String(req.body.key || '').trim();
+  if (!/^https?:\/\//.test(url) || !key) return res.status(400).json({ error: 'Enter the cloud address and the branch key or activation code' });
+  // An activation code (HZ-…) from the admin app works here too, for a POS run by hand (no installer): swap it for the branch key
+  if (/^hz-/i.test(key)) {
+    try {
+      const r = await fetch(url + '/api/activate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: key }), signal: AbortSignal.timeout(20000) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) return res.status(400).json({ error: d.error || 'That activation code did not work' });
+      key = d.key;
+    } catch (e) { return res.status(502).json({ error: `Could not reach the cloud: ${e.message}` }); }
+  }
   try { const hello = await cloud.connect(url, key); res.json({ ...cloud.status(), branch: hello.branch }); }
   catch (e) { res.status(502).json({ error: `Could not connect: ${e.message}` }); }
 });
