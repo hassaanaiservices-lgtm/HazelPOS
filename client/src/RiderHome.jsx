@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { api, rs, run } from './lib'
 import { Icon } from './ui'
 import { toast } from './notify'
+import { beep } from './QrOrders'
 
 // The rider's own screen (4th login, role rider). Ready orders to accept, their deliveries (navigate, call, delivered),
 // an On-duty switch that shares their location, and their money: today, this month, cash still with them.
@@ -19,7 +20,14 @@ export default function RiderHome() {
   const watch = useRef(null), last = useRef(0), wake = useRef(null)
   const gps = typeof window !== 'undefined' && window.isSecureContext && 'geolocation' in navigator
 
-  const load = () => api('/rider/board').then(x => { setD(x); return x }).catch(e => setLoc(e.message))
+  // A new order ready to pick up: beep and vibrate, so riders waiting at the shop notice it
+  const seenReady = useRef(null)
+  const load = () => api('/rider/board').then(x => {
+    const ready = x.ready.filter(o => o.status === 'ready').map(o => o.id)
+    if (seenReady.current && ready.some(id => !seenReady.current.has(id))) { beep(); navigator.vibrate?.([300, 150, 300]); toast('New delivery ready to pick up', 'info') }
+    seenReady.current = new Set(ready)
+    setD(x); return x
+  }).catch(e => setLoc(e.message))
   useEffect(() => { load().then(x => x?.me?.on_duty && gps && start()); const t = setInterval(load, 5000); return () => { clearInterval(t); stop() } }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const send = p => {
