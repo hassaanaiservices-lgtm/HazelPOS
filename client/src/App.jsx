@@ -118,7 +118,7 @@ export default function App() {
     return () => window.removeEventListener('pos-logout', clearSession)
   }, [])
 
-  // Wait for /settings so the demo role picker doesn't flash the PIN keypad first.
+  // Wait for /settings so the demo role picker doesn't flash the PIN box first.
   if (settings.demo === undefined) return <div className="login" />
   if (settings.licence?.state === 'activate') return <Activate settings={settings} onDone={reloadAll} />
   if (!user) return <Login settings={settings} onLogin={login} />

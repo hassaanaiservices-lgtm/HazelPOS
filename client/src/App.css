@@ -340,19 +340,12 @@ main > section { flex: 1; min-height: 0; }
 .licence-banner.due_soon { background: var(--info-soft); color: var(--text); border-color: color-mix(in srgb, var(--info) 45%, transparent); }
 .licence-banner.warning { background: var(--warn-soft); color: var(--text); border-color: color-mix(in srgb, var(--warn) 55%, transparent); }
 .licence-banner.locked { background: var(--danger-soft); color: var(--text); border-color: var(--danger); }
-.pin-dots { display: flex; gap: 16px; margin: 12px 0; }
-.pin-dots i { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--line-strong); transition: background-color var(--dur), border-color var(--dur); }
-.pin-dots i.on { background: var(--accent); border-color: var(--accent); }
 .shake { animation: shake 0.35s; }
 @keyframes shake { 25% { transform: translateX(-6px) } 75% { transform: translateX(6px) } }
 .demo-roles { display: flex; flex-direction: column; gap: 8px; width: 100%; margin-top: 8px; }
 .demo-role { flex-direction: column; align-items: flex-start !important; gap: 4px; min-height: 64px !important; padding: 12px 16px !important; text-align: left; white-space: normal !important; }
 .demo-role b { font-size: var(--fs-lg); }
 .demo-role small { font-weight: 500; }
-.keypad { display: grid; grid-template-columns: repeat(3, minmax(0, 76px)); gap: 12px; margin-top: 8px; }
-.keypad button { height: 64px; border-radius: var(--r-md); background: var(--surface-2); border: var(--bw) solid var(--outline); font-size: var(--fs-xl); font-weight: 700; }
-.keypad button:hover { background: var(--surface-3); }
-.keypad button:active { background: var(--accent); color: var(--accent-ink); }
 
 /* ---------- Home: order type ---------- */
 .home { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; text-align: center; }
@@ -804,8 +797,6 @@ h1, h2 { font-weight: 800; letter-spacing: -0.02em; }
 .order-bar { border: var(--bw) solid var(--outline); border-radius: var(--r-pill) !important; box-shadow: var(--pop-lg) !important; }
 .size-card-btn, .methods button, .table-pick button, .quick button { border-color: var(--outline); border-width: var(--bw); }
 .size-card-btn.selected, .methods button.active { background: color-mix(in srgb, var(--accent) 22%, var(--surface)); box-shadow: var(--pop); }
-.keypad button { border-radius: var(--r-pill); box-shadow: var(--pop); }
-.keypad button:active { transform: translate(3px, 3px); box-shadow: none; }
 .toast-item.success { background: color-mix(in srgb, var(--ok) var(--tint), var(--surface)); }
 .toast-item.error { background: color-mix(in srgb, var(--danger) var(--tint), var(--surface)); border-color: var(--outline); }
 .toast-item.info { background: color-mix(in srgb, var(--info) var(--tint), var(--surface)); }
@@ -939,19 +930,10 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px
 .rider-actions .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 48px; border-radius: var(--r-pill); border: var(--bw) solid var(--outline); color: var(--text); text-decoration: none; font-weight: 600; }
 .ok-btn { background: var(--ok); color: var(--accent-ink); border-color: var(--ok); border-radius: var(--r-pill); font-weight: 700; display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
 
-/* ---------- Login: English keyboard next to the number pad ---------- */
-.pin-dots { flex-wrap: wrap; justify-content: center; gap: 12px; min-height: 18px; }
-.kb { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; width: 100%; }
-.kb-row { display: flex; justify-content: center; gap: 4px; }
-.kb button { flex: 1 1 0; min-width: 0; max-width: 44px; height: 48px; padding: 0; border-radius: var(--r-md); background: var(--surface-2); border: var(--bw) solid var(--outline); font-size: var(--fs-md); font-weight: 700; }
-.kb button:active { background: var(--accent); color: var(--accent-ink); }
-.kb .kb-wide { max-width: 64px; flex: 1.5 1 0; display: grid; place-items: center; }
-.login-actions { display: flex; gap: 12px; width: 100%; margin-top: 16px; }
-.login-actions button { flex: 1; min-height: 48px; }
-.login-card:has(.kb) { max-width: 520px; width: 100%; }
-@media (max-width: 520px) {
-  .login:has(.kb) { padding-left: 4px; padding-right: 4px; }
-  .login-card:has(.kb) { padding-left: 8px; padding-right: 8px; }
-  .kb-row { gap: 3px; }
-  .kb button { height: 52px; border-radius: 10px; }
-}
+/* ---------- Login: one PIN box, typed on the device's own keyboard ---------- */
+.login-form { display: flex; flex-direction: column; gap: 12px; width: 100%; margin-top: 8px; }
+.pin-field { display: flex; gap: 8px; align-items: center; }
+.pin-field input { flex: 1; min-width: 0; min-height: 52px; font-size: var(--fs-xl); letter-spacing: 0.2em; text-align: center; }
+.pin-field input::placeholder { letter-spacing: normal; }
+.pin-field button { min-height: 52px; min-width: 64px; }
+.login-form .primary { min-height: 52px; }
