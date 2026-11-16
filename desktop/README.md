@@ -33,9 +33,9 @@ menu pictures don't send. (`npm run dist:win` refuses to run off Windows; a thro
 
 The code repo can stay private. Installed apps look for updates in a **public** repo that holds only the installers:
 
-1. On GitHub, create an empty **public** repo named `HazelPOS-releases` (same account as the code repo).
+1. On GitHub, create an empty **public** repo named `-HazelPOS-releases` (note the dash at the start; yours already exists) (same account as the code repo).
 2. Make a token: GitHub → Settings → Developer settings → Fine-grained tokens → Generate. Repository access: **only**
-   `HazelPOS-releases`. Permission: **Contents: Read and write**. Copy it.
+   `-HazelPOS-releases`. Permission: **Contents: Read and write**. Copy it.
 3. In the **code** repo: Settings → Secrets and variables → Actions → New repository secret. Name `RELEASES_TOKEN`, value: the token.
 4. Fill in `desktop/package.json` → `hazel`: `cloudUrl` (your cloud's address) and `licencePublicKey`
    (open `https://<your-cloud>/api/licence/public-key` and paste what it shows). The build refuses to run without both.

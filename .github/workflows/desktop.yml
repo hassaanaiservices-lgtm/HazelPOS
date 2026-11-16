@@ -1,7 +1,7 @@
-# Builds the HazelPOS Windows installer and publishes it to the PUBLIC releases repo (hassaanaiservices-lgtm/HazelPOS-releases),
+# Builds the HazelPOS Windows installer and publishes it to the PUBLIC releases repo (hassaanaiservices-lgtm/-HazelPOS-releases),
 # where installed apps look for updates. The code repo can stay private.
 #
-# One-time setup (desktop/README.md): create the empty public repo "HazelPOS-releases", make a fine-grained token that can
+# One-time setup (desktop/README.md): create the empty public repo "-HazelPOS-releases", make a fine-grained token that can
 # write Contents on that repo only, and save it in THIS repo: Settings → Secrets and variables → Actions → RELEASES_TOKEN.
 #
 # Release: bump "version" in desktop/package.json, commit, then   git tag v1.0.1 && git push --tags

@@ -106,7 +106,7 @@
       {
         "provider": "github",
         "owner": "hassaanaiservices-lgtm",
-        "repo": "HazelPOS-releases",
+        "repo": "-HazelPOS-releases",
         "releaseType": "release"
       }
     ],
