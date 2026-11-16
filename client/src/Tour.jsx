@@ -29,6 +29,9 @@ const STEPS = {
     ['#nav-register_session', 'Cash drawer', 'Open the shift in the morning with the cash in the drawer, record cash in/out, and close it at night.'],
     ['#tour-help', 'Need this again?', 'Press Help any time to see this tour again.'],
   ],
+  rider: [
+    [null, 'Your rider screen', 'Press "On duty" when you start, so the restaurant and customers can see where you are. Orders appear under "Ready to pick up": press Accept to take one. Navigate and Call help you find the customer; press Delivered twice when you hand it over. Your earnings and the cash you must hand in are at the top. You can see this again from Help.'],
+  ],
   kitchen: [
     [null, 'Kitchen screen', 'New orders appear on the left with a beep. Press "Start cooking", then "Mark ready" when the food is done. For a deal, every item inside is listed. You can see this again from Help.'],
   ],

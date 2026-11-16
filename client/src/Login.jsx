@@ -31,7 +31,7 @@ export default function Login({ settings, onLogin }) {
         {settings.demo ? <>
           <p className="muted">Free demo. Pick who you want to be:</p>
           <div className="demo-roles">
-            {[['1234', 'Owner', 'Menu, stock, staff, reports and settings'], ['1111', 'Cashier', 'Take orders, tables, delivery, WhatsApp'], ['2222', 'Kitchen', 'The kitchen ticket board']].map(([p, role, what]) => (
+            {[['1234', 'Owner', 'Menu, stock, staff, reports and settings'], ['1111', 'Cashier', 'Take orders, tables, delivery, WhatsApp'], ['2222', 'Kitchen', 'The kitchen ticket board'], ['3333', 'Rider', 'Accept deliveries, live location, your earnings']].map(([p, role, what]) => (
               <button key={role} className={`ghost demo-role role-${role.toLowerCase()}`} onClick={() => submit(p)}><b>{role}</b><small className="muted">{what}</small></button>
             ))}
           </div>

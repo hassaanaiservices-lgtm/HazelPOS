@@ -773,8 +773,9 @@ h1, h2 { font-weight: 800; letter-spacing: -0.02em; }
 .demo-role.role-owner { --role-c: var(--accent); }
 .demo-role.role-cashier { --role-c: var(--ok); }
 .demo-role.role-kitchen { --role-c: var(--info); }
-.demo-role.role-owner, .demo-role.role-cashier, .demo-role.role-kitchen { background: color-mix(in srgb, var(--role-c) var(--tint), var(--surface)); }
-.demo-role.role-owner:not(:disabled):hover, .demo-role.role-cashier:not(:disabled):hover, .demo-role.role-kitchen:not(:disabled):hover { background: color-mix(in srgb, var(--role-c) calc(var(--tint) + 8%), var(--surface)); border-color: var(--outline); }
+.demo-role.role-rider { --role-c: var(--warn); }
+.demo-role.role-owner, .demo-role.role-cashier, .demo-role.role-kitchen, .demo-role.role-rider { background: color-mix(in srgb, var(--role-c) var(--tint), var(--surface)); }
+.demo-role.role-owner:not(:disabled):hover, .demo-role.role-cashier:not(:disabled):hover, .demo-role.role-kitchen:not(:disabled):hover, .demo-role.role-rider:not(:disabled):hover { background: color-mix(in srgb, var(--role-c) calc(var(--tint) + 8%), var(--surface)); border-color: var(--outline); }
 
 /* tables: free is plain, occupied is warm */
 .floor-table-card { border: var(--bw) solid var(--outline); border-top: 6px solid var(--floor-c); box-shadow: var(--pop); transition: transform var(--dur) var(--ease), box-shadow var(--dur) var(--ease); }
@@ -918,3 +919,22 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px
 .acct-cards .card b { font-size: var(--fs-xl); }
 .acct-tbl td, .acct-tbl th { white-space: nowrap; }
 .riders-section h3 { margin: 20px 0 8px; }
+
+/* ---------- Rider's own screen (role rider) ---------- */
+.rider-home { padding: 16px; max-width: 760px; margin: 0 auto; width: 100%; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; }
+.rider-home h2 { margin: 0; } .rider-home h3 { display: flex; align-items: center; gap: 8px; margin: 8px 0 0; }
+.rider-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.duty-switch { display: inline-flex; align-items: center; gap: 10px; min-height: 48px; border-radius: var(--r-pill); padding: 4px 6px 4px 16px; font-weight: 700; }
+.duty-switch span { width: 38px; height: 38px; border-radius: 50%; display: grid; place-items: center; background: var(--surface-3); font-size: 20px; }
+.duty-switch.on { border-color: var(--ok); color: var(--ok); } .duty-switch.on span { background: var(--ok); }
+.rider-note { margin: 0; padding: 10px 12px; border-radius: var(--r-md); background: var(--surface-2); border: var(--bw) solid var(--outline); font-size: var(--fs-sm); }
+.rider-note.bad { color: var(--warn); }
+.rider-money { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+.rider-money .card { background: var(--surface); border: var(--bw) solid var(--outline); border-radius: var(--r-md); padding: 10px 14px; display: flex; flex-direction: column; gap: 2px; }
+.rider-money .card b { font-size: var(--fs-xl); }
+.rider-list { display: flex; flex-direction: column; gap: 10px; }
+.rider-ticket.mine { border-color: var(--accent); }
+.rider-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 4px; }
+.rider-actions .wide { grid-column: 1 / -1; min-height: 52px; }
+.rider-actions .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 48px; border-radius: var(--r-pill); border: var(--bw) solid var(--outline); color: var(--text); text-decoration: none; font-weight: 600; }
+.ok-btn { background: var(--ok); color: var(--accent-ink); border-color: var(--ok); border-radius: var(--r-pill); font-weight: 700; display: inline-flex; align-items: center; justify-content: center; gap: 6px; }

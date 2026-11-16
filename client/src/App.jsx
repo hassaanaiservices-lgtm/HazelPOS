@@ -13,6 +13,7 @@ import Inventory from './Inventory'
 import Customers from './Customers'
 import Delivery from './Delivery'
 import Riders from './Riders'
+import RiderHome from './RiderHome'
 import Payroll from './Payroll'
 import WhatsApp from './WhatsApp'
 import { QrOrderAlerts, beep } from './QrOrders'
@@ -48,12 +49,18 @@ const NAV = {
   kitchen: [
     ['kitchen', 'Kitchen', 'flame'],
   ],
+  rider: [
+    ['rider', 'Deliveries', 'bike'],
+  ],
 }
+
+// The first screen after login, per role
+const homeView = role => ({ kitchen: 'kitchen', admin: 'dashboard', rider: 'rider' })[role] || 'home'
 
 export default function App() {
   const [user, setUser] = useState(() => JSON.parse(localStorage.getItem('pos_user') || 'null'))
   const [settings, setSettings] = useState({ name: 'HazelPOS', logo: '🍕' })
-  const [view, setView] = useState(user?.role === 'kitchen' ? 'kitchen' : user?.role === 'admin' ? 'dashboard' : 'home')
+  const [view, setView] = useState(homeView(user?.role))
   const [menu, setMenu] = useState({ categories: [], products: [], taxRate: 0 })
   const [tables, setTables] = useState([])
   const [order, setOrder] = useState(null)
@@ -73,6 +80,7 @@ export default function App() {
   }, [theme])
 
   const refresh = () => {
+    if (user?.role === 'rider') return // the rider screen loads its own data (RiderHome.jsx)
     api('/tables').then(setTables); api('/summary').then(setSummary)
     if (user?.role === 'admin') api('/inventory/low').then(l => { setLowList(l); setSeen(s => ({ low: s.low.filter(id => l.some(i => i.id === id)) })) }).catch(() => {}) // restocked items drop out of "seen", so they blink again next time they run low
   }
@@ -102,7 +110,7 @@ export default function App() {
     poll(); const t = setInterval(poll, 5000); return () => clearInterval(t)
   }, [user?.id])
 
-  const login = ({ token, user: u }) => { localStorage.setItem('pos_token', token); setUser(u); localStorage.setItem('pos_user', JSON.stringify(u)); setView(u.role === 'kitchen' ? 'kitchen' : u.role === 'admin' ? 'dashboard' : 'home') }
+  const login = ({ token, user: u }) => { localStorage.setItem('pos_token', token); setUser(u); localStorage.setItem('pos_user', JSON.stringify(u)); setView(homeView(u.role)) }
   const clearSession = () => { setUser(null); localStorage.removeItem('pos_user'); localStorage.removeItem('pos_token'); setOrder(null) }
   const logout = () => { api('/logout', {}).catch(() => {}).finally(clearSession) }
   useEffect(() => {
@@ -164,7 +172,7 @@ export default function App() {
             {THEMES.map(([id, label, ic]) => <button key={id} role="radio" aria-checked={theme === id} className={theme === id ? 'on' : ''} onClick={() => setTheme(id)}>
               <Icon name={ic} size={14} />{label}</button>)}
           </div>
-          {user.role !== 'kitchen' && <div className="today"><span>Today</span><span><b>{summary.orders}</b> orders, <b>{rs(summary.revenue)}</b></span></div>}
+          {!['kitchen', 'rider'].includes(user.role) && <div className="today"><span>Today</span><span><b>{summary.orders}</b> orders, <b>{rs(summary.revenue)}</b></span></div>}
           <button className="ghost sm tour-help" id="tour-help" onClick={() => { setNavOpen(false); setTour(true) }}>Help: take the tour</button>
           <div className="user"><span className="avatar">{user.name[0]}</span><span>{user.name}</span>{lock}</div>
         </div>
@@ -191,6 +199,7 @@ export default function App() {
           <span className="muted">Salaries and advances are added to Expenses automatically.</span></div><Payroll notify={notify} /></section>}
         {view === 'delivery' && user.role === 'cashier' && <Delivery notify={notify} />}
         {view === 'riders' && user.role === 'admin' && <Riders notify={notify} />}
+        {view === 'rider' && user.role === 'rider' && <RiderHome />}
         {view === 'whatsapp' && user.role !== 'kitchen' && <WhatsApp notify={notify} />}
         {view === 'menu' && user.role === 'admin' && <MenuSection onChanged={reloadAll} notify={notify} />}
         {view === 'places' && user.role === 'admin' && <PlacesSection onChanged={reloadAll} notify={notify} />}

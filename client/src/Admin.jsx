@@ -565,7 +565,7 @@ function LoginPins({ notify }) {
   return (
     <>
       <h3>Staff & PINs</h3>
-      <p className="muted" style={{ fontSize: 13 }}>Only the owner (admin) sees this. Type a new 4-digit PIN to change or reset anyone's PIN, e.g. when a cashier forgets theirs or leaves. They are signed out on every screen and must use the new PIN. If you still use the default PINs (1234, 1111, 2222), change them now.</p>
+      <p className="muted" style={{ fontSize: 13 }}>Only the owner (admin) sees this. Type a new 4-digit PIN to change or reset anyone's PIN, e.g. when a cashier forgets theirs or leaves. They are signed out on every screen and must use the new PIN. If you still use the default PINs (1234, 1111, 2222), change them now. Riders get their PIN in the Riders section.</p>
       {users.map(u => (
         <div key={u.id} className="two" style={{ alignItems: 'end' }}>
           <label>{u.name} <span className="pill sm">{u.role}</span>

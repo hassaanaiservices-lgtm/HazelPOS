@@ -6,7 +6,8 @@
 // The POS stays the source of truth: a rider's Accept becomes a normal dispatch here, and when it fails (another rider
 // was faster) the rider's phone shows why. Positions are kept in memory only; the cloud keeps the day's trail.
 module.exports = function riderSync(db, cloud, { getOrder, dispatchOrder, deliverOrder, log = console }) {
-  const positions = new Map(); // rider id -> { lat, lng, acc, at, on_duty }
+  const positions = new Map(); // rider id -> { lat, lng, acc, at, on_duty }: from the cloud (rider's phone page)
+  const local = new Map();     // same, from a rider logged in to the POS itself (RiderHome.jsx)
   const FAST = 8000, SLOW = 60000;
   let lastSync = null, lastError = '', timer = null, running = false;
 
@@ -21,7 +22,7 @@ module.exports = function riderSync(db, cloud, { getOrder, dispatchOrder, delive
     }));
   const riders = () => db.prepare("SELECT id local_id, name, phone, rider_token token FROM employees WHERE active=1 AND lower(job) LIKE '%rider%' AND rider_token IS NOT NULL").all();
   // Deliveries on, or a rider on duty: poll fast
-  const busy = () => [...positions.values()].some(p => p.on_duty)
+  const busy = () => [...positions.values(), ...local.values()].some(p => p.on_duty)
     || !!db.prepare("SELECT 1 FROM orders WHERE type='delivery' AND status NOT IN ('cancelled','merged') AND (status='open' OR delivery_status='out') LIMIT 1").get();
 
   async function tick() {
@@ -29,7 +30,8 @@ module.exports = function riderSync(db, cloud, { getOrder, dispatchOrder, delive
     if (running) return { skipped: 'already running' };
     running = true;
     try {
-      let r = await cloud.call('/api/sync/riders', { riders: riders(), board: board() });
+      const mine = () => [...local].filter(([, p]) => p.lat != null).map(([id, p]) => ({ rider_local_id: id, ...p }));
+      let r = await cloud.call('/api/sync/riders', { riders: riders(), board: board(), positions: mine() });
       const results = [];
       for (const e of r.events || []) {
         try {
@@ -40,7 +42,7 @@ module.exports = function riderSync(db, cloud, { getOrder, dispatchOrder, delive
         } catch (err) { results.push({ id: e.id, result: err.message }); }
       }
       // Something was applied: send the board again right away with the results, so the phones see it at once
-      if (results.length) r = await cloud.call('/api/sync/riders', { riders: riders(), board: board(), ack: results });
+      if (results.length) r = await cloud.call('/api/sync/riders', { riders: riders(), board: board(), ack: results, positions: mine() });
       positions.clear();
       for (const p of r.positions || []) positions.set(+p.rider_local_id, { lat: p.lat, lng: p.lng, acc: p.acc, at: p.at, on_duty: !!p.on_duty });
       lastSync = new Date().toISOString(); lastError = '';
@@ -59,5 +61,11 @@ module.exports = function riderSync(db, cloud, { getOrder, dispatchOrder, delive
   const poke = () => schedule(300); // something changed here (a dispatch, a new rider): tell the cloud now
   schedule(7000);
 
-  return { tick, poke, positions: () => Object.fromEntries(positions), status: () => ({ last_sync: lastSync, last_error: lastError }) };
+  const merged = () => {
+    const out = Object.fromEntries(positions);
+    for (const [id, p] of local) if (!out[id] || Date.parse(p.at) >= Date.parse(out[id].at || 0)) out[id] = p;
+    return out;
+  };
+  const setLocal = (id, p) => { local.set(+id, { ...p, at: new Date().toISOString() }); };
+  return { tick, poke, setLocal, positions: merged, status: () => ({ last_sync: lastSync, last_error: lastError }) };
 };

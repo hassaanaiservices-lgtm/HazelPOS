@@ -353,6 +353,13 @@ app.post('/api/sync/riders', branchAuth, (req, res) => {
     db.prepare(`UPDATE rider_events SET applied_at=?, result='The order is no longer waiting' WHERE branch_id=? AND applied_at IS NULL AND type='accept'
       AND order_local_id NOT IN (SELECT local_id FROM c_delivery WHERE branch_id=? AND status IN ('ready','cooking') AND rider_local_id IS NULL)`).run(now(), b, b);
     db.prepare('UPDATE branches SET board_at=? WHERE id=?').run(now(), b);
+    // Riders logged in to the POS itself share their position through it
+    const pos = db.prepare('UPDATE c_riders SET lat=?, lng=?, acc=?, at=?, on_duty=? WHERE branch_id=? AND local_id=? AND (at IS NULL OR at < ?)');
+    for (const p of (Array.isArray(req.body.positions) ? req.body.positions : []).slice(0, 100)) {
+      if (!(Math.abs(+p.lat) <= 90 && Math.abs(+p.lng) <= 180) || !p.at) continue;
+      const r = pos.run(+p.lat, +p.lng, +p.acc || 0, String(p.at), p.on_duty ? 1 : 0, b, +p.rider_local_id, String(p.at));
+      if (r.changes) db.prepare('INSERT INTO rider_trail VALUES (?,?,?,?,?)').run(b, +p.rider_local_id, +p.lat, +p.lng, String(p.at));
+    }
   });
   res.json({
     events: db.prepare('SELECT id, rider_local_id, order_local_id, type FROM rider_events WHERE branch_id=? AND applied_at IS NULL ORDER BY id LIMIT 100').all(b),

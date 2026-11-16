@@ -101,6 +101,7 @@ for (const sql of [
   // Riders (Riders section): fee per delivery, the secret in the rider's phone link; per order the fee at the time,
   // the customer's tracking link secret, and whether the rider took it on their phone
   'ALTER TABLE employees ADD COLUMN delivery_fee REAL DEFAULT 0',
+  'ALTER TABLE users ADD COLUMN employee_id INTEGER', // a rider's login (role rider) points at their staff record
   'ALTER TABLE employees ADD COLUMN rider_token TEXT',
   'ALTER TABLE orders ADD COLUMN rider_fee REAL DEFAULT 0',
   'ALTER TABLE orders ADD COLUMN track_token TEXT',
@@ -413,6 +414,13 @@ if (db.prepare('SELECT COUNT(*) c FROM register_sessions').get().c === 0) {
     .run(new Date().toISOString(), 'Owner', 5000, 'open');
 }
 
+// Demo: the role picker has a Rider; make sure a rider login exists (PIN 3333, the first rider on the staff list)
+if (DEMO && !db.prepare("SELECT 1 FROM users WHERE role='rider'").get()) {
+  let e = db.prepare("SELECT id, name FROM employees WHERE active=1 AND lower(job) LIKE '%rider%' ORDER BY id").get();
+  if (!e) e = { id: db.prepare("INSERT INTO employees (name,phone,job,salary,active,joined) VALUES ('Sample Rider','03000000107','Rider',0,1,date('now'))").run().lastInsertRowid, name: 'Sample Rider' };
+  db.prepare("UPDATE employees SET delivery_fee=COALESCE(NULLIF(delivery_fee,0),100) WHERE id=?").run(e.id);
+  db.prepare('INSERT INTO users (name,pin,role,employee_id) VALUES (?,?,?,?)').run(e.name, hashPin('3333'), 'rider', e.id);
+}
 const getSettings = () => Object.fromEntries(db.prepare('SELECT key,value FROM settings').all().map(r => [r.key, r.value]));
 const taxRate = () => (+getSettings().tax_rate || 0) / 100;
 
@@ -442,7 +450,8 @@ const now = () => new Date().toISOString();
 
 // ---------- Auth (PIN + session token) ----------
 const SESSION_IDLE_MS = 12 * 60 * 60 * 1000;
-const ALL = ['admin', 'cashier', 'kitchen'], STAFF = ['admin', 'cashier'], ADMIN = ['admin'];
+const ALL = ['admin', 'cashier', 'kitchen'], STAFF = ['admin', 'cashier'], ADMIN = ['admin'], RIDER = ['rider'];
+const ROLES = [...ALL, 'rider']; // riders log in too (their own screen); they get only the /rider routes
 // First match wins; anything not listed is admin-only. null = public.
 const ACCESS = [
   [/^POST \/login$/, null],
@@ -452,7 +461,8 @@ const ACCESS = [
   [/^(GET|POST) \/internal\//, null], // the desktop app itself, guarded by its own secret (App updates, below)
   [/^GET \/menu-images(\/\d+\/image)?$/, null], // menu card pictures: public like the menu itself (QR page)
   [/^POST \/licence\/(activate|check)$/, null], // activate: only until activated, then admin (checked in the route)
-  [/^POST \/logout$/, ALL],
+  [/^POST \/logout$/, ROLES],
+  [/^(GET|POST) \/rider(\/|$)/, RIDER], // the rider's own screen (client/src/RiderHome.jsx)
   [/^GET \/(menu|tables|summary|kitchen)$/, ALL],
   [/^POST \/kitchen\/\d+$/, ALL],
   [/^(GET|POST) \/(orders|register|qr-requests)(\/|$)/, STAFF],
@@ -477,7 +487,7 @@ app.use('/api', (req, res, next) => {
   const token = (req.get('authorization') || '').replace(/^Bearer /, '');
   const s = token && db.prepare('SELECT * FROM sessions WHERE token=?').get(token);
   if (s && Date.now() - Date.parse(s.last_seen) < SESSION_IDLE_MS) {
-    req.user = db.prepare('SELECT id,name,role FROM users WHERE id=?').get(s.user_id);
+    req.user = db.prepare('SELECT id,name,role,employee_id FROM users WHERE id=?').get(s.user_id);
     if (req.user) { req.token = token; db.prepare('UPDATE sessions SET last_seen=? WHERE token=?').run(now(), token); }
   } else if (s) db.prepare('DELETE FROM sessions WHERE token=?').run(token);
 
@@ -628,11 +638,11 @@ crud('expenses', 'expenses', ['title', 'category', 'amount', 'payment_method', '
 
 // ---------- Staff (PINs are never sent back) ----------
 const adminCount = () => db.prepare("SELECT COUNT(*) c FROM users WHERE role='admin'").get().c;
-app.get('/api/users', (req, res) => res.json(db.prepare('SELECT id,name,role FROM users ORDER BY id').all()));
+app.get('/api/users', (req, res) => res.json(db.prepare("SELECT id,name,role FROM users ORDER BY role='rider', id").all()));
 app.post('/api/users', (req, res) => {
   const { id, name, pin, role } = req.body;
   if (!String(name || '').trim()) return res.status(400).json({ error: 'Name is required' });
-  if (!ALL.includes(role)) return res.status(400).json({ error: 'Invalid role' });
+  if (!ROLES.includes(role)) return res.status(400).json({ error: 'Invalid role' });
   if (!id) return res.status(400).json({ error: 'There are three fixed logins (admin, cashier, kitchen); change their PINs instead' });
   if (pin) {
     if (!/^\d{4}$/.test(String(pin))) return res.status(400).json({ error: 'PIN must be 4 digits' }); // login pad submits at 4
@@ -1115,9 +1125,24 @@ const RIDER_COLS = `e.id, e.name, e.phone, e.active, COALESCE(e.delivery_fee,0) 
       (SELECT COUNT(*) FROM orders o WHERE o.rider_id=e.id AND o.delivery_status='delivered' AND date(o.delivered_at,'localtime')=date('now','localtime')) delivered_today`;
 const riderRows = (where, admin) => {
   const pos = riderSync.positions();
-  return db.prepare(`SELECT ${RIDER_COLS} FROM employees e WHERE lower(e.job) LIKE '%rider%' AND ${where} ORDER BY e.active DESC, e.name`).all()
-    .map(e => ({ ...e, link: admin ? riderLink(e) : undefined, rider_token: undefined, ...(pos[e.id] || {}) }));
+  return db.prepare(`SELECT ${RIDER_COLS}, (SELECT COUNT(*) FROM users u WHERE u.employee_id=e.id AND u.role='rider') has_login
+      FROM employees e WHERE lower(e.job) LIKE '%rider%' AND ${where} ORDER BY e.active DESC, e.name`).all()
+    .map(e => ({ ...e, has_login: !!e.has_login, link: admin ? riderLink(e) : undefined, rider_token: undefined, ...(pos[e.id] || {}) }));
 };
+// A rider's own login (role rider): made or changed from the Riders section; gone when they stop working here
+function setRiderLogin(employeeId, name, pin, active) {
+  const u = db.prepare("SELECT id FROM users WHERE employee_id=? AND role='rider'").get(employeeId);
+  if (!active) { if (u) { db.prepare('DELETE FROM sessions WHERE user_id=?').run(u.id); db.prepare('DELETE FROM users WHERE id=?').run(u.id); } return; }
+  if (pin) {
+    if (!/^\d{4}$/.test(String(pin))) throw new UserError('PIN must be 4 digits');
+    const taken = userByPin(String(pin));
+    if (taken && taken.id !== u?.id) throw new UserError('That PIN is already used by someone else');
+  }
+  if (u) {
+    db.prepare('UPDATE users SET name=? WHERE id=?').run(name, u.id);
+    if (pin) { db.prepare('UPDATE users SET pin=? WHERE id=?').run(hashPin(String(pin)), u.id); db.prepare('DELETE FROM sessions WHERE user_id=?').run(u.id); }
+  } else if (pin) db.prepare('INSERT INTO users (name,pin,role,employee_id) VALUES (?,?,?,?)').run(name, hashPin(String(pin)), 'rider', employeeId);
+}
 app.get('/api/riders', (req, res) => res.json(riderRows(req.query.all ? '1' : 'e.active=1', req.user.role === 'admin')));
 // Where every rider is (from their phones, through the cloud), for the map
 app.get('/api/riders/positions', (req, res) => {
@@ -1130,13 +1155,16 @@ app.post('/api/riders', userErrors((req, res) => {
   if (!String(name || '').trim()) throw new UserError('Name is required');
   const fee = Math.max(0, Math.round(+delivery_fee || 0)), on = active === false || active === 0 || active === '0' ? 0 : 1;
   let rid = id;
-  if (id) {
-    if (!db.prepare("SELECT 1 FROM employees WHERE id=? AND lower(job) LIKE '%rider%'").get(id)) throw new UserError('Rider not found');
-    db.prepare('UPDATE employees SET name=?, phone=?, delivery_fee=?, active=?, rider_token=COALESCE(rider_token, ?) WHERE id=?').run(name.trim(), String(phone || '').trim(), fee, on, newToken(), id);
-  } else {
-    rid = db.prepare('INSERT INTO employees (name,phone,job,salary,active,joined,delivery_fee,rider_token) VALUES (?,?,?,?,?,?,?,?)')
-      .run(name.trim(), String(phone || '').trim(), 'Rider', 0, 1, today(), fee, newToken()).lastInsertRowid;
-  }
+  tx(() => {
+    if (id) {
+      if (!db.prepare("SELECT 1 FROM employees WHERE id=? AND lower(job) LIKE '%rider%'").get(id)) throw new UserError('Rider not found');
+      db.prepare('UPDATE employees SET name=?, phone=?, delivery_fee=?, active=?, rider_token=COALESCE(rider_token, ?) WHERE id=?').run(name.trim(), String(phone || '').trim(), fee, on, newToken(), id);
+    } else {
+      rid = db.prepare('INSERT INTO employees (name,phone,job,salary,active,joined,delivery_fee,rider_token) VALUES (?,?,?,?,?,?,?,?)')
+        .run(name.trim(), String(phone || '').trim(), 'Rider', 0, 1, today(), fee, newToken()).lastInsertRowid;
+    }
+    setRiderLogin(+rid, name.trim(), req.body.pin, on);
+  });
   riderSync.poke();
   res.json(riderRows('e.id=' + (+rid), true)[0]);
 }));
@@ -1158,6 +1186,50 @@ app.post('/api/riders/:id/send-link', userErrors(async (req, res) => {
   await waModule.wa.send(jid, `Salam ${r.name}! ${getSettings().name} ka rider screen: ${r.link}\n\nIsay phone par kholein aur browser ke menu se "Add to Home screen" karein. Delivery ke waqt yeh screen khuli rakhein.`, 'Rider link', 'system');
   res.json({ ok: true });
 }));
+// ---------- The rider's own screen (role rider, client/src/RiderHome.jsx) ----------
+// Same actions as the rider page on the cloud (rider-sync.js), for a rider logged in to the POS itself.
+const riderMe = req => {
+  const e = req.user.employee_id && db.prepare("SELECT * FROM employees WHERE id=? AND active=1 AND lower(job) LIKE '%rider%'").get(req.user.employee_id);
+  if (!e) throw new UserError('This login is not linked to a rider. Ask the owner (Riders section)');
+  return e;
+};
+const riderOrder = (o, mine) => ({ id: o.id, status: o.delivery_status || (['ready', 'done'].includes(o.kitchen_status) ? 'ready' : 'cooking'), customer: o.customer, address: o.address,
+  zone: o.zone, total: o.total, cod: o.status !== 'paid', items: o.items.map(i => `${i.qty}× ${i.name}`).join(', '), created_at: o.created_at, dispatched_at: o.dispatched_at,
+  delivered_at: o.delivered_at, phone: mine ? o.phone : undefined, track_url: mine ? o.track_url : undefined });
+app.get('/api/rider/board', userErrors((req, res) => {
+  const e = riderMe(req), month = today().slice(0, 7);
+  const orders = db.prepare(`SELECT id FROM orders WHERE type='delivery' AND status NOT IN ('cancelled','merged')
+    AND (status='open' OR delivery_status='out' OR date(COALESCE(delivered_at, paid_at, created_at),'localtime') = date('now','localtime')) ORDER BY id`).all().map(r => getOrder(r.id));
+  const mine = orders.filter(o => o.rider_id === e.id && o.delivery_status === 'out').map(o => riderOrder(o, true));
+  const ready = orders.filter(o => !o.delivery_status && o.status !== 'cancelled').map(o => riderOrder(o, false));
+  const doneToday = orders.filter(o => o.rider_id === e.id && o.delivery_status === 'delivered');
+  const M = "rider_id=? AND delivery_status='delivered' AND strftime('%Y-%m', delivered_at, 'localtime')=?";
+  const m = db.prepare(`SELECT COUNT(*) deliveries, COALESCE(SUM(rider_fee),0) earned FROM orders WHERE ${M}`).get(e.id, month);
+  const paid = db.prepare("SELECT COALESCE(SUM(amount),0) s FROM payroll WHERE employee_id=? AND month=? AND type='delivery'").get(e.id, month).s;
+  const pos = riderSync.positions()[e.id] || {};
+  res.json({
+    me: { id: e.id, name: e.name, fee: e.delivery_fee || 0, on_duty: !!pos.on_duty, at: pos.at || null },
+    mine, ready, others_out: orders.filter(o => o.delivery_status === 'out' && o.rider_id !== e.id).length,
+    today: { delivered: doneToday.length, earned: doneToday.reduce((s, o) => s + (o.rider_fee || 0), 0) },
+    cash_with_me: db.prepare("SELECT COALESCE(SUM(total),0) s FROM orders WHERE rider_id=? AND status='open' AND delivery_status='delivered'").get(e.id).s,
+    month: { ...m, paid, owed: m.earned - paid },
+    phone_link: riderLink(e), // their own cloud page: shares location when this screen is opened over plain http (no GPS there)
+  });
+}));
+app.post('/api/rider/accept', userErrors((req, res) => res.json(riderOrder(dispatchOrder(+req.body.order, riderMe(req).id, { byRider: true }), true))));
+app.post('/api/rider/delivered', userErrors((req, res) => res.json(riderOrder(deliverOrder(+req.body.order, { riderId: riderMe(req).id }), true))));
+app.post('/api/rider/location', userErrors((req, res) => {
+  const lat = +req.body.lat, lng = +req.body.lng;
+  if (!(Math.abs(lat) <= 90 && Math.abs(lng) <= 180)) throw new UserError('Bad position');
+  riderSync.setLocal(riderMe(req).id, { lat, lng, acc: Math.min(9999, Math.max(0, +req.body.acc || 0)), on_duty: true });
+  res.json({ ok: true });
+}));
+app.post('/api/rider/duty', userErrors((req, res) => {
+  const e = riderMe(req), cur = riderSync.positions()[e.id] || {};
+  riderSync.setLocal(e.id, { lat: cur.lat ?? null, lng: cur.lng ?? null, acc: cur.acc ?? null, on_duty: !!req.body.on });
+  res.json({ ok: true, on_duty: !!req.body.on });
+}));
+
 // Board: everything not yet delivered, plus today's delivered orders
 app.get('/api/deliveries', (req, res) => {
   res.json(db.prepare(`SELECT id FROM orders WHERE type='delivery' AND status != 'cancelled' AND status != 'merged'

@@ -26,7 +26,7 @@ export default function Riders({ notify }) {
 }
 
 const ago = iso => { const s = Math.round((Date.now() - Date.parse(iso)) / 1000); return s < 60 ? `${s} s ago` : s < 3600 ? `${Math.round(s / 60)} min ago` : `${Math.round(s / 3600)} h ago` }
-const EMPTY = { name: '', phone: '', delivery_fee: '', active: 1 }
+const EMPTY = { name: '', phone: '', delivery_fee: '', pin: '', active: 1 }
 
 function RiderList({ notify }) {
   const [riders, setRiders] = useState([])
@@ -35,7 +35,7 @@ function RiderList({ notify }) {
   const load = () => api('/riders?all=1').then(setRiders)
   useEffect(() => { run(load)(); const t = setInterval(() => run(load)(), 15000); return () => clearInterval(t) }, [])
   const save = run(async () => {
-    const r = await api('/riders', { ...edit, delivery_fee: +edit.delivery_fee || 0, active: edit.active ? 1 : 0 })
+    const r = await api('/riders', { ...edit, delivery_fee: +edit.delivery_fee || 0, active: edit.active ? 1 : 0, pin: String(edit.pin || '').trim() || undefined })
     setEdit(null); notify(edit.id ? 'Rider saved' : `${r.name} added. Give them their phone link.`); load()
   })
   const showLink = run(async r => setLink({ rider: r, qr: r.link ? await QRCode.toDataURL(r.link, { width: 260, margin: 1 }) : null }))
@@ -51,26 +51,28 @@ function RiderList({ notify }) {
     : r.at ? <span className="muted">Off duty, last seen {ago(r.at)}</span> : <span className="muted">Off duty</span>
   return (
     <div className="pad">
-      <div className="row-head sub"><span className="muted">Each rider gets a link for their phone: they accept orders, mark them delivered and share their location while on duty.</span>
+      <div className="row-head sub"><span className="muted">Each rider logs in with their own PIN (or opens their phone link): they accept orders, mark them delivered, share their location while on duty and see their earnings.</span>
         <button className="primary add" onClick={() => setEdit({ ...EMPTY })}>+ Add rider</button></div>
       <table className="tbl riders-tbl">
-        <thead><tr><th>Rider</th><th>Phone</th><th>Fee per delivery</th><th>Now</th><th>Today</th><th>Cash with rider</th><th /></tr></thead>
+        <thead><tr><th>Rider</th><th>Phone</th><th>Fee per delivery</th><th>Login</th><th>Now</th><th>Today</th><th>Cash with rider</th><th /></tr></thead>
         <tbody>
-          {!riders.length && <tr><td colSpan={7} className="muted">No riders yet. Add your first rider.</td></tr>}
+          {!riders.length && <tr><td colSpan={8} className="muted">No riders yet. Add your first rider.</td></tr>}
           {riders.map(r => (
             <tr key={r.id} className={r.active ? '' : 'inactive'}>
               <td><b>{r.name}</b></td><td className="muted">{r.phone || '—'}</td><td>{rs(r.delivery_fee)}</td>
+              <td>{r.has_login ? <span className="ok-t">PIN set</span> : <span className="muted">No PIN</span>}</td>
               <td>{status(r)}</td><td>{r.delivered_today} delivered</td>
               <td>{r.cash_due > 0 ? <b className="warn-t">{rs(r.cash_due)}</b> : <span className="muted">—</span>}</td>
               <td className="actions">
                 <button className="ghost sm" onClick={() => showLink(r)}><Icon name="qr" size={16} />Phone link</button>{' '}
-                <button className="ghost sm" onClick={() => setEdit({ ...r, delivery_fee: r.delivery_fee || '' })}>Edit</button>
+                <button className="ghost sm" onClick={() => setEdit({ ...r, delivery_fee: r.delivery_fee || '', pin: '' })}>Edit</button>
               </td>
             </tr>))}
         </tbody>
       </table>
       {edit && <FormModal title={edit.id ? 'Edit rider' : 'New rider'} value={edit} onChange={setEdit} onSave={save} onClose={() => setEdit(null)}
-        fields={[['name', 'Name'], ['phone', 'WhatsApp number'], ['delivery_fee', 'Fee the rider earns per delivery (Rs)', 'number'], ['active', 'Still working here', 'checkbox']]} />}
+        fields={[['name', 'Name'], ['phone', 'WhatsApp number'], ['delivery_fee', 'Fee the rider earns per delivery (Rs)', 'number'],
+          ['pin', edit.has_login ? 'New 4-digit login PIN (empty = keep the old one)' : '4-digit login PIN: the rider logs in with it as "Rider"'], ['active', 'Still working here', 'checkbox']]} />}
       {link && <div className="modal-bg" onClick={() => setLink(null)}><div className="modal link-modal" onClick={e => e.stopPropagation()}>
         <h2>{link.rider.name}'s phone screen</h2>
         {link.rider.link ? <>
