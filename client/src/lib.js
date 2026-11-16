@@ -7,6 +7,8 @@ export const api = async (url, body) => {
   if (r.status === 401 && url !== '/login') window.dispatchEvent(new Event('pos-logout'))
   // Blocked in the public demo: a popup explaining the real feature. The error has no message, so no red toast as well.
   if (data.code === 'demo') { infoBox(data.error, { title: 'Not in the demo' }); throw Object.assign(new Error(''), { code: 'demo' }) }
+  // Logged in with a starting PIN (1234…): the app shows the "Choose your own PIN" screen (ChoosePin.jsx)
+  if (data.code === 'change_pin') window.dispatchEvent(new Event('pos-change-pin'))
   if (!r.ok) throw Object.assign(new Error(data.error || 'Request failed'), { code: data.code })
   return data
 }

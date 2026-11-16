@@ -14,6 +14,7 @@ import Customers from './Customers'
 import Delivery from './Delivery'
 import Riders from './Riders'
 import RiderHome from './RiderHome'
+import ChoosePin from './ChoosePin'
 import Payroll from './Payroll'
 import WhatsApp from './WhatsApp'
 import { QrOrderAlerts, beep } from './QrOrders'
@@ -116,13 +117,17 @@ export default function App() {
   const logout = () => { api('/logout', {}).catch(() => {}).finally(clearSession) }
   useEffect(() => {
     window.addEventListener('pos-logout', clearSession)
-    return () => window.removeEventListener('pos-logout', clearSession)
+    const mustChange = () => setUser(u => u && !u.must_change_pin ? { ...u, must_change_pin: true } : u) // the server says: choose your own PIN first
+    window.addEventListener('pos-change-pin', mustChange)
+    return () => { window.removeEventListener('pos-logout', clearSession); window.removeEventListener('pos-change-pin', mustChange) }
   }, [])
 
   // Wait for /settings so the demo role picker doesn't flash the PIN box first.
   if (settings.demo === undefined) return <div className="login" />
   if (settings.licence?.state === 'activate') return <Activate settings={settings} onDone={reloadAll} />
   if (!user) return <Login settings={settings} onLogin={login} />
+  if (user.must_change_pin) return <ChoosePin user={user} settings={settings} onLogout={logout}
+    onDone={() => { const u = { ...user, must_change_pin: false }; setUser(u); localStorage.setItem('pos_user', JSON.stringify(u)); toast('Your PIN is saved. Next: give your cashier and kitchen their own PINs in Settings → Staff & PINs.', 'info') }} />
   const nav = NAV[user.role] || NAV.cashier
   const newOrder = (type, table) => { setOrder({ type, table_id: table?.id, tableName: table?.name, items: [], discount: 0, user_name: user.name }); setView('register') }
   const openExisting = async id => {

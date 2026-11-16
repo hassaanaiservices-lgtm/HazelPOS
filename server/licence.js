@@ -159,8 +159,11 @@ module.exports = function licence(db, cloud, { setup = null, health = () => ({})
     let s;
     try { s = await check(); } finally { cloud.hold(false); } // check() also downloads the setup if one is ready (skipped after a restore)
     if (s.state === 'activate') throw new Error(get('lic_error') || 'The cloud did not confirm the membership');
+    // Nothing was restored or set up for this restaurant: clear the demo restaurant instead of leaving it on a real PC
+    let demoCleared = false;
+    if (!restored && setup && !setup.appliedAt() && !setup.hasOrders()) { try { demoCleared = setup.clearDemo(); } catch (e) { set('setup_error', `Could not clear the demo data: ${e.message}`); } }
     cloud.syncNow(); // only now: the first backup is of the restored / set-up restaurant, not the demo
-    return { ...s, restored, setup_applied_at: setup?.appliedAt() || null, setup_error: get('setup_error') || null };
+    return { ...s, restored, demo_cleared: demoCleared, setup_applied_at: setup?.appliedAt() || null, setup_error: get('setup_error') || null };
   }
 
   const locked = () => state().state === 'locked';

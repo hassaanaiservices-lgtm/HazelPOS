@@ -9,12 +9,13 @@ const path = require('path');
 const QRCode = require('qrcode');
 const crypto = require('crypto');
 
-const PORT = 4000;
+const { pickPort } = require('./port');
+let PORT = 4000; // 4000 when free, else the next free port (port.js); chosen at start
 // Your HazelPOS Cloud, built into the installer, so the restaurant only types its activation code (package.json "hazel")
 const CLOUD_URL = require('./package.json').hazel?.cloudUrl || '';
 // The cloud's licence public key (GET <cloud>/api/licence/public-key), built in so signed answers can be checked (S10)
 const LICENCE_PUBKEY = require('./package.json').hazel?.licencePublicKey || '';
-const LOCAL = `http://localhost:${PORT}`;
+let LOCAL = `http://localhost:${PORT}`;
 // Packaged: server/, client/dist and rag/ are copied to resources/app (see package.json "extraResources").
 const ROOT = app.isPackaged ? path.join(process.resourcesPath, 'app') : path.join(__dirname, '..');
 const ICON = app.isPackaged ? path.join(process.resourcesPath, 'icon.png') : path.join(__dirname, '..', 'brand', 'hazelpos-logo', 'hazelpos-logo.png');
@@ -182,12 +183,16 @@ app.whenReady().then(async () => {
   // First run: start with the computer, so the POS is up when the restaurant opens.
   const firstRun = !fs.existsSync(path.join(DATA, 'pos.db'));
   if (firstRun && app.isPackaged) app.setLoginItemSettings({ openAtLogin: true });
+  const chosen = await pickPort(DATA); // D5: another program may already use 4000
+  PORT = chosen.port; LOCAL = `http://localhost:${PORT}`;
   startServer();
   buildTray();
   if (!(await waitForServer())) {
     dialog.showErrorBox('HazelPOS is taking too long to start', `Details are in:\n${path.join(LOG_DIR, 'server.log')}\n\n${tail(path.join(LOG_DIR, 'server.log'))}`);
   }
   showWindow();
+  if (chosen.changed) dialog.showMessageBox({ type: 'info', title: 'HazelPOS address changed', message: `HazelPOS is using port ${PORT} on this PC.`,
+    detail: `Another program already uses port ${chosen.saved || 4000}. Kitchen screens and tablets must now open:\n\n${lanUrls().join('\n') || LOCAL}\n\n(Tray icon → Connect other screens shows a QR code.)` }).catch(() => {});
   setupUpdater();
   checkUpdates();
   setInterval(checkUpdates, 6 * 60 * 60 * 1000);

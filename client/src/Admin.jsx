@@ -3,6 +3,7 @@ import { api, rs, parseModifiers, downloadCsv, dealItems } from './lib'
 import { Icon } from './ui'
 import Integrations from './Integrations'
 import { QrCodesModal } from './QrOrders'
+import BotFaq from './BotFaq'
 import { toastError, confirmBox, promptBox } from './notify'
 
 const TABS = ['Restaurant', 'Staff & PINs', 'Alerts', 'Updates', 'WhatsApp bot', 'Integrations', 'Cloud', 'Activity Log']
@@ -19,7 +20,7 @@ export default function Admin({ onChanged, notify, updateNew, onUpdateSeen }) {
       {tab === 'Staff & PINs' && <LoginPins notify={notify} />}
       {tab === 'Alerts' && <StockAlerts notify={notify} />}
       {tab === 'Updates' && <Updates notify={notify} />}
-      {tab === 'WhatsApp bot' && <BotBehaviour notify={notify} />}
+      {tab === 'WhatsApp bot' && <><BotBehaviour notify={notify} /><BotFaq notify={notify} /></>}
       {tab === 'Integrations' && <Integrations onChanged={onChanged} notify={notify} />}
       {tab === 'Cloud' && <CloudSettings notify={notify} />}
       {tab === 'Activity Log' && <ActivityLog />}

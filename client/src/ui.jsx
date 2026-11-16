@@ -78,6 +78,8 @@ export function FormModal({ title, fields, value, onChange, onSave, onClose, sav
               <select value={value[k] ?? ''} onChange={e => set(k, e.target.value)}>
                 {opts.map(o => Array.isArray(o) ? <option key={o[0]} value={o[0]}>{o[1]}</option> : <option key={o} value={o}>{o}</option>)}
               </select>
+            ) : type === 'textarea' ? (
+              <textarea rows={opts || 5} value={value[k] ?? ''} onChange={e => set(k, e.target.value)} />
             ) : (
               <input type={type || 'text'} value={value[k] ?? ''} onChange={e => set(k, e.target.value)} />
             )}

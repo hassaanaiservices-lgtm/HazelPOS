@@ -28,7 +28,9 @@ function readPos(dbPath, dataConfig) {
       : [];
     let menu_pictures = 0; // photos of the menu card the assistant can send (menu_images, server/index.js)
     try { menu_pictures = db.prepare('SELECT COUNT(*) c FROM menu_images').get().c; } catch { /* older database: none */ }
-    return { menu, categories, delivery_zones, restaurant, promos, menu_pictures, behaviour: String(settings.bot_behaviour || '').slice(0, 2000) };
+    let faq = []; // the owner's questions and answers (Settings → WhatsApp bot); empty answers are not sent to the assistant
+    try { faq = db.prepare("SELECT id, question, answer FROM faq WHERE TRIM(COALESCE(answer, '')) != '' ORDER BY sort, id").all().map(f => ({ ...f })); } catch { /* older database: none */ }
+    return { menu, categories, delivery_zones, restaurant, promos, menu_pictures, faq, behaviour: String(settings.bot_behaviour || '').slice(0, 2000) };
   } finally { db.close(); }
 }
 

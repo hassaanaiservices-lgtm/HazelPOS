@@ -13,10 +13,9 @@
   "scripts": {
     "start": "electron .",
     "prepare-app": "npm --prefix ../client ci && npm --prefix ../client run build && npm --prefix ../server ci --omit=dev",
-    "dist": "npm run prepare-app && electron-builder",
-    "dist:win": "npm run prepare-app && electron-builder --win",
-    "dist:mac": "npm run prepare-app && electron-builder --mac",
-    "dist:linux": "npm run prepare-app && electron-builder --linux"
+    "verify": "node verify-build.js",
+    "dist": "node check-build-os.js && npm run prepare-app && node verify-build.js pre && electron-builder --win --publish never && node verify-build.js post",
+    "dist:win": "node check-build-os.js && npm run prepare-app && node verify-build.js pre && electron-builder --win --publish never && node verify-build.js post"
   },
   "dependencies": {
     "electron-updater": "^6.6.2",
@@ -34,6 +33,7 @@
     },
     "files": [
       "main.js",
+      "port.js",
       "package.json"
     ],
     "extraResources": [
@@ -45,14 +45,24 @@
           "!pos.db*",
           "!*.db*",
           "!whatsapp/auth/**",
-          "!whatsapp/media/**"
+          "!whatsapp/media/**",
+          "!node_modules/**"
         ]
       },
       {
         "from": "../server/node_modules",
         "to": "app/server/node_modules",
         "filter": [
-          "**/*"
+          "**/*",
+          "!**/*.map",
+          "!**/*.d.ts",
+          "!**/@types/**",
+          "!**/{README,CHANGELOG,HISTORY}.md",
+          "!@img/sharp-wasm32/**",
+          "!@img/sharp-linux*/**",
+          "!@img/sharp-darwin*/**",
+          "!@img/sharp-libvips-linux*/**",
+          "!@img/sharp-libvips-darwin*/**"
         ]
       },
       {
@@ -66,7 +76,11 @@
           "**/*",
           "!eval/**",
           "!data/index/**",
-          "!scripts/**"
+          "!scripts/**",
+          "!**/*.map",
+          "!**/*.d.ts",
+          "!**/@types/**",
+          "!**/{README,CHANGELOG,HISTORY}.md"
         ]
       },
       {
@@ -83,22 +97,22 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": "always",
       "createStartMenuShortcut": true,
-      "shortcutName": "HazelPOS"
-    },
-    "mac": {
-      "target": "dmg",
-      "category": "public.app-category.business"
-    },
-    "linux": {
-      "target": "AppImage",
-      "category": "Office"
+      "shortcutName": "HazelPOS",
+      "artifactName": "HazelPOS-Setup-${version}.${ext}",
+      "deleteAppDataOnUninstall": false,
+      "differentialPackage": true
     },
     "publish": [
       {
         "provider": "github",
         "owner": "hassaanaiservices-lgtm",
-        "repo": "HazelPOS"
+        "repo": "HazelPOS-releases",
+        "releaseType": "release"
       }
+    ],
+    "compression": "maximum",
+    "electronLanguages": [
+      "en-US"
     ]
   }
 }

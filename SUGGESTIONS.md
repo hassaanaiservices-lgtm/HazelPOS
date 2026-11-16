@@ -112,3 +112,8 @@ the phone's WhatsApp app at the same time), Meta checks the business (verificati
 
 ## Kitchen workflow, 16 Nov 2026
 - **K1. One screen, one job, one button.** DONE 16 Nov (dine-in keeps a Served button at the counter, since dine-in bills are paid after the meal): the kitchen never chooses where an order goes; the order type (picked at billing) decides. Kitchen screen = two columns, New → Cooking, buttons "Start cooking" and "Ready". On Ready the ticket leaves the kitchen: dine-in and takeaway pop up on the counter's Food-ready strip and clear by themselves when the bill is paid; delivery goes to the riders' phones. A read-only "Ready, waiting" list stays on the kitchen screen's side. Mistakes in order type are fixed by the cashier on Orders, not by the kitchen.
+
+## After the desktop-risk fixes, 16 Nov 2026
+- **F1. FAQ answers prepared in the admin app.** A new restaurant's bot answers (hours, delivery, halal…) are written by the owner in Settings → WhatsApp bot. For restaurants you set up remotely, a "Questions and answers" box in the admin app (Branch → Details), sent with the rest of the setup, would let you have it ready on day one.
+- **F2. Auto-check at the first login.** After the owner chooses a PIN, a short checklist ("Add your menu", "Add tables", "Connect WhatsApp", "Give the cashier a PIN") on the Dashboard until each is done.
+- **F3. Windows signing later.** Certificates for Windows apps are sold as normal ones (a few hundred dollars a year) or as a cloud signing service billed monthly; check what is available in Pakistan when you reach about 10 clients (RISKS D3).

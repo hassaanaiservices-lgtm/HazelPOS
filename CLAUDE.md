@@ -32,6 +32,7 @@ See [rag/README.md](rag/README.md) for the other rag scripts (export-pos, valida
 - `POS_DB=<path>`: use a different SQLite file. Use this for experiments instead of touching `server/pos.db`.
 - `DEMO=1`: role picker with no PINs. Printer, fiscal, cloud and secret writes are blocked.
 - `WHATSAPP=off`: never connect to WhatsApp. Set this on any second server, because two servers on one login push each other off.
+- `FORCE_PIN_CHANGE=1`: behave like an installed app on first login (starting PINs 1234/1111/2222/3333 must be replaced; the installed app sets `HAZEL_LICENCE=1`, which does the same).
 - `PORT`.
 - `DEEPSEEK_API_KEY` and `GROQ_API_KEY` live in the root `.env` (see `.env.example`).
 

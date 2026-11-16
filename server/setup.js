@@ -65,6 +65,22 @@ module.exports = function setupApplier(db, { hashPin }) {
     return done;
   }
 
+  // Activated with NO setup prepared: the demo restaurant must not stay on a real restaurant's PC (its menu, tables, sample
+  // expenses, bank details, the name "Pizza Venu"). Only while there are no orders. The logins stay (their starting PINs
+  // are replaced at the first login, see FORCE_PIN in index.js).
+  function clearDemo() {
+    if (hasOrders()) return false;
+    db.exec('BEGIN');
+    try {
+      for (const t of ['recipes', 'products', 'categories', 'tables_', 'floors', 'delivery_zones', 'expenses', 'cash_moves', 'register_sessions', 'menu_images', 'customers', 'promos', 'faq'])
+        db.exec(`DELETE FROM ${t}`);
+      const setSetting = db.prepare('INSERT INTO settings (key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value');
+      for (const [k, v] of [['name', 'My Restaurant'], ['logo', '🍽️'], ['logo_image', ''], ['address', ''], ['phone', ''], ['ntn', ''], ['strn', ''], ['bank_name', ''], ['bank_account', ''], ['bank_title', ''], ['demo_cleared_at', new Date().toISOString()]])
+        setSetting.run(k, v);
+      db.exec('COMMIT');
+    } catch (e) { db.exec('ROLLBACK'); throw e; }
+    return true;
+  }
   const appliedAt = () => db.prepare("SELECT value FROM settings WHERE key='setup_applied_at'").get()?.value || '';
-  return { apply, appliedAt, hasOrders };
+  return { apply, appliedAt, hasOrders, clearDemo };
 };

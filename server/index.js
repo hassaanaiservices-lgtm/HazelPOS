@@ -29,6 +29,8 @@ CREATE TABLE IF NOT EXISTS orders (
   kitchen_status TEXT, kitchen_at TEXT, user_name TEXT);
 CREATE TABLE IF NOT EXISTS order_items (id INTEGER PRIMARY KEY, order_id INTEGER, product_id INTEGER, name TEXT, price REAL, qty INTEGER, note TEXT, sent INTEGER DEFAULT 0);
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT);
+-- What the WhatsApp assistant may answer about the restaurant (Settings → WhatsApp bot → Questions and answers)
+CREATE TABLE IF NOT EXISTS faq (id INTEGER PRIMARY KEY, question TEXT NOT NULL, answer TEXT DEFAULT '', sort INTEGER DEFAULT 0);
 CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, name TEXT, pin TEXT UNIQUE, role TEXT);
 
 CREATE TABLE IF NOT EXISTS expenses (
@@ -102,6 +104,7 @@ for (const sql of [
   // the customer's tracking link secret, and whether the rider took it on their phone
   'ALTER TABLE employees ADD COLUMN delivery_fee REAL DEFAULT 0',
   'ALTER TABLE users ADD COLUMN employee_id INTEGER', // a rider's login (role rider) points at their staff record
+  'ALTER TABLE users ADD COLUMN must_change_pin INTEGER DEFAULT 0', // logged in with a starting PIN (1234…): must choose their own first
   'ALTER TABLE employees ADD COLUMN rider_token TEXT',
   'ALTER TABLE orders ADD COLUMN rider_fee REAL DEFAULT 0',
   'ALTER TABLE orders ADD COLUMN track_token TEXT',
@@ -388,6 +391,13 @@ const crypto = require('crypto');
 const normPin = pin => String(pin ?? '').trim().toLowerCase();
 const PIN_OK = pin => /^[a-z0-9]{4,12}$/.test(normPin(pin));
 const PIN_RULE = 'PIN must be 4 to 12 letters or numbers';
+// The starting PINs of a new install. On a real install (the desktop app) nobody keeps them: the owner must choose their
+// own PIN at the first login, and no PIN set later may be one of these. Off in the demo and in the dev server.
+const DEFAULT_PINS = ['1234', '1111', '2222', '3333'];
+const WEAK_PINS = [...DEFAULT_PINS, '0000', '4321'];
+const FORCE_PIN = !DEMO && (process.env.HAZEL_LICENCE === '1' || process.env.FORCE_PIN_CHANGE === '1');
+const PIN_WEAK = pin => FORCE_PIN && WEAK_PINS.includes(normPin(pin));
+const PIN_WEAK_MSG = 'That PIN is too easy to guess. Choose another (letters and numbers, for example your name and a number).';
 const hashPin = pin => {
   const salt = crypto.randomBytes(16).toString('hex');
   return `s1$${salt}$${crypto.scryptSync(normPin(pin), salt, 32, { N: 4096 }).toString('hex')}`;
@@ -397,7 +407,7 @@ const pinMatches = (pin, stored) => {
   if (v !== 's1' || !hash) return false;
   return crypto.timingSafeEqual(crypto.scryptSync(normPin(pin), salt, 32, { N: 4096 }), Buffer.from(hash, 'hex'));
 };
-const userByPin = pin => db.prepare('SELECT id,name,role,pin FROM users').all().find(u => pinMatches(pin, u.pin));
+const userByPin = pin => db.prepare('SELECT id,name,role,pin,must_change_pin FROM users').all().find(u => pinMatches(pin, u.pin));
 for (const u of db.prepare("SELECT id,pin FROM users WHERE pin NOT LIKE 's1$%'").all())
   db.prepare('UPDATE users SET pin=? WHERE id=?').run(hashPin(u.pin), u.id);
 
@@ -469,6 +479,7 @@ const ACCESS = [
   [/^GET \/menu-images(\/\d+\/image)?$/, null], // menu card pictures: public like the menu itself (QR page)
   [/^POST \/licence\/(activate|check)$/, null], // activate: only until activated, then admin (checked in the route)
   [/^POST \/logout$/, ROLES],
+  [/^POST \/me\/pin$/, ROLES], // choosing one's own PIN (first login with a starting PIN)
   [/^(GET|POST) \/rider(\/|$)/, RIDER], // the rider's own screen (client/src/RiderHome.jsx)
   [/^GET \/(menu|tables|summary|kitchen)$/, ALL],
   [/^POST \/kitchen\/\d+$/, ALL],
@@ -494,7 +505,7 @@ app.use('/api', (req, res, next) => {
   const token = (req.get('authorization') || '').replace(/^Bearer /, '');
   const s = token && db.prepare('SELECT * FROM sessions WHERE token=?').get(token);
   if (s && Date.now() - Date.parse(s.last_seen) < SESSION_IDLE_MS) {
-    req.user = db.prepare('SELECT id,name,role,employee_id FROM users WHERE id=?').get(s.user_id);
+    req.user = db.prepare('SELECT id,name,role,employee_id,must_change_pin FROM users WHERE id=?').get(s.user_id);
     if (req.user) { req.token = token; db.prepare('UPDATE sessions SET last_seen=? WHERE token=?').run(now(), token); }
   } else if (s) db.prepare('DELETE FROM sessions WHERE token=?').run(token);
 
@@ -502,6 +513,9 @@ app.use('/api', (req, res, next) => {
   const roles = rule ? rule[1] : ADMIN;
   if (roles && !req.user) return res.status(401).json({ error: 'Please log in again' });
   if (roles && !roles.includes(req.user.role)) return res.status(403).json({ error: 'Not allowed for your role' });
+  // Logged in with a starting PIN: nothing works until they choose their own
+  if (FORCE_PIN && req.user?.must_change_pin && !/^(POST \/me\/pin|POST \/logout|GET \/settings)$/.test(`${req.method} ${req.path}`))
+    return res.status(403).json({ error: 'Choose your own PIN first', code: 'change_pin' });
 
   // Record every change made by staff
   if (req.method !== 'GET' && req.user) res.on('finish', () => {
@@ -525,6 +539,8 @@ const loginFails = new Map();
 app.post('/api/login', (req, res) => {
   const f = loginFails.get(req.ip) || { n: 0, until: 0 };
   if (f.until > Date.now()) return res.status(429).json({ error: `Too many wrong PINs. Try again in ${Math.ceil((f.until - Date.now()) / 60000)} min` });
+  // A new install that is not activated yet has the starting PINs: nobody can log in until it is activated (the screen shows Activate)
+  if (lic.state().state === 'activate') return res.status(403).json({ error: 'Activate HazelPOS first' });
   const u = userByPin(String(req.body.pin || ''));
   if (!u) {
     f.n++; if (f.n >= 5) { f.n = 0; f.until = Date.now() + 5 * 60 * 1000; }
@@ -532,11 +548,20 @@ app.post('/api/login', (req, res) => {
     audit(req, 'LOGIN FAILED', 401);
     return res.status(401).json({ error: 'Wrong PIN' });
   }
+  // A starting PIN (1234, 1111…) on a real install: only the owner may use it, and only to choose their own PIN.
+  // The others (cashier, kitchen, rider) wait until the owner gives them a PIN, so nobody can grab their login first.
+  if (FORCE_PIN && DEFAULT_PINS.includes(normPin(req.body.pin))) {
+    if (u.role !== 'admin') {
+      audit(req, 'LOGIN REFUSED (starting PIN)', 403);
+      return res.status(403).json({ error: 'This is a starting PIN. Ask the owner to give you a new PIN (Settings → Staff & PINs).' });
+    }
+    db.prepare('UPDATE users SET must_change_pin=1 WHERE id=?').run(u.id); u.must_change_pin = 1;
+  }
   loginFails.delete(req.ip);
   const token = crypto.randomBytes(32).toString('hex');
   db.prepare('INSERT INTO sessions (token,user_id,created_at,last_seen) VALUES (?,?,?,?)').run(token, u.id, now(), now());
   req.user = u; audit(req, 'LOGIN', 200);
-  res.json({ token, user: { id: u.id, name: u.name, role: u.role } });
+  res.json({ token, user: { id: u.id, name: u.name, role: u.role, must_change_pin: !!(FORCE_PIN && u.must_change_pin) } });
 });
 app.post('/api/logout', (req, res) => {
   db.prepare('DELETE FROM sessions WHERE token=?').run(req.token);
@@ -653,6 +678,7 @@ app.post('/api/users', (req, res) => {
   if (!id) return res.status(400).json({ error: 'There are three fixed logins (admin, cashier, kitchen); change their PINs instead' });
   if (pin) {
     if (!PIN_OK(pin)) return res.status(400).json({ error: PIN_RULE });
+    if (PIN_WEAK(pin)) return res.status(400).json({ error: PIN_WEAK_MSG });
     const taken = userByPin(pin);
     if (taken && taken.id !== +id) return res.status(400).json({ error: 'That PIN is already used' });
   }
@@ -662,7 +688,7 @@ app.post('/api/users', (req, res) => {
     if (cur.role === 'admin' && role !== 'admin' && adminCount() === 1) return res.status(400).json({ error: 'Keep at least one admin' });
     db.prepare('UPDATE users SET name=?, role=? WHERE id=?').run(name.trim(), role, id);
     if (pin) {
-      db.prepare('UPDATE users SET pin=? WHERE id=?').run(hashPin(pin), id);
+      db.prepare('UPDATE users SET pin=?, must_change_pin=0 WHERE id=?').run(hashPin(pin), id);
       if (+id !== req.user.id) db.prepare('DELETE FROM sessions WHERE user_id=?').run(id); // new PIN: that person is signed out everywhere
     }
     db.prepare('DELETE FROM sessions WHERE user_id=? AND token != ?').run(id, req.token); // PIN/role change logs them out elsewhere
@@ -670,7 +696,46 @@ app.post('/api/users', (req, res) => {
   const uid = id || db.prepare('INSERT INTO users (name,pin,role) VALUES (?,?,?)').run(name.trim(), hashPin(pin), role).lastInsertRowid;
   res.json(db.prepare('SELECT id,name,role FROM users WHERE id=?').get(uid));
 });
+// First login with a starting PIN: the person chooses their own
+app.post('/api/me/pin', (req, res) => {
+  const pin = String(req.body.pin ?? '');
+  if (!PIN_OK(pin)) return res.status(400).json({ error: PIN_RULE });
+  if (PIN_WEAK(pin)) return res.status(400).json({ error: PIN_WEAK_MSG });
+  const taken = userByPin(pin);
+  if (taken && taken.id !== req.user.id) return res.status(400).json({ error: 'That PIN is already used by someone else. Choose another.' });
+  db.prepare('UPDATE users SET pin=?, must_change_pin=0 WHERE id=?').run(hashPin(pin), req.user.id);
+  db.prepare('DELETE FROM sessions WHERE user_id=? AND token != ?').run(req.user.id, req.token); // other devices signed in with the old PIN are out
+  res.json({ ok: true });
+});
 app.post('/api/users/:id/delete', (req, res) => res.status(400).json({ error: 'The admin, cashier and kitchen logins cannot be deleted' }));
+
+// ---------- What the WhatsApp assistant may answer (Settings → WhatsApp bot) ----------
+// Owner-written answers (opening hours, delivery, halal, parking…). Read live by the assistant: rag/src/loaders/pos-db.js.
+// Every answer goes into every WhatsApp prompt, so the total is capped (cost and speed).
+const FAQ_STARTER = ['Opening hours / Timings', 'Do you deliver? Delivery time', 'Payment methods', 'Is the food halal?', 'Dine-in, takeaway, parking',
+  'Do you take bulk / party orders?', 'How do I complain or give feedback?'];
+const FAQ_MAX_ITEMS = 60, FAQ_MAX_CHARS = 8000;
+const faqChars = (exceptId = 0) => db.prepare('SELECT COALESCE(SUM(LENGTH(question) + LENGTH(answer)), 0) c FROM faq WHERE id != ?').get(exceptId).c;
+app.get('/api/faq', (req, res) => res.json({ items: db.prepare('SELECT id, question, answer, sort FROM faq ORDER BY sort, id').all(), max_chars: FAQ_MAX_CHARS, used_chars: faqChars() }));
+app.post('/api/faq', (req, res) => { // a UserError thrown here becomes a 400 (error handler at the end of this file)
+  const question = String(req.body.question ?? '').trim().slice(0, 200), answer = String(req.body.answer ?? '').trim().slice(0, 1000);
+  if (!question) throw new UserError('Write the question');
+  const id = +req.body.id || 0;
+  if (id && !db.prepare('SELECT 1 FROM faq WHERE id=?').get(id)) throw new UserError('That question no longer exists');
+  if (!id && db.prepare('SELECT COUNT(*) c FROM faq').get().c >= FAQ_MAX_ITEMS) throw new UserError(`Up to ${FAQ_MAX_ITEMS} questions`);
+  if (faqChars(id) + question.length + answer.length > FAQ_MAX_CHARS) throw new UserError(`Too much text: the assistant reads all answers with every message, so they must stay under ${FAQ_MAX_CHARS} characters in total. Shorten some answers.`);
+  if (id) db.prepare('UPDATE faq SET question=?, answer=? WHERE id=?').run(question, answer, id);
+  else db.prepare('INSERT INTO faq (question, answer, sort) VALUES (?,?,COALESCE((SELECT MAX(sort) FROM faq), 0) + 1)').run(question, answer);
+  res.json({ ok: true });
+});
+app.post('/api/faq/:id/delete', (req, res) => { db.prepare('DELETE FROM faq WHERE id=?').run(req.params.id); res.json({ ok: true }); });
+// The usual questions with empty answers, to fill in (questions already there are not added twice)
+app.post('/api/faq/starter', (req, res) => {
+  const have = new Set(db.prepare('SELECT LOWER(question) q FROM faq').all().map(r => r.q));
+  let n = 0;
+  for (const q of FAQ_STARTER) if (!have.has(q.toLowerCase())) { db.prepare('INSERT INTO faq (question, answer, sort) VALUES (?,?,COALESCE((SELECT MAX(sort) FROM faq), 0) + 1)').run(q, ''); n++; }
+  res.json({ ok: true, added: n });
+});
 
 app.get('/api/audit', (req, res) => {
   res.json(db.prepare('SELECT * FROM audit_log ORDER BY id DESC LIMIT ?').all(Math.min(1000, +req.query.limit || 300)));
@@ -1145,12 +1210,13 @@ function setRiderLogin(employeeId, name, pin, active) {
   if (!active) { if (u) { db.prepare('DELETE FROM sessions WHERE user_id=?').run(u.id); db.prepare('DELETE FROM users WHERE id=?').run(u.id); } return; }
   if (pin) {
     if (!PIN_OK(pin)) throw new UserError(PIN_RULE);
+    if (PIN_WEAK(pin)) throw new UserError(PIN_WEAK_MSG);
     const taken = userByPin(String(pin));
     if (taken && taken.id !== u?.id) throw new UserError('That PIN is already used by someone else');
   }
   if (u) {
     db.prepare('UPDATE users SET name=? WHERE id=?').run(name, u.id);
-    if (pin) { db.prepare('UPDATE users SET pin=? WHERE id=?').run(hashPin(String(pin)), u.id); db.prepare('DELETE FROM sessions WHERE user_id=?').run(u.id); }
+    if (pin) { db.prepare('UPDATE users SET pin=?, must_change_pin=0 WHERE id=?').run(hashPin(String(pin)), u.id); db.prepare('DELETE FROM sessions WHERE user_id=?').run(u.id); }
   } else if (pin) db.prepare('INSERT INTO users (name,pin,role,employee_id) VALUES (?,?,?,?)').run(name, hashPin(String(pin)), 'rider', employeeId);
 }
 app.get('/api/riders', (req, res) => res.json(riderRows(req.query.all ? '1' : 'e.active=1', req.user.role === 'admin')));

@@ -11,8 +11,10 @@ const { menuSections } = require('./menu-section');
 const { restaurantSection, faqSection, deliverySection, promoSection, menuPicturesSection } = require('./info-sections');
 
 // pos = { menu, categories, delivery_zones, restaurant, promos } (shape of readPos); faqDocs from the FAQ loader
-function buildKnowledge(pos, faqDocs, cfg) {
+function buildKnowledge(pos, faqFileDocs, cfg) {
   const cur = cfg.currency;
+  // FAQ: written in Settings (database) first, then any files in rag/data/raw/faq (used by the tests and the eval)
+  const faqDocs = [...(pos.faq || []).map(f => ({ id: `faq:db#${f.id}`, type: 'faq', title: f.question, data: { question: f.question.trim(), answer: f.answer.trim() } })), ...faqFileDocs];
   const lines = [
     ...restaurantSection(pos.restaurant),
     ...faqSection(faqDocs),
