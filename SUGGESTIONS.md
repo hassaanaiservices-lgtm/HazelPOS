@@ -109,3 +109,6 @@ the phone's WhatsApp app at the same time), Meta checks the business (verificati
 - **R-d. Rider in the demo.** The public demo has no cloud, so the rider phone page can't be shown there. Option: the demo server could host a fake rider page with a moving dot, for the sales pitch.
 - **R-e. Rider performance report.** Accounts already shows average minutes and late deliveries per rider per month. A per-day chart (deliveries per hour, average time) would help owners plan rider shifts.
 - **R-f. Rider "I'm back at the shop" / cash hand-in from the phone.** Today the cashier records cash hand-ins on the Delivery board. The rider phone could show "Hand in Rs X" and the cashier confirms with one tap.
+
+## Kitchen workflow, 16 Nov 2026
+- **K1. One screen, one job, one button.** Recommended simplification (asked on 16 Nov): the kitchen never chooses where an order goes; the order type (picked at billing) decides. Kitchen screen = two columns, New → Cooking, buttons "Start cooking" and "Ready". On Ready the ticket leaves the kitchen: dine-in and takeaway pop up on the counter's Food-ready strip and clear by themselves when the bill is paid; delivery goes to the riders' phones. A read-only "Ready, waiting" list stays on the kitchen screen's side. Mistakes in order type are fixed by the cashier on Orders, not by the kitchen.
