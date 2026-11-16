@@ -33,7 +33,7 @@ const STEPS = {
     [null, 'Your rider screen', 'Press "On duty" when you start, so the restaurant and customers can see where you are. Orders appear under "Ready to pick up": press Accept to take one. Navigate and Call help you find the customer; press Delivered twice when you hand it over. Your earnings and the cash you must hand in are at the top. You can see this again from Help.'],
   ],
   kitchen: [
-    [null, 'Kitchen screen', 'New orders appear on the left with a beep. Press "Start cooking", then "Mark ready" when the food is done. For a deal, every item inside is listed. You can see this again from Help.'],
+    [null, 'Kitchen screen', 'New orders appear on the left with a beep. Press "Start cooking", then "Mark ready" when the food is done. Dine-in: the counter is told, and "Served" clears it. Takeaway: "Picked up" clears it. Delivery: it leaves by itself when a rider takes it. For a deal, every item inside is listed. You can see this again from Help.'],
   ],
 }
 const doneKey = role => `pos_tour_done_${role}`

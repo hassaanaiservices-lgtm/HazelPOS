@@ -106,6 +106,7 @@ for (const sql of [
   'ALTER TABLE orders ADD COLUMN rider_fee REAL DEFAULT 0',
   'ALTER TABLE orders ADD COLUMN track_token TEXT',
   'ALTER TABLE orders ADD COLUMN accepted_by_rider INTEGER DEFAULT 0',
+  'ALTER TABLE orders ADD COLUMN ready_at TEXT', // when the kitchen pressed Mark ready (the counter sees how long food has been waiting)
 ]) { try { db.exec(sql); } catch { /* column exists */ } }
 
 // Product details & sizes
@@ -685,7 +686,8 @@ app.get('/api/tables', (req, res) => {
            o.created_at seated_at,
            o.user_name waiter,
            (SELECT COUNT(*) FROM order_items oi WHERE oi.order_id = o.id) item_count,
-           (SELECT COUNT(*) FROM orders x WHERE x.table_id = t.id AND x.status='open' AND x.type='dine-in') open_bills
+           (SELECT COUNT(*) FROM orders x WHERE x.table_id = t.id AND x.status='open' AND x.type='dine-in') open_bills,
+           (SELECT COUNT(*) FROM orders x WHERE x.table_id = t.id AND x.status='open' AND x.type='dine-in' AND x.kitchen_status='ready') food_ready
     FROM tables_ t
     LEFT JOIN floors f ON f.name = t.floor
     LEFT JOIN orders o ON o.id = (SELECT MAX(id) FROM orders x WHERE x.table_id = t.id AND x.status='open' AND x.type='dine-in')
@@ -1011,6 +1013,8 @@ function payOrder(o, method, paidRaw, userName) {
       .run(method, paid, paid - o.total, now(), o.id);
   });
   afterPaid(o.id);
+  // Takeaway paid at the counter after the food was ready = handed over: off the kitchen board
+  if (o.type === 'takeaway') db.prepare("UPDATE orders SET kitchen_status='done' WHERE id=? AND kitchen_status='ready'").run(o.id);
 }
 const afterPaidHooks = [];
 const afterPaid = id => afterPaidHooks.forEach(fn => { try { fn(id); } catch (e) { console.error('after-paid hook:', e.message); } });
@@ -1119,7 +1123,7 @@ crud('delivery-zones', 'delivery_zones', ['name', 'fee', 'min_order', 'free_abov
 // Riders are staff whose job contains "rider" (the Riders section adds them with a per-delivery fee). cash_due = unpaid
 // (COD) orders they have delivered: still on the way does not count. A rider's phone screen lives on the cloud
 // (rider-sync.js); its link holds a secret, so only the admin gets the link.
-const { onTheWayMessage, statusMessage } = require('./whatsapp/messages');
+const { onTheWayMessage, statusMessage, readyPickupMessage } = require('./whatsapp/messages');
 const newToken = () => crypto.randomBytes(16).toString('hex');
 const cloudBase = () => cloud.status().connected ? cloud.status().url.replace(/\/+$/, '') : null;
 const riderLink = e => e.rider_token && cloudBase() ? `${cloudBase()}/r/${e.rider_token}` : null;
@@ -1266,6 +1270,12 @@ function deliverOrder(orderId, { riderId = null } = {}) {
   riderSync.poke();
   return getOrder(o.id);
 }
+// A WhatsApp takeaway customer hears their order is ready to collect
+function notifyReadyForPickup(orderId) {
+  const w = waModule?.store.chatForOrder(orderId);
+  if (!w || !waModule.wa.isConnected()) return;
+  waModule.wa.send(w.chat_id, readyPickupMessage({ id: orderId }, w.lang, getSettings().name), 'Order update', 'system').catch(e => console.error('Ready message:', e.message));
+}
 // A WhatsApp customer hears that their order left, with the live-tracking link when the cloud is connected
 function notifyOnTheWay(orderId, riderName) {
   const w = waModule?.store.chatForOrder(orderId);
@@ -1358,10 +1368,20 @@ app.get('/api/kitchen', (req, res) => {
     AND o.status NOT IN ('cancelled', 'merged') ORDER BY o.kitchen_at`).all();
   res.json(rows.map(r => getOrder(r.id)));
 });
+// After Ready, each order type goes its own way:
+//   dine-in  -> the counter is told "Table 5: food ready"; whoever serves presses Served (done)
+//   takeaway -> the counter is told; a WhatsApp customer gets "ready to pick up"; Picked up or paying clears it
+//   delivery -> riders are told (rider-sync); it leaves the kitchen when a rider takes it (dispatchOrder)
 app.post('/api/kitchen/:id', (req, res) => {
   const s = req.body.status;
   if (!['new', 'preparing', 'ready', 'done'].includes(s)) return res.status(400).json({ error: 'bad status' });
-  db.prepare('UPDATE orders SET kitchen_status=? WHERE id=?').run(s, req.params.id);
+  const before = db.prepare('SELECT id, type, kitchen_status FROM orders WHERE id=?').get(req.params.id);
+  if (!before) return res.status(404).json({ error: 'Order not found' });
+  db.prepare("UPDATE orders SET kitchen_status=?, ready_at=CASE WHEN ?='ready' THEN ? ELSE ready_at END WHERE id=?").run(s, s, now(), before.id);
+  if (s === 'ready' && before.kitchen_status !== 'ready') {
+    if (before.type === 'delivery') riderSync.poke(); // riders' phones beep within seconds
+    if (before.type === 'takeaway') notifyReadyForPickup(before.id);
+  }
   res.json({ ok: true });
 });
 

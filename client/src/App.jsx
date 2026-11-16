@@ -17,6 +17,7 @@ import RiderHome from './RiderHome'
 import Payroll from './Payroll'
 import WhatsApp from './WhatsApp'
 import { QrOrderAlerts, beep } from './QrOrders'
+import ReadyAlerts from './ReadyAlerts'
 import QRCode from 'qrcode'
 import { Icon, Logo } from './ui'
 import { toast, toastError, confirmBox, promptBox } from './notify'
@@ -207,6 +208,7 @@ export default function App() {
       </main>
       {tour && <Tour role={user.role} onClose={() => setTour(false)} />}
       {user.role === 'cashier' && <QrOrderAlerts user={user} notify={notify} onAccepted={refresh} />}
+      {user.role === 'cashier' && view !== 'kitchen' && <ReadyAlerts notify={notify} />}
     </div>
     </Ctx.Provider>
   )

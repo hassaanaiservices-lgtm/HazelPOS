@@ -937,3 +937,19 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px
 .pin-field input::placeholder { letter-spacing: normal; }
 .pin-field button { min-height: 52px; min-width: 64px; }
 .login-form .primary { min-height: 52px; }
+
+/* ---------- Kitchen: after Ready, per order type; the counter's Food ready strip ---------- */
+.ticket.type-dine-in { border-left: 4px solid var(--info); }
+.ticket.type-takeaway { border-left: 4px solid var(--warn); }
+.ticket.type-delivery { border-left: 4px solid var(--accent); }
+.k-next { font-size: var(--fs-sm); color: var(--ok); font-weight: 600; }
+.food-ready-tag { display: inline-flex; align-items: center; gap: 4px; font-size: var(--fs-xs); font-weight: 700; color: var(--accent-ink); background: var(--ok); border-radius: var(--r-pill); padding: 2px 8px; animation: food-pulse 1.6s ease-in-out infinite; }
+@keyframes food-pulse { 50% { opacity: .6; } }
+.ready-strip { position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); z-index: 40; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: center;
+  max-width: min(960px, calc(100vw - 32px)); background: var(--surface); border: 2px solid var(--ok); border-radius: var(--r-lg); padding: 8px 12px; box-shadow: var(--pop); }
+.ready-strip-title { display: inline-flex; align-items: center; gap: 6px; font-weight: 800; color: var(--ok); }
+.ready-chip { display: flex; align-items: center; gap: 10px; background: var(--surface-2); border: var(--bw) solid var(--outline); border-radius: var(--r-md); padding: 6px 6px 6px 12px; }
+.ready-chip.dine-in { border-left: 4px solid var(--info); } .ready-chip.takeaway { border-left: 4px solid var(--warn); }
+.ready-chip-text { display: flex; flex-direction: column; line-height: 1.2; }
+.ready-chip .primary.sm { min-height: 44px; }
+@media (max-width: 640px) { .ready-strip { left: 8px; right: 8px; transform: none; max-width: none; bottom: 8px; } .ready-chip { flex: 1 1 100%; justify-content: space-between; } }

@@ -232,6 +232,7 @@ export default function TablesFloor({ tables, onPick, onBack, onRefresh, canEdit
                     {t.item_count > 0 && <span className="items-tag">{t.item_count} items</span>}
                     {t.open_bills > 1 && <span className="items-tag">{t.open_bills} bills</span>}
                   </span>
+                  {t.food_ready > 0 && <span className="food-ready-tag"><Icon name="bell" size={13} />Food ready</span>}
                   {t.waiter && <span className="waiter-name">{t.waiter}</span>}
                 </>}
               </button>

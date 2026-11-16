@@ -37,6 +37,11 @@ const T = {
     roman_ur: '🛵 Aapka order #{id} rider {rider} ke saath nikal gaya hai!',
     ur: '🛵 آپ کا آرڈر #{id} رائیڈر {rider} کے ساتھ نکل گیا ہے!',
   },
+  ready_pickup: {
+    en: '🛍️ Your order #{id} is ready! You can pick it up from {name} now.',
+    roman_ur: '🛍️ Aapka order #{id} tayyar hai! Aap abhi {name} se le sakte hain.',
+    ur: '🛍️ آپ کا آرڈر #{id} تیار ہے! آپ ابھی {name} سے لے سکتے ہیں۔',
+  },
   track: { en: 'See where the rider is: {link}', roman_ur: 'Rider kahan hai, yahan dekhein: {link}', ur: 'رائیڈر کہاں ہے، یہاں دیکھیں: {link}' },
   status_out: {
     en: '🛵 Your order #{id} is on its way with {rider}, left {min} min ago.',
@@ -80,6 +85,7 @@ const onTheWayMessage = (order, lang, riderName, link) => [fill('on_the_way', la
 // "Where is my order?": its live status (status = cooking | ready | out | delivered)
 const statusMessage = (order, lang, status, riderName, minutes, link) => [fill('status_' + status, lang, { id: order.id, rider: riderName || '', min: minutes }),
   status === 'out' && link && fill('track', lang, { link })].filter(Boolean).join('\n');
+const readyPickupMessage = (order, lang, name) => fill('ready_pickup', lang, { id: order.id, name: name || 'the restaurant' });
 const rejectedMessage = (lang, reason) => pick('rejected', lang).replace('{reason}', reason ? ` (${reason})` : '');
 
-module.exports = { pick, acceptedMessage, rejectedMessage, onTheWayMessage, statusMessage };
+module.exports = { pick, acceptedMessage, rejectedMessage, onTheWayMessage, statusMessage, readyPickupMessage };
