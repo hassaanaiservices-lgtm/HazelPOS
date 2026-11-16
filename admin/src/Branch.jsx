@@ -383,13 +383,13 @@ function Staff({ staff, save }) {
   const set = (i, k) => e => setRows(rows.map((r, n) => n === i ? { ...r, [k]: e.target.value } : r))
   return (
     <div className="card"><h3>Staff and PINs</h3>
-      <p className="muted">At least one admin (the owner). PINs are exactly 4 digits, all different. Once their POS has the PINs, they're deleted from the cloud. After that the owner changes or resets anyone's PIN in the POS: <b>Settings → Staff & PINs</b>.</p>
+      <p className="muted">At least one admin (the owner). PINs are 4 to 12 letters or numbers, all different (capital or small letters don't matter). Once their POS has the PINs, they're deleted from the cloud. After that the owner changes or resets anyone's PIN in the POS: <b>Settings → Staff & PINs</b>.</p>
       {applied && <p className="notice" style={{ marginTop: 12 }}>These PINs are already on their POS and were removed from the cloud. To send new ones (for a new PC), type all PINs again.</p>}
       <div style={{ marginTop: 12 }}>{rows.map((u, i) => (
         <div className="staff-row" key={i}>
           <input aria-label="Name" placeholder="Name" value={u.name} onChange={set(i, 'name')} />
           <select aria-label="Role" value={u.role} onChange={set(i, 'role')}><option value="admin">Admin (owner)</option><option value="cashier">Cashier</option><option value="kitchen">Kitchen</option></select>
-          <input aria-label="PIN" placeholder={u.pin_applied ? 'on their POS' : '4-digit PIN'} value={u.pin} onChange={e => set(i, 'pin')({ target: { value: e.target.value.replace(/\D/g, '').slice(0, 4) } })} inputMode="numeric" maxLength={4} />
+          <input aria-label="PIN" placeholder={u.pin_applied ? 'on their POS' : 'PIN (4+ letters or numbers)'} value={u.pin} onChange={e => set(i, 'pin')({ target: { value: e.target.value.replace(/[^a-z0-9]/gi, '').slice(0, 12) } })} autoCapitalize="none" maxLength={12} />
           <button className="danger" aria-label={`Remove ${u.name || 'person'}`} onClick={() => setRows(rows.filter((_, n) => n !== i))}>✕</button>
         </div>))}</div>
       <div className="row"><button onClick={() => setRows([...rows, { name: '', role: 'cashier', pin: '' }])}>+ Add person</button>

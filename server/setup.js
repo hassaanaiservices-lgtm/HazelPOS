@@ -52,9 +52,9 @@ module.exports = function setupApplier(db, { hashPin }) {
       done.images = (s.images || []).length;
 
       // Staff: only when the setup has an owner, so nobody is ever locked out of Settings
-      const staff = (s.staff || []).filter(u => String(u.name || '').trim() && ROLES.includes(u.role) && /^\d{4}$/.test(String(u.pin))); // the login pad takes 4 digits
+      const staff = (s.staff || []).filter(u => String(u.name || '').trim() && ROLES.includes(u.role) && /^[a-z0-9]{4,12}$/i.test(String(u.pin).trim())); // 4 to 12 letters or numbers
       if (staff.some(u => u.role === 'admin')) {
-        if (new Set(staff.map(u => String(u.pin))).size !== staff.length) throw new Error('Two staff members in the setup have the same PIN');
+        if (new Set(staff.map(u => String(u.pin).trim().toLowerCase())).size !== staff.length) throw new Error('Two staff members in the setup have the same PIN');
         db.exec('DELETE FROM sessions'); db.exec('DELETE FROM users');
         for (const u of staff) db.prepare('INSERT INTO users (name, pin, role) VALUES (?,?,?)').run(String(u.name).trim(), hashPin(String(u.pin)), u.role);
         done.staff = staff.length;

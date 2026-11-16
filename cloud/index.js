@@ -717,8 +717,8 @@ app.post('/api/vendor/branches/:id/setup', vendorAuth, (req, res) => {
   if (Array.isArray(body.staff)) {
     const staff = body.staff.map(u => ({ name: String(u.name || '').trim(), role: u.role, pin: String(u.pin || '').trim() })).filter(u => u.name);
     if (staff.some(u => !['admin', 'cashier', 'kitchen'].includes(u.role))) return res.status(400).json({ error: 'Role must be admin, cashier or kitchen' });
-    if (staff.some(u => !/^\d{4}$/.test(u.pin))) return res.status(400).json({ error: 'Every PIN must be exactly 4 digits (the POS login pad takes 4)' });
-    if (new Set(staff.map(u => u.pin)).size !== staff.length) return res.status(400).json({ error: 'Two people have the same PIN' });
+    if (staff.some(u => !/^[a-z0-9]{4,12}$/i.test(u.pin))) return res.status(400).json({ error: 'Every PIN must be 4 to 12 letters or numbers' });
+    if (new Set(staff.map(u => u.pin.toLowerCase())).size !== staff.length) return res.status(400).json({ error: 'Two people have the same PIN' });
     if (staff.length && !staff.some(u => u.role === 'admin')) return res.status(400).json({ error: 'Add at least one admin (the owner), or they cannot open Settings' });
     data.staff = staff;
   }

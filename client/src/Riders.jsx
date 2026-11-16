@@ -72,7 +72,7 @@ function RiderList({ notify }) {
       </table>
       {edit && <FormModal title={edit.id ? 'Edit rider' : 'New rider'} value={edit} onChange={setEdit} onSave={save} onClose={() => setEdit(null)}
         fields={[['name', 'Name'], ['phone', 'WhatsApp number'], ['delivery_fee', 'Fee the rider earns per delivery (Rs)', 'number'],
-          ['pin', edit.has_login ? 'New 4-digit login PIN (empty = keep the old one)' : '4-digit login PIN: the rider logs in with it as "Rider"'], ['active', 'Still working here', 'checkbox']]} />}
+          ['pin', edit.has_login ? 'New login PIN (empty = keep the old one)' : 'Login PIN, 4 to 12 letters or numbers: the rider logs in with it'], ['active', 'Still working here', 'checkbox']]} />}
       {link && <div className="modal-bg" onClick={() => setLink(null)}><div className="modal link-modal" onClick={e => e.stopPropagation()}>
         <h2>{link.rider.name}'s phone screen</h2>
         {link.rider.link ? <>

@@ -699,8 +699,8 @@ function PinPrompt({ msg, onDone }) {
       <div className="modal" onClick={e => e.stopPropagation()}>
         <h2>Admin approval</h2>
         <p className="muted">{msg}</p>
-        <input autoFocus type="password" inputMode="numeric" maxLength={4} placeholder="Admin PIN" value={pin}
-          onChange={e => setPin(e.target.value.replace(/\D/g, ''))} onKeyDown={e => e.key === 'Enter' && pin && onDone(pin)} />
+        <input autoFocus type="password" autoCapitalize="none" autoComplete="off" maxLength={12} placeholder="Admin PIN" value={pin}
+          onChange={e => setPin(e.target.value.replace(/[^a-z0-9]/gi, ''))} onKeyDown={e => e.key === 'Enter' && pin && onDone(pin)} />
         <div className="actions">
           <button className="ghost" onClick={() => onDone(null)}>Cancel</button>
           <button className="primary" disabled={pin.length < 4} onClick={() => onDone(pin)}>Approve</button>

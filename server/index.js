@@ -383,14 +383,18 @@ if (db.prepare('SELECT COUNT(*) c FROM users').get().c === 0) {
 
 // PINs are stored as salted scrypt hashes ("s1$salt$hash"); plain PINs from older databases are hashed on startup
 const crypto = require('crypto');
+// A PIN is 4 to 12 letters or numbers. Capital and small letters count as the same (easier on a touch keyboard).
+const normPin = pin => String(pin ?? '').trim().toLowerCase();
+const PIN_OK = pin => /^[a-z0-9]{4,12}$/.test(normPin(pin));
+const PIN_RULE = 'PIN must be 4 to 12 letters or numbers';
 const hashPin = pin => {
   const salt = crypto.randomBytes(16).toString('hex');
-  return `s1$${salt}$${crypto.scryptSync(String(pin), salt, 32, { N: 4096 }).toString('hex')}`;
+  return `s1$${salt}$${crypto.scryptSync(normPin(pin), salt, 32, { N: 4096 }).toString('hex')}`;
 };
 const pinMatches = (pin, stored) => {
   const [v, salt, hash] = String(stored).split('$');
   if (v !== 's1' || !hash) return false;
-  return crypto.timingSafeEqual(crypto.scryptSync(String(pin), salt, 32, { N: 4096 }), Buffer.from(hash, 'hex'));
+  return crypto.timingSafeEqual(crypto.scryptSync(normPin(pin), salt, 32, { N: 4096 }), Buffer.from(hash, 'hex'));
 };
 const userByPin = pin => db.prepare('SELECT id,name,role,pin FROM users').all().find(u => pinMatches(pin, u.pin));
 for (const u of db.prepare("SELECT id,pin FROM users WHERE pin NOT LIKE 's1$%'").all())
@@ -647,7 +651,7 @@ app.post('/api/users', (req, res) => {
   if (!ROLES.includes(role)) return res.status(400).json({ error: 'Invalid role' });
   if (!id) return res.status(400).json({ error: 'There are three fixed logins (admin, cashier, kitchen); change their PINs instead' });
   if (pin) {
-    if (!/^\d{4}$/.test(String(pin))) return res.status(400).json({ error: 'PIN must be 4 digits' }); // login pad submits at 4
+    if (!PIN_OK(pin)) return res.status(400).json({ error: PIN_RULE });
     const taken = userByPin(pin);
     if (taken && taken.id !== +id) return res.status(400).json({ error: 'That PIN is already used' });
   }
@@ -1136,7 +1140,7 @@ function setRiderLogin(employeeId, name, pin, active) {
   const u = db.prepare("SELECT id FROM users WHERE employee_id=? AND role='rider'").get(employeeId);
   if (!active) { if (u) { db.prepare('DELETE FROM sessions WHERE user_id=?').run(u.id); db.prepare('DELETE FROM users WHERE id=?').run(u.id); } return; }
   if (pin) {
-    if (!/^\d{4}$/.test(String(pin))) throw new UserError('PIN must be 4 digits');
+    if (!PIN_OK(pin)) throw new UserError(PIN_RULE);
     const taken = userByPin(String(pin));
     if (taken && taken.id !== u?.id) throw new UserError('That PIN is already used by someone else');
   }
