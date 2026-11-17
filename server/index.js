@@ -1,6 +1,5 @@
 // HazelPOS backend: Express + Node's built-in SQLite (Node 22.5+)
 const express = require('express');
-const cors = require('cors');
 const path = require('path');
 const { DatabaseSync } = require('node:sqlite');
 
@@ -440,7 +439,16 @@ const getSettings = () => Object.fromEntries(db.prepare('SELECT key,value FROM s
 const taxRate = () => (+getSettings().tax_rate || 0) / 100;
 
 const app = express();
-app.use(cors());
+// No CORS: every screen (POS window, kitchen tablet, customer QR page) is served by this server itself. A website the cashier
+// visits in another tab must not be able to call the POS (or lock the PIN screen by guessing PINs from the cashier's PC).
+app.disable('x-powered-by');
+const CSP = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; " +
+  "img-src 'self' data: blob: https://tile.openstreetmap.org; media-src 'self' blob: data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'";
+app.use((req, res, next) => {
+  res.set({ 'X-Content-Type-Options': 'nosniff', 'X-Frame-Options': 'SAMEORIGIN', 'Referrer-Policy': 'no-referrer' });
+  if (req.path.startsWith('/api/')) res.set('Cache-Control', 'no-store'); // settings, links and reports are never kept by a browser or a proxy
+  next();
+});
 app.use(express.json({ limit: '2mb' })); // payment QR image is stored as a data URL in settings
 
 // The public demo gives every visitor the Owner screen, so whatever makes THIS server reach out or write somewhere is shut:
@@ -1776,6 +1784,9 @@ app.get('/api/cloud/status', (req, res) => res.json(cloud.status()));
 app.post('/api/cloud/connect', async (req, res) => {
   const url = String(req.body.url || '').trim().replace(/\/+$/, ''); let key = String(req.body.key || '').trim();
   if (!/^https?:\/\//.test(url) || !key) return res.status(400).json({ error: 'Enter the cloud address and the branch key or activation code' });
+  // An installed app talks to the HazelPOS Cloud that came with it, and to no other: otherwise its orders and backups could be sent anywhere
+  const fixedCloud = String(process.env.HAZEL_CLOUD_URL || '').trim().replace(/\/+$/, '');
+  if (lic.required && fixedCloud && url !== fixedCloud) return res.status(400).json({ error: 'This HazelPOS connects to HazelPOS Cloud only' });
   // An activation code (HZ-…) from the admin app works here too, for a POS run by hand (no installer): swap it for the branch key
   if (/^hz-/i.test(key)) {
     try {
@@ -1978,12 +1989,19 @@ app.get('/api/qr/:token', (req, res) => {
 });
 
 // Public: customer places an order -> goes to staff for approval
+const qrHits = new Map(); // ip -> recent order times
 app.post('/api/qr/:token/order', (req, res) => {
   const table = tableByToken(req.params.token);
   if (!table) return res.status(404).json({ error: 'Invalid table QR code' });
+  // Anyone with the QR code can send orders: a few per table and per phone, so nobody can flood the cashier's screen
+  const recent = (qrHits.get(req.ip) || []).filter(t => Date.now() - t < 5 * 60e3);
+  if (recent.length >= 8 || db.prepare("SELECT COUNT(*) c FROM qr_requests WHERE table_id=? AND status='pending'").get(table.id).c >= 5)
+    return res.status(429).json({ error: 'Please wait: the staff are still looking at your earlier orders' });
+  qrHits.set(req.ip, [...recent, Date.now()]);
+  if (qrHits.size > 2000) for (const [ip, ts] of qrHits) if (!ts.some(t => Date.now() - t < 5 * 60e3)) qrHits.delete(ip);
   let items;
   try {
-    items = (req.body.items || []).map(i => priceItem({ ...i, qty: Math.min(50, parseInt(i.qty) || 0) }, { activeOnly: true }))
+    items = (Array.isArray(req.body.items) ? req.body.items.slice(0, 40) : []).map(i => priceItem({ ...i, qty: Math.min(50, parseInt(i.qty) || 0) }, { activeOnly: true }))
       .filter(i => i.qty > 0).map(i => ({ ...i, note: i.note.slice(0, 120) }));
   } catch (e) {
     if (e instanceof UserError) return res.status(400).json({ error: e.message });
@@ -2037,12 +2055,12 @@ app.use('/api', (req, res) => res.status(404).json({ error: `Unknown address: ${
 // /assets, /favicon.svg and /icons.svg (no clash with site/, whose index.html wins at /).
 if (DEMO) {
   app.get('/README.md', (req, res) => res.status(404).end()); // site/README.md is notes for us, not for visitors
-  app.get(['/app', '/app/'], (req, res) => res.sendFile(path.join(__dirname, '../client/dist/index.html')));
+  app.get(['/app', '/app/'], (req, res) => res.set('Content-Security-Policy', CSP).sendFile(path.join(__dirname, '../client/dist/index.html')));
   app.use('/images', express.static(path.join(__dirname, '../site/images'), { maxAge: '7d' })); // screenshots change rarely: let browsers keep them
   app.use(express.static(path.join(__dirname, '../site')));
 }
-app.use(express.static(path.join(__dirname, '../client/dist')));
-app.get('/t/:token', (req, res) => res.sendFile(path.join(__dirname, '../client/dist/index.html')));
+app.use(express.static(path.join(__dirname, '../client/dist'), { setHeaders: (res, file) => { if (file.endsWith('.html')) res.set('Content-Security-Policy', CSP); } }));
+app.get('/t/:token', (req, res) => res.set('Content-Security-Policy', CSP).sendFile(path.join(__dirname, '../client/dist/index.html')));
 
 // Any error not handled above is answered as JSON (never Express's HTML error page)
 app.use((err, req, res, next) => { // eslint-disable-line no-unused-vars

@@ -100,3 +100,16 @@ Still open, by design or for later:
 | S9 | The cloud is one SQLite file on one Railway volume. Fine for hundreds of branches; at thousands of busy branches it needs Postgres or several cloud instances. | Watch the Grafana dashboard (response times); plan the move when you pass ~300 active branches. | watch |
 | S10 | The first-activation public key is trusted on first use unless the installer carries it (RISKS L4). | Put `hazel.licencePublicKey` in `desktop/package.json` before building installers. The GitHub build now **refuses** to build without it (and without `hazel.cloudUrl`). | open: needs your cloud address and key |
 | S11 | The older test scripts (licence, onboarding, updates: e2e–e2e13) lived in a temp folder that the PC's restart wiped, so they were not re-run after this check. The rider, metrics and isolation suites (e2e14–e2e17, 115 checks, in `desktop/dist/shots/`) pass. | Rewrite the lost suites into the repo (`tests/`) so they survive and can run before every release. | open |
+
+## Security audit, 17 Nov 2026
+
+The full list (15 holes found and fixed, tested; 5 risks that can only be accepted) is in [SECURITY-AUDIT.md](SECURITY-AUDIT.md).
+The accepted ones:
+
+| # | Risk | What to do | Status |
+|---|---|---|---|
+| X1 | A stolen `RELEASES_TOKEN` or hacked GitHub account = a malicious update on every PC | 2-step login on GitHub, token only for the releases repo, test clients first; later a signing certificate and a signed update list | open |
+| X2 | A technical restaurant can crack the licence on its own PC | The real hold is the cloud-only services; optional offline lease | accepted |
+| X3 | Suspend only reaches a PC that can reach the cloud | Same lease option | accepted |
+| X4 | Backups on your volume are not encrypted at rest | Protect Railway access; privacy line in the agreement; later encrypt | open |
+| X5 | Anyone on the restaurant Wi-Fi can open the login page | PIN lock-out; advise a guest Wi-Fi | accepted |

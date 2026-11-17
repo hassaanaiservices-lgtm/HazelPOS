@@ -67,11 +67,12 @@ async function waitForServer(ms = 30_000) {
 
 function showWindow() {
   if (win) { if (win.isMinimized()) win.restore(); win.show(); win.focus(); return; }
-  win = new BrowserWindow({ width: 1366, height: 860, minWidth: 900, minHeight: 600, icon: ICON, autoHideMenuBar: true, show: false, title: 'HazelPOS' });
+  win = new BrowserWindow({ width: 1366, height: 860, minWidth: 900, minHeight: 600, icon: ICON, autoHideMenuBar: true, show: false, title: 'HazelPOS',
+    webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, webSecurity: true, allowRunningInsecureContent: false } }); // the POS page can never reach the PC itself
   win.loadURL(LOCAL);
   win.once('ready-to-show', () => { win.maximize(); win.show(); });
   // Map links, table QR links etc. open in the normal browser, not inside the POS window
-  win.webContents.setWindowOpenHandler(({ url }) => { shell.openExternal(url); return { action: 'deny' }; });
+  require('./harden')(win, () => LOCAL, u => shell.openExternal(u)); // only web and phone links leave the app (harden.js)
   win.on('close', e => { if (!quitting) { e.preventDefault(); win.hide(); } }); // keep serving the kitchen screen and WhatsApp
   win.on('closed', () => { win = null; });
 }

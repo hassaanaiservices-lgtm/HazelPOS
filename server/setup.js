@@ -56,7 +56,7 @@ module.exports = function setupApplier(db, { hashPin }) {
       if (staff.some(u => u.role === 'admin')) {
         if (new Set(staff.map(u => String(u.pin).trim().toLowerCase())).size !== staff.length) throw new Error('Two staff members in the setup have the same PIN');
         db.exec('DELETE FROM sessions'); db.exec('DELETE FROM users');
-        for (const u of staff) db.prepare('INSERT INTO users (name, pin, role) VALUES (?,?,?)').run(String(u.name).trim(), hashPin(String(u.pin)), u.role);
+        for (const u of staff) db.prepare('INSERT INTO users (name, pin, role, must_change_pin) VALUES (?,?,?,1)').run(String(u.name).trim(), hashPin(String(u.pin)), u.role); // each person chooses their own PIN at the first login (the cloud held this one in plain text)
         done.staff = staff.length;
       }
       setSetting.run('setup_applied_at', new Date().toISOString());

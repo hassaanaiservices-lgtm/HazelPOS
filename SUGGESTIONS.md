@@ -117,3 +117,10 @@ the phone's WhatsApp app at the same time), Meta checks the business (verificati
 - **F1. FAQ answers prepared in the admin app.** A new restaurant's bot answers (hours, delivery, halal…) are written by the owner in Settings → WhatsApp bot. For restaurants you set up remotely, a "Questions and answers" box in the admin app (Branch → Details), sent with the rest of the setup, would let you have it ready on day one.
 - **F2. Auto-check at the first login.** After the owner chooses a PIN, a short checklist ("Add your menu", "Add tables", "Connect WhatsApp", "Give the cashier a PIN") on the Dashboard until each is done.
 - **F3. Windows signing later.** Certificates for Windows apps are sold as normal ones (a few hundred dollars a year) or as a cloud signing service billed monthly; check what is available in Pakistan when you reach about 10 clients (RISKS D3).
+
+## From the security audit, 17 Nov 2026
+- **U3. Signed updates.** The cloud signs the SHA-512 of each release; the POS checks it before installing, so a hacked GitHub account alone cannot push a fake update. Needs: the release workflow posts the hash to the cloud, the admin app's "Release to everyone" confirms it. About half a day.
+- **L-a. Offline lease (optional, per client, default off).** A PC that has not reached the cloud for N days (suggest 45) locks new orders. It closes X2 and X3 (a PC that blocks the cloud, or a frozen clock). It breaks your "internet never matters" rule only for a PC that has been offline for weeks, which a restaurant using the WhatsApp assistant never is.
+- **B1. Encrypt backups at rest.** The POS encrypts the database copy with a key only you hold (the licence key pair) before uploading. Restores decrypt on activation. Stops a Railway breach from exposing customer data.
+- **S12. Guest Wi-Fi note** for the client setup sheet: tablets and kitchen on the restaurant network, customers on a separate guest Wi-Fi.
+- **S13. Bundle the Manrope font** in the POS (today it loads from Google when online, which the security policy has to allow). Offline POSes then look the same, and the policy can drop the two Google addresses.

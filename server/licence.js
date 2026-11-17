@@ -29,7 +29,14 @@ module.exports = function licence(db, cloud, { setup = null, health = () => ({})
   const set = (k, v) => db.prepare('INSERT INTO cloud_config VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run(k, String(v ?? ''));
 
   // Turning the PC clock back must not stretch the offline days: never use a time earlier than one we've already seen
-  const clock = () => Math.max(Date.now(), +get('lic_clock') || 0);
+  // The cloud's own time (signed, issued_at of the last answer) is a floor too: the saved lic_clock can be edited, the signed time can't
+  let signedAt = { sig: '', t: 0 };
+  const signedTime = () => {
+    const sig = get('lic_sig');
+    if (signedAt.sig !== sig) { const a = sig ? verified(get('lic_signed'), sig) : null; signedAt = { sig, t: a ? Date.parse(a.issued_at) || 0 : 0 }; }
+    return signedAt.t;
+  };
+  const clock = () => Math.max(Date.now(), +get('lic_clock') || 0, signedTime());
   const tick = () => { const t = clock(); set('lic_clock', t); return t; }; // saved on each check, not on every read
 
   const base = () => get('url').replace(/\/+$/, '');
@@ -49,7 +56,6 @@ module.exports = function licence(db, cloud, { setup = null, health = () => ({})
       if (!signed || !sig || !crypto.verify(null, Buffer.from(signed), crypto.createPublicKey(pubkey()), Buffer.from(sig, 'base64'))) return null;
       const a = JSON.parse(Buffer.from(signed, 'base64').toString());
       if (a.key_hash !== keyHash()) return null;                                     // issued for another branch/PC
-      if (Date.parse(a.issued_at) > Date.now() + 2 * DAY) return null;               // from the future: clock games
       return a;
     } catch { return null; }
   }
@@ -111,6 +117,8 @@ module.exports = function licence(db, cloud, { setup = null, health = () => ({})
     const base = { paid_until: a.paid_until || null, ai_until: a.ai_until || null, pos_until: a.pos_until || null, update_requested_at: a.update_requested_at || null, update_policy: a.update_policy || null, last_check: new Date(+get('lic_checked_at')).toISOString(), error: get('lic_error') };
     if (a.revoked) return { ...base, state: 'locked', message: 'This branch key was removed from HazelPOS Cloud. Contact HazelPOS to reconnect.' };
     if (a.tampered) return { ...base, state: 'locked', message: "HazelPOS couldn't confirm your membership on this PC (the saved details are missing or were changed). Connect to the internet: it fixes itself within a few minutes." };
+    // The PC's date is more than 2 days before the last time HazelPOS Cloud answered: the clock was turned back (or is wrong)
+    if (a.issued_at && Date.parse(a.issued_at) - Date.now() > 2 * DAY) return { ...base, state: 'locked', message: 'The date or time on this PC is wrong (it is behind). Set it to automatic in Windows (Settings → Time & language → Date & time). HazelPOS unlocks by itself within minutes.' };
     if (a.cancelled) return { ...base, state: 'locked', message: 'Your HazelPOS membership was cancelled. New orders and the WhatsApp assistant are off. Contact HazelPOS.' };
     if (a.suspended) return { ...base, state: 'locked', message: 'HazelPOS has paused your membership. New orders and the WhatsApp assistant are off until it is renewed. Contact HazelPOS.' };
     if (!a.paid_until) return a.active === false ? { ...base, state: 'locked', message: 'Your HazelPOS membership has not started yet. Contact HazelPOS.' } : { ...base, state: 'ok' };
@@ -134,7 +142,9 @@ module.exports = function licence(db, cloud, { setup = null, health = () => ({})
   // First run. code: the short activation code (one use; the cloud swaps it for this branch's key) or the long key.
   // url: empty = the cloud address that came with the installer. Uses cloud sync's own connect.
   async function activate(url, code) {
-    url = String(url || process.env.HAZEL_CLOUD_URL || '').trim().replace(/\/+$/, '');
+    const fixed = String(process.env.HAZEL_CLOUD_URL || '').trim().replace(/\/+$/, ''); // the cloud that came with this installer
+    url = String(url || fixed).trim().replace(/\/+$/, '');
+    if (fixed && url !== fixed) throw new Error('This HazelPOS can only be activated on HazelPOS Cloud');
     if (!/^https?:\/\//.test(url)) throw new Error('Enter the cloud address');
     let key = String(code || '').trim();
     if (/^hz-/i.test(key)) {

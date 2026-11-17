@@ -29,8 +29,11 @@ const sha = s => crypto.createHash('sha256').update(String(s)).digest();
 const app = express();
 app.set('trust proxy', 1); // Railway / any HTTPS proxy in front: real client IP and https
 app.disable('x-powered-by');
+app.set('case sensitive routing', true);
 app.use((req, res, next) => {
-  res.set({ 'X-Frame-Options': 'DENY', 'Referrer-Policy': 'no-referrer', 'X-Content-Type-Options': 'nosniff' });
+  res.set({ 'X-Frame-Options': 'DENY', 'Referrer-Policy': 'no-referrer', 'X-Content-Type-Options': 'nosniff',
+    'Content-Security-Policy': "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'" });
+  if (req.secure) res.set('Strict-Transport-Security', 'max-age=15552000');
   next();
 });
 app.use(express.json({ limit: '4mb' })); // menu Excel files and menu pictures travel as base64
@@ -78,11 +81,13 @@ app.use('/api', async (req, res) => {
   const user = loggedIn(req);
   if (!user) return res.status(401).json({ error: 'Please log in' });
   if (req.method !== 'GET' && req.get('x-hazel-admin') !== '1') return res.status(403).json({ error: 'Not allowed' });
-  if (/^\/team(\/|$)/.test(req.path) && user.role !== 'owner') return res.status(403).json({ error: 'Only an owner can manage the team' });
+  // Only plain, known-shaped paths go to the cloud: no dot-dot, no encoded slashes or dots, no double slashes
+  if (!/^\/[a-z0-9_\-]+(\/[a-z0-9_\-]+)*\/?$/i.test(req.path)) return res.status(400).json({ error: 'Bad address' });
+  if (/^\/team(\/|$)/i.test(req.path) && user.role !== 'owner') return res.status(403).json({ error: 'Only an owner can manage the team' });
   try {
     const r = await cloud(req.url, {
       method: req.method,
-      headers: { 'X-Vendor-User': user.email ? `${user.name} <${user.email}>` : user.name }, // who did it: the cloud's activity log
+      headers: { 'X-Vendor-User': user.email ? `${user.name} <${user.email}>` : user.name, 'X-Vendor-Role': user.role }, // who did it: the cloud's activity log and the owner-only team routes
       body: req.method !== 'GET' ? JSON.stringify(req.body || {}) : undefined,
     });
     const body = Buffer.from(await r.arrayBuffer());

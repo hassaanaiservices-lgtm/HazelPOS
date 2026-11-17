@@ -95,12 +95,40 @@ const passMatches = (p, stored) => {
 };
 const tx = fn => { db.exec('BEGIN'); try { const r = fn(); db.exec('COMMIT'); return r; } catch (e) { db.exec('ROLLBACK'); throw e; } };
 const KEEP_BACKUPS = 14;
+const CODE_DAYS = +process.env.ACTIVATION_CODE_DAYS || 14;
 
 const app = express();
-app.use('/api/sync/backup', express.raw({ type: '*/*', limit: '500mb' }));
-app.use('/api/ai/transcribe', express.raw({ type: '*/*', limit: '25mb' })); // WhatsApp voice notes are small
 app.set('trust proxy', 1); // Railway / any HTTPS proxy in front: req.ip is the real visitor, so the wrong-password limits count per visitor, not for everyone at once
-app.use(express.json({ limit: '10mb' }));
+app.disable('x-powered-by');
+app.set('case sensitive routing', true); // /api/vendor/TEAM must not reach the route /api/vendor/team (the admin app's owner-only check is case-sensitive)
+app.use((req, res, next) => {
+  res.set({ 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer', 'X-Frame-Options': 'DENY' });
+  if (req.secure) res.set('Strict-Transport-Security', 'max-age=15552000'); // HTTPS only, for the next 6 months
+  next();
+});
+
+// Request bodies are read only AFTER the caller has shown a valid key. Before, anyone on the internet could send 500 MB to
+// /api/sync/backup and this shared server buffered it all: one request could stop every restaurant's sync, AI and rider screens.
+// Open pages (login, activation, rider and tracking links) accept 64 KB at most.
+const smallJson = express.json({ limit: '64kb' });
+const BACKUP_MAX = (+process.env.BACKUP_MAX_MB || 150) * 1024 * 1024; // a restaurant's whole database; years of orders are still far below this
+app.use((req, res, next) => /^\/api\/(sync|vendor|ai)(\/|$)/.test(req.path) ? next() : smallJson(req, res, next));
+const knownBranch = (req, res, next) => { // only checks that the key exists (the route's own auth does the rest)
+  const key = (req.get('authorization') || '').replace(/^Bearer /, '');
+  if (!key || !db.prepare('SELECT 1 FROM branches WHERE key_hash=?').get(sha(key))) return res.status(401).json({ error: 'Unknown branch key' });
+  next();
+};
+const vendorKeyOnly = (req, res, next) => {
+  const k = (req.get('authorization') || '').replace(/^Bearer /, '');
+  if (!VENDOR || !keyMatches(k)) return res.status(401).json({ error: 'Not allowed' });
+  next();
+};
+app.use('/api/sync', knownBranch, express.json({ limit: '12mb' }));
+app.use('/api/sync/backup', express.raw({ type: '*/*', limit: BACKUP_MAX }));
+app.use('/api/vendor', vendorKeyOnly, express.json({ limit: '12mb' })); // menu Excel files and menu photos come as base64
+app.use('/api/ai', knownBranch);
+app.use('/api/ai/chat', express.json({ limit: '1mb' }));
+app.use('/api/ai/transcribe', express.raw({ type: '*/*', limit: '25mb' })); // WhatsApp voice notes are small
 
 // ---------- Owner accounts ----------
 const fails = new Map(); // ip -> { n, until }
@@ -266,7 +294,9 @@ app.post('/api/activate', (req, res) => {
   const f = fails.get('a:' + req.ip) || { n: 0, until: 0 };
   if (f.until > Date.now()) return res.status(429).json({ error: 'Too many wrong codes. Try again in 15 minutes' });
   const code = String(req.body.code || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
-  const b = code && db.prepare('SELECT * FROM branches WHERE code_hash=? AND code_used_at IS NULL').get(sha(code));
+  let b = code && db.prepare('SELECT * FROM branches WHERE code_hash=? AND code_used_at IS NULL').get(sha(code));
+  // A code nobody used for 14 days is dead (it may have been seen in an old chat): the admin app makes a new one in a click
+  if (b && Date.now() - Date.parse(b.code_created_at || 0) > CODE_DAYS * 864e5) { fails.delete('a:' + req.ip); return res.status(410).json({ error: 'That activation code has expired. Ask HazelPOS for a new one' }); }
   if (!b) { f.n++; if (f.n >= 10) { f.n = 0; f.until = Date.now() + 15 * 60 * 1000; } fails.set('a:' + req.ip, f); return res.status(400).json({ error: 'That activation code is wrong or was already used. Ask HazelPOS for a new one' }); }
   fails.delete('a:' + req.ip);
   if (!membership(b.owner_id).pos_active) return res.status(402).json({ error: 'The HazelPOS membership for this restaurant is not active. Contact HazelPOS' });
@@ -303,7 +333,11 @@ app.post('/api/sync/health', branchAuth, (req, res) => {
 
 // Upserts are keyed by (branch, local id), so re-sending the same batch is harmless
 app.post('/api/sync/push', branchAuth, (req, res) => {
-  const b = req.branch.id, { orders = [], expenses = [], deleted_expenses = [], stock, shifts = [] } = req.body;
+  const b = req.branch.id, body = req.body || {};
+  // One push is at most a few hundred orders (server/cloud-sync.js); anything far beyond that is not a real POS
+  const cap = (v, n) => (Array.isArray(v) ? v.slice(0, n) : undefined);
+  const orders = (cap(body.orders, 1000) || []).map(o => ({ ...o, items: cap(o.items, 300) })), expenses = cap(body.expenses, 2000) || [], deleted_expenses = cap(body.deleted_expenses, 2000) || [];
+  const stock = cap(body.stock, 3000), shifts = cap(body.shifts, 500) || [];
   // Cross-check (S10 phase 4): new orders made after this POS should have locked = someone got around the lock.
   // A day of margin for clocks and for a POS that hadn't checked in yet. Shown in the admin app (Unpaid page).
   const m = membership(req.branch.owner_id);
@@ -489,6 +523,8 @@ app.get('/api/sync/backup/latest', branchAuth, (req, res) => {
 });
 app.post('/api/sync/backup', branchAuth, (req, res) => {
   if (!req.body?.length || req.body.subarray(0, 15).toString() !== 'SQLite format 3') return res.status(400).json({ error: 'Not a database file' });
+  const last = db.prepare('SELECT MAX(at) at FROM backups WHERE branch_id=?').get(req.branch.id).at;
+  if (last && Date.now() - Date.parse(last) < 2 * 60e3) return res.status(429).json({ error: 'A backup was just made. Try again in a couple of minutes' }); // keeps one branch from filling the disk
   const file = `b${req.branch.id}-${Date.now()}.db`;
   fs.writeFileSync(path.join(DATA, 'backups', file), req.body);
   db.prepare('INSERT INTO backups (branch_id,at,size,file) VALUES (?,?,?,?)').run(req.branch.id, now(), req.body.length, file);
@@ -536,6 +572,10 @@ const vendorAuth = (req, res, next) => {
   if (!VENDOR || !keyMatches(k)) return res.status(401).json({ error: 'Not allowed' });
   // Who did it: the admin app's server says which team member is logged in (only it has the key, so this is trusted)
   req.who = String(req.get('x-vendor-user') || 'admin app').slice(0, 120);
+  req.vendorRole = req.get('x-vendor-role') === 'owner' ? 'owner' : 'staff'; // the admin app says who is logged in; only it has the key
+  // Managing the team (who can log in to the admin app) is for owners only. Checked here as well as in the admin app.
+  if (/^\/api\/vendor\/team(\/|$)/i.test(req.path) && !/^\/api\/vendor\/team\/login$/.test(req.path) && req.vendorRole !== 'owner')
+    return res.status(403).json({ error: 'Only an owner can manage the team' });
   if (req.method !== 'GET' && !/^\/api\/vendor\/team\/login$/.test(req.path)) res.on('finish', () => {
     if (res.statusCode >= 400) return;
     const { password, file, image, data, rows, menu, ...rest } = req.body || {}; // no passwords, no big files in the log
@@ -882,6 +922,12 @@ app.post('/api/vendor/branches/:id/code', vendorAuth, (req, res) => {
 // Restaurants' installed apps have no AI keys. Their WhatsApp assistant (DeepSeek) and voice notes (Groq) come through
 // here: your keys stay on this server, every call is counted per branch, and an unpaid membership switches AI off.
 const AI_DAILY_LIMIT = +process.env.AI_DAILY_LIMIT || 3000; // calls per branch per day: a runaway loop can't empty your account
+// Your money, your rules: a restaurant's PC can ask for a reply, but never choose the model, the size or the settings.
+const AI_MODELS = String(process.env.AI_MODELS || 'deepseek-flash').split(',').map(s => s.trim()).filter(Boolean); // the first one is used unless the PC asks for another one in this list
+const AI_MAX_INPUT_CHARS = +process.env.AI_MAX_INPUT_CHARS || 300_000; // per call (the menu and the chat); about 85k tokens
+const AI_DAILY_INPUT_TOKENS = +process.env.AI_DAILY_INPUT_TOKENS || 30_000_000; // per branch per day, cached or not
+const AI_DAILY_AUDIO_SECONDS = +process.env.AI_DAILY_AUDIO_SECONDS || 7200; // voice notes per branch per day
+const STT_MODELS = ['whisper-large-v3', 'whisper-large-v3-turbo'];
 const aiAuth = (req, res, next) => {
   if (!VENDOR) return res.status(503).json({ error: 'The AI proxy only runs on the vendor cloud (VENDOR_API_KEY set)' }); // else anyone who signs up uses your keys
   const key = (req.get('authorization') || '').replace(/^Bearer /, '');
@@ -890,6 +936,9 @@ const aiAuth = (req, res, next) => {
   if (!membership(b.owner_id).ai_active) return res.status(402).json({ error: 'HazelPOS membership is not paid: the WhatsApp assistant is paused until it is renewed' });
   const used = db.prepare('SELECT COUNT(*) c FROM ai_usage WHERE branch_id=? AND day=?').get(b.id, today()).c;
   if (used >= AI_DAILY_LIMIT) return res.status(403).json({ error: `Daily AI limit reached (${AI_DAILY_LIMIT} calls). It resets tomorrow` });
+  const sums = db.prepare('SELECT COALESCE(SUM(tokens_in),0) t, COALESCE(SUM(audio_seconds),0) s FROM ai_usage WHERE branch_id=? AND day=?').get(b.id, today());
+  if (sums.t >= AI_DAILY_INPUT_TOKENS) return res.status(403).json({ error: 'Daily AI limit reached (size). It resets tomorrow' });
+  if (req.path === '/api/ai/transcribe' && sums.s >= AI_DAILY_AUDIO_SECONDS) return res.status(403).json({ error: 'Daily voice-note limit reached. It resets tomorrow' });
   req.branch = b;
   next();
 };
@@ -898,8 +947,17 @@ const logAi = (b, kind, ok, t0, u = {}) => db.prepare(`INSERT INTO ai_usage (bra
 
 app.post('/api/ai/chat', aiAuth, async (req, res) => {
   if (!process.env.DEEPSEEK_API_KEY) return res.status(503).json({ error: 'The cloud has no DeepSeek key yet' });
-  const t0 = Date.now(), { model, messages, max_tokens, thinking, response_format } = req.body || {};
-  if (!Array.isArray(messages)) return res.status(400).json({ error: 'messages missing' });
+  const t0 = Date.now(), { messages, max_tokens } = req.body || {};
+  if (!Array.isArray(messages) || !messages.length || messages.length > 60) return res.status(400).json({ error: 'messages missing' });
+  let chars = 0;
+  for (const m of messages) {
+    if (!m || !['system', 'user', 'assistant'].includes(m.role) || typeof m.content !== 'string') return res.status(400).json({ error: 'bad message' });
+    chars += m.content.length;
+  }
+  if (chars > AI_MAX_INPUT_CHARS) return res.status(413).json({ error: 'That message is too large' });
+  const model = AI_MODELS.includes(req.body.model) ? req.body.model : AI_MODELS[0];
+  const thinking = process.env.AI_ALLOW_THINKING === '1' && req.body.thinking?.type === 'enabled' ? { type: 'enabled' } : { type: 'disabled' }; // reasoning costs many times more
+  const response_format = req.body.response_format?.type === 'json_object' ? { type: 'json_object' } : undefined;
   try {
     const r = await fetch((process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com') + '/chat/completions', {
       method: 'POST',
@@ -923,12 +981,12 @@ app.post('/api/ai/transcribe', aiAuth, async (req, res) => {
   const t0 = Date.now();
   const form = new FormData();
   form.append('file', new Blob([req.body], { type: req.get('content-type') || 'audio/ogg' }), path.basename(String(req.query.name || 'voice.ogg')));
-  form.append('model', String(req.query.model || 'whisper-large-v3'));
+  form.append('model', STT_MODELS.includes(req.query.model) ? req.query.model : STT_MODELS[0]);
   form.append('response_format', 'verbose_json');
   form.append('temperature', '0');
-  if (req.query.language) form.append('language', String(req.query.language));
+  if (/^[a-z]{2,3}$/.test(req.query.language || '')) form.append('language', req.query.language);
   try {
-    const r = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
+    const r = await fetch((process.env.GROQ_BASE_URL || 'https://api.groq.com/openai/v1') + '/audio/transcriptions', {
       method: 'POST', body: form, headers: { Authorization: 'Bearer ' + process.env.GROQ_API_KEY }, signal: AbortSignal.timeout(60_000),
     });
     const body = await r.json().catch(() => ({}));
@@ -941,6 +999,14 @@ app.post('/api/ai/transcribe', aiAuth, async (req, res) => {
 });
 
 app.use(express.static(path.join(__dirname, 'public')));
+
+// Any error is answered as JSON without details (Express would print the file paths and the stack to the visitor)
+app.use((err, req, res, next) => { // eslint-disable-line no-unused-vars
+  if (err.type === 'entity.too.large') return res.status(413).json({ error: 'That is too large' });
+  if (err.type === 'entity.parse.failed') return res.status(400).json({ error: 'The request was not valid JSON' });
+  if (!err.status || err.status >= 500) console.error(`${req.method} ${req.path}:`, err);
+  res.status(err.status || 500).json({ error: err.status && err.status < 500 ? 'Bad request' : 'Something went wrong' });
+});
 
 const PORT = process.env.PORT || 4200;
 // ---------- Grafana: /metrics (Prometheus text format) ----------

@@ -6,6 +6,7 @@
 // Deals: "Deal items" lists what's inside, e.g. "2x Zinger Burger (Single); Fries (Regular); Coke 500ml". "Combo for"
 // names the item it's also offered with ("Make it a combo" when that item is tapped).
 const zlib = require('zlib');
+const MAX_PART = 30 * 1024 * 1024, MAX_TOTAL = 60 * 1024 * 1024; // a real menu sheet is a few hundred KB
 
 const COLUMNS = {
   category: ['category', 'categories', 'section', 'type'],
@@ -63,6 +64,7 @@ function unzip(buf) {
   const count = buf.readUInt16LE(eocd + 10);
   let p = buf.readUInt32LE(eocd + 16);
   const files = {};
+  let total = 0;
   for (let n = 0; n < count; n++) {
     if (buf.readUInt32LE(p) !== 0x02014b50) break;
     const method = buf.readUInt16LE(p + 10), size = buf.readUInt32LE(p + 20);
@@ -72,7 +74,14 @@ function unzip(buf) {
     const start = local + 30 + buf.readUInt16LE(local + 26) + buf.readUInt16LE(local + 28);
     const raw = buf.subarray(start, start + size);
     if (/^xl\/(sharedStrings|workbook)\.xml$|^xl\/worksheets\/sheet\d+\.xml$|^xl\/_rels\/workbook\.xml\.rels$/.test(name))
-      files[name] = (method === 8 ? zlib.inflateRawSync(raw) : raw).toString('utf8');
+    {
+      // A few KB of Excel can unpack to gigabytes (a "zip bomb"): cap each part and the total
+      const tooBig = () => new Error('That Excel file is too big once unpacked. Save it again as a plain .xlsx with just the menu');
+      let one;
+      try { one = method === 8 ? zlib.inflateRawSync(raw, { maxOutputLength: MAX_PART }) : raw; } catch (e) { throw e.code === 'ERR_BUFFER_TOO_LARGE' || e instanceof RangeError ? tooBig() : e; }
+      if (one.length > MAX_PART || (total += one.length) > MAX_TOTAL) throw tooBig();
+      files[name] = one.toString('utf8');
+    }
     p += 46 + nameLen + extraLen + commentLen;
   }
   return files;
