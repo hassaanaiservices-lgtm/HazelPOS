@@ -38,15 +38,16 @@ jobs:
       - name: Build the installer (not published yet)
         run: npx electron-builder --win --publish never
         working-directory: desktop
-      - name: Check the installer
-        run: node desktop/verify-build.js post
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4   # saved first: downloadable from the run page even if a check below fails
+        if: always()
         with:
           name: HazelPOS-installer
           path: |
             desktop/dist/HazelPOS-Setup-*.exe
             desktop/dist/*.blockmap
             desktop/dist/latest.yml
+      - name: Check the installer
+        run: node desktop/verify-build.js post
       - name: Publish to the public releases repo
         run: npx electron-builder --win --prepackaged dist/win-unpacked --publish always
         working-directory: desktop

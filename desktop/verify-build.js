@@ -33,7 +33,8 @@ async function pre() {
 function post() {
   const dist = path.join(__dirname, 'dist');
   const files = fs.existsSync(dist) ? fs.readdirSync(dist) : [];
-  const exe = files.find(f => /^HazelPOS-Setup-.*\.exe$/.test(f));
+  const exe = files.find(f => /^HazelPOS-Setup-.*\.exe$/.test(f) && !f.includes('__uninstaller'));
+  console.log('desktop/dist: ' + files.join(', '));
   need(!!exe, 'no HazelPOS-Setup-<version>.exe in desktop/dist');
   need(files.some(f => f.endsWith('.exe.blockmap')), 'no .blockmap next to the installer: updates would download the whole file every time');
   need(files.includes('latest.yml'), 'no latest.yml: installed apps could not find updates');
@@ -47,14 +48,18 @@ function post() {
   if (fs.existsSync(res)) {
     const img = path.join(res, '@img');
     const names = fs.existsSync(img) ? fs.readdirSync(img) : [];
+    console.log('packed @img: ' + names.join(', '));
     need(!names.some(n => /linux|darwin|wasm32/.test(n)), `foreign sharp parts inside the installer: ${names.filter(n => /linux|darwin|wasm32/.test(n)).join(', ')}`);
-    need(!fs.existsSync(path.join(res, '@types')), 'type files (@types) were packed: they are not needed');
+    const types = path.join(res, '@types'); // only size: a warning, never a stopper
+    if (fs.existsSync(types) && fs.readdirSync(types).length) warnings.push('type files (@types) were packed: not needed, only size');
   }
 }
 
 (async () => {
   if (phase === 'pre') await pre(); else post();
-  warnings.forEach(w => console.warn('warning: ' + w));
+  warnings.forEach(w => console.warn((CI ? '::warning::' : 'warning: ') + w));
+  // On GitHub, problems become notes on the run page (readable without opening the log)
+  if (CI) problems.forEach(p => console.log('::error::' + p.replace(/\n/g, ' ')));
   if (problems.length) { console.error('\nBuild check failed:\n- ' + problems.join('\n- ')); process.exit(1); }
   console.log(`build check (${phase}) ok`);
 })();
