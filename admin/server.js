@@ -12,7 +12,7 @@ const crypto = require('crypto');
 const path = require('path');
 const fs = require('fs');
 
-const { ADMIN_PASSWORD = '', VENDOR_API_KEY = '' } = process.env;
+const ADMIN_PASSWORD = String(process.env.ADMIN_PASSWORD || ''), VENDOR_API_KEY = String(process.env.VENDOR_API_KEY || '').trim(); // a pasted key may carry a space or new line
 const CLOUD_URL = String(process.env.CLOUD_URL || '').replace(/\/+$/, '');
 const problems = [
   ADMIN_PASSWORD.length < 12 && 'ADMIN_PASSWORD must be at least 12 characters',

@@ -538,7 +538,7 @@ app.post('/api/sync/backup', branchAuth, (req, res) => {
 // ---------- Memberships ----------
 // VENDOR_API_KEY set = this is your HazelPOS Cloud: memberships are enforced and your admin app (admin/) can manage it.
 // Not set = someone runs their own cloud just for their branches: nothing is enforced.
-const VENDOR_KEY = process.env.VENDOR_API_KEY || '';
+const VENDOR_KEY = String(process.env.VENDOR_API_KEY || '').trim(); // a space or new line pasted with the key must not break it
 const VENDOR = VENDOR_KEY.length >= 32;
 if (VENDOR_KEY && !VENDOR) console.error('VENDOR_API_KEY is too short (32+ characters): vendor mode is OFF');
 const today = () => new Date().toISOString().slice(0, 10);
