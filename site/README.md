@@ -39,3 +39,24 @@ Same system as the POS (`/DESIGN.md`), in its light "dark cream" theme: sand gro
 ember orange, Manrope, and the POS's chunky outlined style (2px ink outlines, solid offset shadows, pill buttons). Each
 section sits on its own soft band (peach hero, mint WhatsApp, blue reports, sand tour and questions, orange close). Built with the Hallmark skill
 (stamp at the top of `styles.css`).
+
+## Table-QR story (the scroll scene in `#qr-order`)
+
+A customer waits for a waiter, scans the table's QR, orders on his phone (seen through his eyes), the order pops up on
+the cashier's screen, she taps Accept, and his phone shows the order confirmed.
+
+- **Words, drawings, menu items, phone and POS screens:** `tools/qr-scene/scene.py`. It writes the section into
+  `index.html` between the `qr-scene:start` / `qr-scene:end` comments, so edit the generator and re-run it, never
+  the block itself:
+  ```bash
+  python3 tools/qr-scene/scene.py
+  ```
+- **Timing:** `qr-scene.js`. Everything on screen is set from one scroll progress number `p` (0 to 1): the phone taps
+  are in `TAPS`, the faces in `FACE`, the bubbles in `BUBBLES`, the captions in `CAPS`.
+- **Speed:** `.qs-track { height: 820vh; }` in `styles.css` (block "table-QR story"). Bigger is slower.
+- **Look at one moment:** `?qr=0.55` jumps there; `?qr=0.55&shot` pins the stage and paints exactly that frame, for
+  screenshots.
+- **Characters:** Open Peeps by Pablo Stanley (CC0, `tools/qr-scene/open-peeps/LICENSE`), assembled by
+  `tools/qr-scene/peep.py`.
+- The phone and POS screens copy `client/src/CustomerOrder.jsx` and `client/src/QrOrders.jsx`. If those screens
+  change, update `phone()` and `monitor()` in the generator so the page still shows the product as it is.
