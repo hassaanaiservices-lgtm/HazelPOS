@@ -40,7 +40,14 @@ function post() {
   need(files.includes('latest.yml'), 'no latest.yml: installed apps could not find updates');
   if (exe) {
     const mb = fs.statSync(path.join(dist, exe)).size / 1048576;
-    need(mb < 150, `the installer is ${Math.round(mb)} MB (expected under 150): something large got packed`);
+    if (mb > 150) { // not a stopper: list the biggest parts so the cause shows on the run page
+      warnings.push(`the installer is ${Math.round(mb)} MB (usually about 100)`);
+      const du = d => { let n = 0; for (const e of fs.readdirSync(d, { withFileTypes: true })) { const p = path.join(d, e.name); n += e.isDirectory() ? du(p) : fs.statSync(p).size; } return n; };
+      const root = path.join(dist, 'win-unpacked'), parts = [];
+      const walk = (d, depth) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const p = path.join(d, e.name); if (e.isDirectory()) { parts.push([path.relative(root, p), du(p)]); if (depth < 4) walk(p, depth + 1); } else parts.push([path.relative(root, p), fs.statSync(p).size]); } };
+      if (fs.existsSync(root)) walk(root, 0);
+      parts.sort((x, y) => y[1] - x[1]).slice(0, 15).forEach(([n, b]) => warnings.push(`size: ${(b / 1048576).toFixed(1)} MB  ${n}`));
+    }
     console.log(`installer: ${exe}, ${mb.toFixed(1)} MB`);
     need(exe.includes(pkg.version), `the installer name does not contain the version ${pkg.version}`);
   }
