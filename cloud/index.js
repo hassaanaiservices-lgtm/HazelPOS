@@ -631,14 +631,18 @@ app.get('/api/vendor/owners', vendorAuth, (req, res) => {
   })));
 });
 app.post('/api/vendor/owners', vendorAuth, (req, res) => {
+  // Only the name and phone are needed. The owner's dashboard login (email + password) is optional and can be added later.
   const email = String(req.body.email || '').trim().toLowerCase(), pass = String(req.body.password || '');
-  if (!/^\S+@\S+\.\S+$/.test(email)) return res.status(400).json({ error: 'Enter a valid email' });
-  if (pass.length < 8) return res.status(400).json({ error: 'Password must be at least 8 characters' });
-  if (db.prepare('SELECT 1 FROM owners WHERE email=?').get(email)) return res.status(400).json({ error: 'An account with this email already exists' });
+  if (!String(req.body.name || '').trim()) return res.status(400).json({ error: 'Enter the restaurant name' });
+  if (!String(req.body.phone || '').trim()) return res.status(400).json({ error: "Enter the owner's phone number" });
+  if (email && !/^\S+@\S+\.\S+$/.test(email)) return res.status(400).json({ error: 'Enter a valid email, or leave it empty' });
+  if (email && pass.length < 8) return res.status(400).json({ error: 'With an email, the dashboard password must be at least 8 characters' });
+  if (!email && pass) return res.status(400).json({ error: 'A dashboard password needs an email too' });
+  if (email && db.prepare('SELECT 1 FROM owners WHERE email=?').get(email)) return res.status(400).json({ error: 'An account with this email already exists' });
   const paid = /^\d{4}-\d{2}-\d{2}$/.test(req.body.paid_until || '') ? req.body.paid_until : addMonths(today(), 1);
   const fee = v => v === '' || v == null ? null : Math.max(0, +v || 0);
   const id = db.prepare('INSERT INTO owners (email,name,pass,created_at,phone,plan,notes,paid_until,monthly_fee,install_fee,install_paid) VALUES (?,?,?,?,?,?,?,?,?,?,?)')
-    .run(email, String(req.body.name || ''), hashPass(pass), now(), String(req.body.phone || ''), String(req.body.plan || ''), String(req.body.notes || ''), paid,
+    .run(email || null, String(req.body.name || '').trim(), email ? hashPass(pass) : null, now(), String(req.body.phone || '').trim(), String(req.body.plan || ''), String(req.body.notes || ''), paid,
       fee(req.body.monthly_fee), fee(req.body.install_fee), req.body.install_paid ? 1 : 0).lastInsertRowid;
   res.json({ id });
 });
@@ -659,6 +663,15 @@ app.post('/api/vendor/owners/:id', vendorAuth, (req, res) => {
     b.paid_until === undefined ? o.paid_until : b.paid_until, b.suspended === undefined ? o.suspended : (b.suspended ? 1 : 0),
     grace(b.wa_grace_days, o.wa_grace_days), grace(b.pos_grace_days, o.pos_grace_days),
     b.cancelled === undefined ? o.cancelled_at : b.cancelled ? (o.cancelled_at || now()) : null, o.id);
+  if (b.email !== undefined || b.password !== undefined) { // the owner's dashboard login, added or changed later
+    const email = b.email === undefined ? o.email : String(b.email || '').trim().toLowerCase() || null;
+    if (email && !/^\S+@\S+\.\S+$/.test(email)) return res.status(400).json({ error: 'Enter a valid email' });
+    if (email && db.prepare('SELECT 1 FROM owners WHERE email=? AND id != ?').get(email, o.id)) return res.status(400).json({ error: 'An account with this email already exists' });
+    if (b.password !== undefined && String(b.password).length < 8) return res.status(400).json({ error: 'The password must be at least 8 characters' });
+    if (email && !o.pass && b.password === undefined) return res.status(400).json({ error: 'Set a password too' });
+    db.prepare('UPDATE owners SET email=?, pass=? WHERE id=?').run(email, !email ? null : b.password !== undefined ? hashPass(String(b.password)) : o.pass, o.id);
+    db.prepare('DELETE FROM owner_sessions WHERE owner_id=?').run(o.id); // a changed login signs them out everywhere
+  }
   const fee = (v, cur) => v === undefined ? cur : v === '' || v === null ? null : Math.max(0, +v || 0);
   db.prepare('UPDATE owners SET monthly_fee=?, install_fee=?, install_paid=? WHERE id=?').run(fee(b.monthly_fee, o.monthly_fee), fee(b.install_fee, o.install_fee),
     b.install_paid === undefined ? o.install_paid : b.install_paid ? 1 : 0, o.id);

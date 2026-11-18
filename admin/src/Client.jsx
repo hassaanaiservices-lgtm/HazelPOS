@@ -21,6 +21,18 @@ export default function Client({ id }) {
     const v = await inputBox('Paid until', { type: 'date', value: o.paid_until || '' })
     if (v) { await api(`/owners/${id}`, { paid_until: v }); toast(`Paid until ${v}`); load() }
   })
+  // The owner's sales-dashboard login (optional): email + password, added or changed any time
+  const setLogin = run(async () => {
+    const email = await inputBox("Owner's email for their sales dashboard (empty = no login)", { type: 'email', value: o.email || '' })
+    if (email === null) return
+    const body = { email }
+    if (email.trim()) {
+      const password = await inputBox(o.email ? 'New password (8+ characters), or leave empty to keep the old one' : 'Password (8+ characters)', { type: 'text' })
+      if (password === null) return
+      if (password) body.password = password
+    }
+    await api(`/owners/${id}`, body); toast(email.trim() ? 'Dashboard login saved' : 'Dashboard login removed'); load()
+  })
   const suspend = run(async () => {
     if (!o.suspended && !await confirmBox(`Stop ${o.name || o.email} now? Their WhatsApp bot stops right away, and new orders stop on their POS at its next check (within 3 hours). You can resume any time.`, { confirmLabel: 'Stop now', danger: true })) return
     await api(`/owners/${id}`, { suspended: !o.suspended }); toast(o.suspended ? 'Resumed' : 'Stopped'); load()
@@ -80,10 +92,11 @@ export default function Client({ id }) {
             <br />"+1 month" counts from the later of today and the paid-until date. No internet never stops anything.</p>}
         </div>
         <div className="card"><h3>Details</h3>
-          <p>{o.email}</p>
+          {o.email ? <p>{o.email}</p> : <p className="muted">No dashboard login yet</p>}
           {o.phone && <p>{o.phone}</p>}
           {o.notes && <p className="muted" style={{ marginTop: 8 }}>{o.notes}</p>}
           <p className="muted small" style={{ marginTop: 8 }}>Client since {o.created_at?.slice(0, 10)}. The email and password log in to their own sales dashboard on the cloud.</p>
+          <button className="link" style={{ padding: 0, minHeight: 0, marginTop: 8 }} onClick={setLogin}>{o.email ? 'Change dashboard login' : 'Add dashboard login'}</button>
         </div>
       </div>
 

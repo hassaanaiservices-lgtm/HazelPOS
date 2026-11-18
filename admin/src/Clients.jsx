@@ -75,9 +75,9 @@ function NewClient({ onClose, onDone }) {
         <h2>New client</h2>
         <div className="grid2">
           <label>Restaurant name<input value={f.name} onChange={set('name')} required autoFocus /></label>
-          <label>Owner phone<input value={f.phone} onChange={set('phone')} inputMode="tel" /></label>
-          <label>Owner email (their cloud dashboard login)<input type="email" value={f.email} onChange={set('email')} required /></label>
-          <label>Dashboard password (8+ characters)<input value={f.password} onChange={set('password')} minLength={8} required /></label>
+          <label>Owner phone<input value={f.phone} onChange={set('phone')} inputMode="tel" required /></label>
+          <label>Owner email (optional: their sales dashboard login)<input type="email" value={f.email} onChange={set('email')} /></label>
+          <label>Dashboard password (optional, 8+ characters)<input value={f.password} onChange={set('password')} minLength={8} required={!!f.email} /></label>
           <label>Monthly fee (Rs)<input type="number" min="0" value={f.monthly_fee} onChange={set('monthly_fee')} placeholder="e.g. 5000" /></label>
           <label>Installation fee (Rs, one time)<input type="number" min="0" value={f.install_fee} onChange={set('install_fee')} placeholder="e.g. 15000" /></label>
           <label className="check"><input type="checkbox" checked={f.install_paid} onChange={e => setF({ ...f, install_paid: e.target.checked })} /> Installation fee paid</label>
