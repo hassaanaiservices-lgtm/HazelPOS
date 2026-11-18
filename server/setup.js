@@ -9,7 +9,8 @@
 const { importMenu } = require('./menu-import');
 
 const RESTAURANT_KEYS = ['name', 'address', 'phone', 'logo', 'logo_image', 'tax_rate', 'ntn', 'strn', 'footer', 'bank_name', 'bank_account', 'bank_title'];
-const ROLES = ['admin', 'cashier', 'kitchen'];
+const crypto = require('crypto');
+const ROLES = ['admin', 'cashier', 'kitchen', 'rider']; // riders get a staff record too (the Riders section, their fee and phone link)
 const FLOOR_COLORS = ['#ff9f43', '#a55eea', '#26de81', '#4bcffa', '#ff6b81'];
 
 module.exports = function setupApplier(db, { hashPin }) {
@@ -30,6 +31,9 @@ module.exports = function setupApplier(db, { hashPin }) {
       const setSetting = db.prepare('INSERT INTO settings (key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value');
       // Demo bank details and NTN must not stay on a real restaurant's receipts
       for (const k of ['ntn', 'strn', 'bank_name', 'bank_account', 'bank_title']) setSetting.run(k, '');
+      // The demo restaurant's own name, address and phone must not stay when the setup leaves them empty (first time only:
+      // later the owner may have typed their own on the POS)
+      if (firstTime) for (const [k, v] of [['name', 'My Restaurant'], ['address', ''], ['phone', ''], ['footer', 'Thank you! Visit again 🙏'], ['logo', '🍽️'], ['logo_image', '']]) setSetting.run(k, v);
       if (s.restaurant?.logo_image && !/^data:image\/(png|jpeg|webp);base64,/.test(s.restaurant.logo_image)) delete s.restaurant.logo_image;
       for (const k of RESTAURANT_KEYS) if (s.restaurant?.[k] != null && String(s.restaurant[k]).trim() !== '') setSetting.run(k, String(s.restaurant[k]).trim());
       done.restaurant = s.restaurant?.name || '';
@@ -60,7 +64,12 @@ module.exports = function setupApplier(db, { hashPin }) {
       else if (staff.some(u => u.role === 'admin')) {
         if (new Set(staff.map(u => String(u.pin).trim().toLowerCase())).size !== staff.length) throw new Error('Two staff members in the setup have the same PIN');
         db.exec('DELETE FROM sessions'); db.exec('DELETE FROM users');
-        for (const u of staff) db.prepare('INSERT INTO users (name, pin, role, must_change_pin) VALUES (?,?,?,1)').run(String(u.name).trim(), hashPin(String(u.pin)), u.role); // each person chooses their own PIN at the first login (the cloud held this one in plain text)
+        for (const u of staff) {
+          // A rider is also a staff member (Riders section: delivery fee, phone link); their login points at that record
+          const emp = u.role !== 'rider' ? null : db.prepare("INSERT INTO employees (name, phone, job, salary, active, joined, delivery_fee, rider_token) VALUES (?,?,'Rider',0,1,date('now'),?,?)")
+            .run(String(u.name).trim(), String(u.phone || ''), Math.max(0, +u.delivery_fee || 0), crypto.randomBytes(16).toString('hex')).lastInsertRowid;
+          db.prepare('INSERT INTO users (name, pin, role, must_change_pin, employee_id) VALUES (?,?,?,1,?)').run(String(u.name).trim(), hashPin(String(u.pin)), u.role, emp); // each person chooses their own PIN at the first login (the cloud held this one in plain text)
+        }
         done.staff = staff.length;
       }
       setSetting.run('setup_applied_at', new Date().toISOString());

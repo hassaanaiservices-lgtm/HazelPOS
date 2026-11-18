@@ -769,7 +769,7 @@ app.post('/api/vendor/branches/:id/setup', vendorAuth, (req, res) => {
   if (Array.isArray(body.zones)) data.zones = body.zones.slice(0, 200).map(z => ({ name: String(z.name || '').trim(), fee: +z.fee || 0, min_order: +z.min_order || 0, free_above: +z.free_above || 0, eta_min: +z.eta_min || 45 })).filter(z => z.name);
   if (Array.isArray(body.staff)) {
     const staff = body.staff.map(u => ({ name: String(u.name || '').trim(), role: u.role, pin: String(u.pin || '').trim() })).filter(u => u.name);
-    if (staff.some(u => !['admin', 'cashier', 'kitchen'].includes(u.role))) return res.status(400).json({ error: 'Role must be admin, cashier or kitchen' });
+    if (staff.some(u => !['admin', 'cashier', 'kitchen', 'rider'].includes(u.role))) return res.status(400).json({ error: 'Role must be admin, cashier, kitchen or rider' });
     if (staff.some(u => !/^[a-z0-9]{4,12}$/i.test(u.pin))) return res.status(400).json({ error: 'Every PIN must be 4 to 12 letters or numbers' });
     if (new Set(staff.map(u => u.pin.toLowerCase())).size !== staff.length) return res.status(400).json({ error: 'Two people have the same PIN' });
     if (staff.length && !staff.some(u => u.role === 'admin')) return res.status(400).json({ error: 'Add at least one admin (the owner), or they cannot open Settings' });

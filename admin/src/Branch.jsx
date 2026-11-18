@@ -389,7 +389,7 @@ function Staff({ staff, save }) {
       <div style={{ marginTop: 12 }}>{rows.map((u, i) => (
         <div className="staff-row" key={i}>
           <input aria-label="Name" placeholder="Name" value={u.name} onChange={set(i, 'name')} />
-          <select aria-label="Role" value={u.role} onChange={set(i, 'role')}><option value="admin">Admin (owner)</option><option value="cashier">Cashier</option><option value="kitchen">Kitchen</option></select>
+          <select aria-label="Role" value={u.role} onChange={set(i, 'role')}><option value="admin">Admin (owner)</option><option value="cashier">Cashier</option><option value="kitchen">Kitchen</option><option value="rider">Rider</option></select>
           <input aria-label="PIN" placeholder={u.pin_applied ? 'on their POS' : 'PIN (4+ letters or numbers)'} value={u.pin} onChange={e => set(i, 'pin')({ target: { value: e.target.value.replace(/[^a-z0-9]/gi, '').slice(0, 12) } })} autoCapitalize="none" maxLength={12} />
           <button className="danger" aria-label={`Remove ${u.name || 'person'}`} onClick={() => setRows(rows.filter((_, n) => n !== i))}>✕</button>
         </div>))}</div>
