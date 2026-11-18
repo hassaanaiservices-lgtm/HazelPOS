@@ -75,7 +75,8 @@ module.exports = function licence(db, cloud, { setup = null, health = () => ({})
       else set('lic_error', d.error || `Cloud replied ${r.status}`);
     } catch (e) { tick(); set('lic_error', e.name === 'TimeoutError' ? 'Cloud took too long to answer' : 'Cloud not reachable (no internet?)'); return state(); }
     // You prepared (or finished) the restaurant's setup after they activated: take it now, while there are no orders yet
-    if (data.setup_ready && setup && !setup.appliedAt() && !setup.hasOrders()) await pullSetup();
+    // (also after it was applied once: the cloud marks it ready again only when you saved a change in the admin app; never once there are orders)
+    if (data.setup_ready && setup && !setup.hasOrders()) await pullSetup();
     call('/api/sync/health', { ...health(), licence: state().state, setup_applied_at: setup?.appliedAt() || null, setup_error: get('setup_error') || null })
       .catch(() => {}); // only for your admin app: never matters to the POS
     return state();

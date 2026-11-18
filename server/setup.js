@@ -20,6 +20,7 @@ module.exports = function setupApplier(db, { hashPin }) {
     if (hasOrders()) throw new Error('This POS already has orders, so the setup from HazelPOS was not applied (it would replace your menu and staff)');
     const s = setup || {};
     const done = {};
+    const firstTime = !appliedAt();
     db.exec('BEGIN');
     try {
       // The demo restaurant goes: menu, recipes, tables, floors, delivery areas, sample expenses, the demo cash drawer
@@ -53,7 +54,10 @@ module.exports = function setupApplier(db, { hashPin }) {
 
       // Staff: only when the setup has an owner, so nobody is ever locked out of Settings
       const staff = (s.staff || []).filter(u => String(u.name || '').trim() && ROLES.includes(u.role) && /^[a-z0-9]{4,12}$/i.test(String(u.pin).trim())); // 4 to 12 letters or numbers
-      if (staff.some(u => u.role === 'admin')) {
+      // Only the first time: when you change the setup again later (before the first order), the logins people already
+      // use, and the PINs they chose, stay as they are. PINs are changed on the POS itself (Settings → Staff & PINs).
+      if (!firstTime) done.staff_kept = true;
+      else if (staff.some(u => u.role === 'admin')) {
         if (new Set(staff.map(u => String(u.pin).trim().toLowerCase())).size !== staff.length) throw new Error('Two staff members in the setup have the same PIN');
         db.exec('DELETE FROM sessions'); db.exec('DELETE FROM users');
         for (const u of staff) db.prepare('INSERT INTO users (name, pin, role, must_change_pin) VALUES (?,?,?,1)').run(String(u.name).trim(), hashPin(String(u.pin)), u.role); // each person chooses their own PIN at the first login (the cloud held this one in plain text)

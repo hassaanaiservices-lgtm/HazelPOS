@@ -198,6 +198,7 @@ function MenuPictures({ id, images, reload }) {
     const r = await api(`/branches/${id}/setup/menu-rows`, { rows, apply })
     setCheck(r)
     if (r.applied) { toast(`Menu saved: ${r.items} items`); setRows(null); setCheck(null); reload() }
+    else if (apply) toastError(`NOT saved: ${r.errors.length} row${r.errors.length === 1 ? ' has' : 's have'} a problem (shown in red below). Fix ${r.errors.length === 1 ? 'it' : 'them'} or remove the row, then save again.`)
   })
   const csv = () => downloadCsv('menu-from-pictures.csv', [['Category', 'Item', 'Size', 'Price', 'Description'], ...rows])
   return (
