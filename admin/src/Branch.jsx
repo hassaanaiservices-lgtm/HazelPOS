@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api, ago, fileBase64, shrinkImage, downloadCsv } from './lib'
-import { run, toast, toastError, confirmBox } from './notify'
+import { run, toast, toastError, confirmBox, inputBox } from './notify'
 import { Stage, WhatsApp, Check } from './ui'
 
 const TABS = ['Overview', 'Details', 'Menu', 'Tables', 'Delivery areas', 'Staff', 'Health & errors']
@@ -35,7 +35,7 @@ export default function Branch({ id }) {
       {tab === 'Menu' && <><MenuPictures id={id} images={d.images} reload={load} /><Menu id={id} d={d} reload={load} /><Deals menu={d.setup.menu || []} save={save} /></>}
       {tab === 'Tables' && <Tables tables={d.setup.tables || []} floors={d.setup.floors || []} save={save} />}
       {tab === 'Delivery areas' && <Zones zones={d.setup.zones || []} save={save} />}
-      {tab === 'Staff' && <Staff staff={d.setup.staff || []} save={save} />}
+      {tab === 'Staff' && <><PinReset id={id} branch={d.branch} /><Staff staff={d.setup.staff || []} save={save} /></>}
       {tab === 'Health & errors' && <Health d={d} />}
     </>
   )
@@ -374,6 +374,35 @@ function Zones({ zones, save }) {
       <label>One area per line: <code>area, delivery fee, minimum order, free delivery above (0 = never), minutes</code>
         <textarea rows={12} value={text} onChange={e => setText(e.target.value)} placeholder={'Gulberg, 150, 800, 3000, 35\nDHA Phase 5, 200, 1000, 0, 45'} /></label>
       <div className="row" style={{ marginTop: 12 }}><button className="primary" onClick={run(() => save({ zones: fromLines(text).map(([name, fee, min_order, free_above, eta_min]) => ({ name, fee: +fee || 0, min_order: +min_order || 0, free_above: +free_above || 0, eta_min: +eta_min || 45 })) }))}>Save delivery areas</button></div>
+    </div>
+  )
+}
+
+// Someone forgot their PIN: you set a temporary one here, their POS picks it up within a minute, and at their next login
+// they must choose a new one. PINs are never stored readable anywhere, so nobody (not even you) can look them up.
+const tempPin = () => Array.from(crypto.getRandomValues(new Uint8Array(6)), n => 'abcdefghjkmnpqrstuvwxyz23456789'[n % 31]).join('')
+const ROLE_NAMES = { admin: 'Owner (admin)', cashier: 'Cashier', kitchen: 'Kitchen', rider: 'Rider' }
+function PinReset({ id, branch }) {
+  const users = branch.health?.users || []
+  const [list, setList] = useState([])
+  const load = () => api(`/branches/${id}/pin-resets`).then(setList)
+  useEffect(() => { run(load)(); const t = setInterval(() => run(load)(), 15000); return () => clearInterval(t) }, [id])
+  const reset = run(async u => {
+    const pin = await inputBox(`Temporary PIN for ${u.name}. Tell them this PIN; at their next login the POS makes them choose a new one.`, { value: tempPin(), confirmLabel: 'Reset PIN' })
+    if (!pin) return
+    await api(`/branches/${id}/pin-reset`, { user_id: u.id, pin: pin.trim() })
+    toast(`Done. ${u.name}'s POS gets it within a minute (when it is online). Tell them: log in with ${pin.trim()}`); load()
+  })
+  const last = u => list.find(r => r.user_id === u.id)
+  return (
+    <div className="card"><h3>Forgot a PIN?</h3>
+      <p className="muted">PINs are stored scrambled and each person chooses their own, so nobody can see them. Reset it instead: set a temporary PIN here, tell the person, and at their next login the POS asks them to choose a new one.</p>
+      {!users.length ? <p className="muted" style={{ marginTop: 12 }}>The list of logins appears after their POS reports in (within 3 hours of starting).</p>
+        : <table style={{ marginTop: 12 }}><thead><tr><th>Login</th><th>Role</th><th>Last reset</th><th /></tr></thead>
+          <tbody>{users.map(u => { const r = last(u); return (
+            <tr key={u.id}><td><b>{u.name}</b></td><td className="muted">{ROLE_NAMES[u.role] || u.role}</td>
+              <td className="muted small">{!r ? '—' : !r.applied_at ? `waiting for their POS (${ago(r.created_at)})` : r.result === 'ok' ? `done ${ago(r.applied_at)}` : r.result}</td>
+              <td><button onClick={() => reset(u)}>Reset PIN</button></td></tr>) })}</tbody></table>}
     </div>
   )
 }

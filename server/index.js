@@ -522,7 +522,8 @@ app.use('/api', (req, res, next) => {
   if (roles && !req.user) return res.status(401).json({ error: 'Please log in again' });
   if (roles && !roles.includes(req.user.role)) return res.status(403).json({ error: 'Not allowed for your role' });
   // Logged in with a starting PIN: nothing works until they choose their own
-  if (FORCE_PIN && req.user?.must_change_pin && !/^(POST \/me\/pin|POST \/logout|GET \/settings)$/.test(`${req.method} ${req.path}`))
+  // set by a starting PIN on a real install, a PIN from the vendor's setup, or a PIN reset from the admin app
+  if (req.user?.must_change_pin && !/^(POST \/me\/pin|POST \/logout|GET \/settings)$/.test(`${req.method} ${req.path}`))
     return res.status(403).json({ error: 'Choose your own PIN first', code: 'change_pin' });
 
   // Record every change made by staff
@@ -569,7 +570,7 @@ app.post('/api/login', (req, res) => {
   const token = crypto.randomBytes(32).toString('hex');
   db.prepare('INSERT INTO sessions (token,user_id,created_at,last_seen) VALUES (?,?,?,?)').run(token, u.id, now(), now());
   req.user = u; audit(req, 'LOGIN', 200);
-  res.json({ token, user: { id: u.id, name: u.name, role: u.role, must_change_pin: !!(FORCE_PIN && u.must_change_pin) } });
+  res.json({ token, user: { id: u.id, name: u.name, role: u.role, must_change_pin: !!u.must_change_pin } });
 });
 app.post('/api/logout', (req, res) => {
   db.prepare('DELETE FROM sessions WHERE token=?').run(req.token);
@@ -1780,6 +1781,27 @@ crud('promos', 'promos', ['code', 'type', 'value', 'min_order', 'max_discount', 
 // The branch key lives in its own table so it never appears in /api/settings
 const cloud = require('./cloud-sync')(db);
 const riderSync = require('./rider-sync')(db, cloud, { getOrder, dispatchOrder, deliverOrder });
+// A PIN you reset from the admin app (someone forgot theirs): picked up within a minute. The person logs in with the
+// temporary PIN and must choose a new one straight away; their other open sessions are signed out.
+setInterval(async () => {
+  if (!cloud.status().connected || cloud.isHeld()) return;
+  try {
+    const list = await cloud.call('/api/sync/pin-resets');
+    if (!Array.isArray(list) || !list.length) return;
+    const results = list.map(r => {
+      const u = db.prepare('SELECT id, name FROM users WHERE id=?').get(r.user_id);
+      if (!u) return { id: r.id, result: 'That login no longer exists on the POS' };
+      const taken = userByPin(String(r.pin || ''));
+      if (!PIN_OK(r.pin)) return { id: r.id, result: 'Not a valid PIN' };
+      if (taken && taken.id !== u.id) return { id: r.id, result: 'Someone else on this POS already uses that PIN: choose another' };
+      db.prepare('UPDATE users SET pin=?, must_change_pin=1 WHERE id=?').run(hashPin(String(r.pin)), u.id);
+      db.prepare('DELETE FROM sessions WHERE user_id=?').run(u.id);
+      db.prepare('INSERT INTO audit_log (at,user_id,user_name,role,ip,action,status,detail) VALUES (?,?,?,?,?,?,?,?)').run(now(), null, 'HazelPOS (remote)', '', '', 'PIN RESET', 200, `PIN of ${u.name} reset from HazelPOS Admin`);
+      return { id: r.id, result: 'ok' };
+    });
+    await cloud.call('/api/sync/pin-resets/ack', { results });
+  } catch { /* offline: next minute */ }
+}, 60_000).unref();
 app.get('/api/cloud/status', (req, res) => res.json(cloud.status()));
 app.post('/api/cloud/connect', async (req, res) => {
   const url = String(req.body.url || '').trim().replace(/\/+$/, ''); let key = String(req.body.key || '').trim();
@@ -1817,6 +1839,7 @@ const setupApplier = require('./setup')(db, { hashPin });
 const health = () => {
   const w = waModule?.wa.status() || {};
   return {
+    users: db.prepare('SELECT id, name, role FROM users ORDER BY id').all().map(u => ({ ...u })), // names and roles only: your admin app's "Reset PIN"
     version: process.env.HAZEL_VERSION || require('./package.json').version, platform: `${process.platform} ${process.arch}`, node: process.versions.node,
     uptime_min: Math.round(process.uptime() / 60),
     whatsapp: { status: w.status, connected_at: w.connected_at, error: w.error || '', assistant: waModule?.assistant.enabled() ?? null },

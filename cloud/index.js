@@ -83,6 +83,9 @@ CREATE INDEX IF NOT EXISTS c_delivery_track ON c_delivery (track_token);
 CREATE TABLE IF NOT EXISTS rider_events (id INTEGER PRIMARY KEY, branch_id INTEGER, rider_local_id INTEGER, order_local_id INTEGER, type TEXT, at TEXT, applied_at TEXT, result TEXT);
 CREATE INDEX IF NOT EXISTS rider_events_open ON rider_events (branch_id, applied_at);
 CREATE TABLE IF NOT EXISTS rider_trail (branch_id INTEGER, rider_local_id INTEGER, lat REAL, lng REAL, at TEXT);
+-- A forgotten PIN, reset by you from the admin app: the POS picks it up within a minute, the person must choose a new one at login.
+-- The temporary PIN is wiped as soon as the POS has it (or after a day).
+CREATE TABLE IF NOT EXISTS pin_resets (id INTEGER PRIMARY KEY, branch_id INTEGER, user_id INTEGER, user_name TEXT, pin TEXT, created_at TEXT, by_who TEXT, applied_at TEXT, result TEXT);
 CREATE INDEX IF NOT EXISTS rider_trail_r ON rider_trail (branch_id, rider_local_id, at);
 `);
 
@@ -506,6 +509,18 @@ app.get('/api/track/:token', (req, res) => {
   });
 });
 // The owner's map: today's trail of one rider
+// ---------- PIN reset (admin app -> POS) ----------
+const PIN_RESET_HOURS = 24;
+app.get('/api/sync/pin-resets', branchAuth, (req, res) => {
+  db.prepare("UPDATE pin_resets SET pin=NULL, result='expired', applied_at=? WHERE branch_id=? AND applied_at IS NULL AND created_at < ?")
+    .run(now(), req.branch.id, new Date(Date.now() - PIN_RESET_HOURS * 3600e3).toISOString());
+  res.json(db.prepare('SELECT id, user_id, pin FROM pin_resets WHERE branch_id=? AND applied_at IS NULL ORDER BY id').all(req.branch.id));
+});
+app.post('/api/sync/pin-resets/ack', branchAuth, (req, res) => {
+  const up = db.prepare('UPDATE pin_resets SET pin=NULL, applied_at=?, result=? WHERE id=? AND branch_id=? AND applied_at IS NULL');
+  for (const r of (Array.isArray(req.body.results) ? req.body.results : []).slice(0, 50)) up.run(now(), String(r.result || 'ok').slice(0, 200), +r.id, req.branch.id);
+  res.json({ ok: true });
+});
 app.get('/api/sync/riders/:id/trail', branchAuth, (req, res) => {
   res.json(db.prepare('SELECT lat, lng, at FROM rider_trail WHERE branch_id=? AND rider_local_id=? AND at > ? ORDER BY at').all(req.branch.id, +req.params.id, new Date(Date.now() - 24 * 3600e3).toISOString()));
 });
@@ -924,6 +939,23 @@ app.post('/api/vendor/updates/request', vendorAuth, (req, res) => {
 });
 
 // A new activation code: shown once. Using it on a PC swaps it for a new key, so any older install stops.
+// The logins on that POS (from its last health report) and recent PIN resets
+app.get('/api/vendor/branches/:id/pin-resets', vendorAuth, (req, res) => {
+  const b = vendorBranch(req, res); if (!b) return;
+  res.json(db.prepare('SELECT id, user_id, user_name, created_at, by_who, applied_at, result FROM pin_resets WHERE branch_id=? ORDER BY id DESC LIMIT 20').all(b.id));
+});
+app.post('/api/vendor/branches/:id/pin-reset', vendorAuth, (req, res) => {
+  const b = vendorBranch(req, res); if (!b) return;
+  const pin = String(req.body.pin || '').trim(), userId = +req.body.user_id;
+  if (!/^[a-z0-9]{4,12}$/i.test(pin)) return res.status(400).json({ error: 'The temporary PIN must be 4 to 12 letters or numbers' });
+  if (['1234', '1111', '2222', '3333', '0000', '4321'].includes(pin.toLowerCase())) return res.status(400).json({ error: 'Choose a less easy temporary PIN' });
+  const users = JSON.parse(b.health || 'null')?.users || [];
+  const u = users.find(x => x.id === userId);
+  if (!u) return res.status(400).json({ error: "That login is not on this POS's last report. Wait for the POS to report again (within 3 hours), or ask the owner to reset it in Settings → Staff & PINs" });
+  db.prepare("UPDATE pin_resets SET pin=NULL, applied_at=?, result='replaced by a newer reset' WHERE branch_id=? AND user_id=? AND applied_at IS NULL").run(now(), b.id, userId);
+  db.prepare('INSERT INTO pin_resets (branch_id, user_id, user_name, pin, created_at, by_who) VALUES (?,?,?,?,?,?)').run(b.id, userId, String(u.name), pin, now(), req.who);
+  res.json({ ok: true });
+});
 app.post('/api/vendor/branches/:id/code', vendorAuth, (req, res) => {
   const b = vendorBranch(req, res); if (!b) return;
   const code = newCode();
