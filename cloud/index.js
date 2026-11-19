@@ -787,6 +787,8 @@ app.post('/api/vendor/branches/:id/setup', vendorAuth, (req, res) => {
     if (staff.some(u => !['admin', 'cashier', 'kitchen', 'rider'].includes(u.role))) return res.status(400).json({ error: 'Role must be admin, cashier, kitchen or rider' });
     if (staff.some(u => !/^[a-z0-9]{4,12}$/i.test(u.pin))) return res.status(400).json({ error: 'Every PIN must be 4 to 12 letters or numbers' });
     if (new Set(staff.map(u => u.pin.toLowerCase())).size !== staff.length) return res.status(400).json({ error: 'Two people have the same PIN' });
+    const easy = staff.find(u => ['1234', '1111', '2222', '3333', '0000', '4321'].includes(u.pin.toLowerCase())); // the POS refuses these at login
+    if (easy) return res.status(400).json({ error: `${easy.name}'s PIN ${easy.pin} is too easy (the POS refuses it). Choose another, e.g. a name and a number` });
     if (staff.length && !staff.some(u => u.role === 'admin')) return res.status(400).json({ error: 'Add at least one admin (the owner), or they cannot open Settings' });
     data.staff = staff;
   }
