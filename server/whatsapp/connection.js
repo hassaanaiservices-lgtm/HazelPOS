@@ -11,12 +11,11 @@ const path = require('path');
 const QRCode = require('qrcode');
 
 // HAZEL_DATA_DIR: the desktop app keeps the login and voice notes in the user's app-data folder, so updates never wipe them.
+// hooks.dataDir: HazelPOS Cloud runs one connection per restaurant, each in its own folder.
 const DATA_DIR = process.env.HAZEL_DATA_DIR ? path.join(process.env.HAZEL_DATA_DIR, 'whatsapp') : __dirname;
-const AUTH_DIR = path.join(DATA_DIR, 'auth');
 // WHATSAPP=off: never connect (test copies, the demo server). Two servers on one WhatsApp login push each other off,
 // and the second one could answer real customers from the wrong database.
 const OFF = process.env.WHATSAPP === 'off';
-const MEDIA_DIR = path.join(DATA_DIR, 'media'); // voice notes, so staff can listen and the engine can transcribe
 const HEARTBEAT_MS = 30_000;        // how often we note "still online", to know later what we missed
 const OFFLINE_GRACE_MS = 20_000;    // messages this close to the connection opening count as live
 const HISTORY_MARGIN_MS = 120_000;  // ignore messages older than our last moment online (they're history, not missed)
@@ -48,6 +47,8 @@ function parse(c) {
 
 // hooks.onIncoming(row): called for every new live customer message (not for messages that arrived while offline)
 module.exports = function waConnection(store, hooks = {}) {
+  const AUTH_DIR = path.join(hooks.dataDir || DATA_DIR, 'auth');
+  const MEDIA_DIR = path.join(hooks.dataDir || DATA_DIR, 'media'); // voice notes, so staff can listen and the engine can transcribe
   let sock = null, status = 'disconnected', qr = null, me = null, error = '';
   let wanted = false, retryMs = 4000, connectedAt = 0, acceptFrom = 0, heartbeat = null, retryTimer = null;
 
@@ -190,13 +191,20 @@ module.exports = function waConnection(store, hooks = {}) {
     try { for (const f of fs.readdirSync(MEDIA_DIR)) { const p = path.join(MEDIA_DIR, f); if (Date.now() - fs.statSync(p).mtimeMs > (hooks.keepAudioDays || 14) * 864e5) fs.rmSync(p); } }
     catch { /* no folder yet */ }
   };
-  cleanMedia(); setInterval(cleanMedia, 864e5).unref();
+  cleanMedia(); const cleaner = setInterval(cleanMedia, 864e5); cleaner.unref();
 
   // Already linked before: reconnect by itself when the POS starts
   if (!OFF && fs.existsSync(path.join(AUTH_DIR, 'creds.json'))) setTimeout(() => connect().catch(e => console.error('WhatsApp reconnect:', e.message)), 1500);
 
+  // Close the connection but stay linked (the cloud stops a restaurant's bot; the login is kept for later)
+  function stop() {
+    wanted = false; clearTimeout(retryTimer); clearInterval(cleaner);
+    const s = sock; sock = null; goOffline(); status = 'disconnected'; qr = null;
+    try { s?.end(undefined); } catch { /* already closed */ }
+  }
+
   return {
-    connect, send, sendImage, typing, isConnected, markRead, logout, mediaPath: file => path.join(MEDIA_DIR, path.basename(file)),
+    stop, connect, send, sendImage, typing, isConnected, markRead, logout, mediaPath: file => path.join(MEDIA_DIR, path.basename(file)),
     status: () => ({ status, qr, me, error, connected_at: connectedAt ? new Date(connectedAt).toISOString() : null, last_online: store.meta.get('last_online') }),
   };
 };

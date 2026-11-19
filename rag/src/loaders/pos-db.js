@@ -10,6 +10,13 @@ function readPos(dbPath, dataConfig) {
   const db = new DatabaseSync(dbPath, { readOnly: true });
   try {
     db.exec('PRAGMA busy_timeout = 5000'); // the POS may be writing right now: wait for it instead of failing
+    return readPosDb(db, dataConfig);
+  } finally { db.close(); }
+}
+
+// The same from a database that is already open (the POS sends this to HazelPOS Cloud for the cloud WhatsApp bot)
+function readPosDb(db, dataConfig) {
+  {
     const categories = db.prepare('SELECT id, name FROM categories ORDER BY id').all().map(c => ({ ...c }));
     // Hidden (inactive) products are included, marked active:false, so the assistant can say "not available right now"
     const menu = db.prepare('SELECT * FROM products ORDER BY category_id, id').all().map(p => ({
@@ -31,7 +38,7 @@ function readPos(dbPath, dataConfig) {
     let faq = []; // the owner's questions and answers (Settings → WhatsApp bot); empty answers are not sent to the assistant
     try { faq = db.prepare("SELECT id, question, answer FROM faq WHERE TRIM(COALESCE(answer, '')) != '' ORDER BY sort, id").all().map(f => ({ ...f })); } catch { /* older database: none */ }
     return { menu, categories, delivery_zones, restaurant, promos, menu_pictures, faq, behaviour: String(settings.bot_behaviour || '').slice(0, 2000) };
-  } finally { db.close(); }
+  }
 }
 
-module.exports = { readPos };
+module.exports = { readPos, readPosDb };

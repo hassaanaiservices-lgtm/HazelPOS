@@ -1101,6 +1101,12 @@ app.post('/api/ai/transcribe', aiAuth, async (req, res) => {
   }
 });
 
+// WhatsApp bot hosted here, per restaurant (cloud/wa-host.js). Needs the POS's packages: npm --prefix server ci --omit=dev
+if (process.env.WA_HOST !== 'off') {
+  try { require('./wa-host')({ app, db, dataDir: DATA, branchAuth, vendorAuth, vendorBranch, membership, now }); }
+  catch (e) { console.error('Cloud WhatsApp bot not available:', e.message); }
+}
+
 app.use(express.static(path.join(__dirname, 'public')));
 
 // Any error is answered as JSON without details (Express would print the file paths and the stack to the visitor)

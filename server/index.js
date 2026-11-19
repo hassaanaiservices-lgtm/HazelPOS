@@ -1803,6 +1803,30 @@ crud('promos', 'promos', ['code', 'type', 'value', 'min_order', 'max_discount', 
 // The branch key lives in its own table so it never appears in /api/settings
 const cloud = require('./cloud-sync')(db);
 const riderSync = require('./rider-sync')(db, cloud, { getOrder, dispatchOrder, deliverOrder });
+// WhatsApp bot on HazelPOS Cloud (cloud/wa-host.js): the cloud answers customers even when this PC is off. Every 2
+// minutes the POS checks whether that is switched on and sends its menu, zones, FAQ and menu photos when they changed.
+// While the cloud bot is on, this POS's own bot stays quiet, so a customer never gets two answers.
+let waCloudMode = false;
+const waKnowledge = () => {
+  const { readPosDb } = require('../rag/src/loaders/pos-db');
+  const { config: ragConfig } = require('../rag/src/config');
+  const pos = readPosDb(db, ragConfig.data);
+  const pictures = db.prepare('SELECT id, caption, mime, data FROM menu_images ORDER BY sort, id').all()
+    .map(p => ({ id: p.id, caption: p.caption || '', mime: p.mime, data: Buffer.from(p.data).toString('base64') }));
+  const hash = crypto.createHash('sha256').update(JSON.stringify({ pos, pictures })).digest('hex');
+  return { pos, pictures, hash };
+};
+const syncWaCloud = async () => {
+  if (!cloud.status().connected || cloud.isHeld()) return;
+  try {
+    const mode = await cloud.call('/api/sync/wa-mode');
+    waCloudMode = !!mode?.cloud;
+    if (!waCloudMode) return;
+    const k = waKnowledge();
+    if (k.hash !== mode.knowledge_hash) await cloud.call('/api/sync/wa-knowledge', k);
+  } catch (e) { if (!/not reachable|too long/i.test(e.message)) console.error('Cloud WhatsApp:', e.message); }
+};
+setTimeout(syncWaCloud, 15_000).unref(); setInterval(syncWaCloud, 120_000).unref();
 // A PIN you reset from the admin app (someone forgot theirs): picked up within a minute. The person logs in with the
 // temporary PIN and must choose a new one straight away; their other open sessions are signed out.
 setInterval(async () => {
@@ -1970,7 +1994,7 @@ function createOrder({ type, zone_id, customer, phone, address, items, userName,
     return orderId;
   });
 }
-const waModule = require('./whatsapp')(app, db, { createOrder, getOrder, printKitchen, getSettings, aiAllowed: () => lic.aiAllowed(), deliveryStatus });
+const waModule = require('./whatsapp')(app, db, { createOrder, getOrder, printKitchen, getSettings, aiAllowed: () => lic.aiAllowed() && !waCloudMode, cloudBot: () => waCloudMode, deliveryStatus });
 const lowStock = require('./stock-alert')(db, { getSettings, wa: waModule.wa });
 // Settings → Alerts: what would be sent now, and a test send
 app.get('/api/low-stock-alert/preview', (req, res) => { const r = lowStock.report(); res.json({ low: r.low, text: r.text, enough: r.enough }); });

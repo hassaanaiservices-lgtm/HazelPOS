@@ -28,13 +28,14 @@ function withinHours(hours, d = new Date()) {
   return open <= close ? now >= open && now < close : now >= open || now < close;
 }
 
+// cleanup(text): voice-note cleanup against the menu (the cloud passes one that uses the restaurant's pushed menu)
 // stt (optional): speech-to-text for voice notes ({ transcribe(file) }); sttCfg: config.stt
 // allowed: the membership allows the bot (server/licence.js aiAllowed); unpaid past the grace days = quiet
 // "Where is my order / how long / is the rider coming?" in English, Roman Urdu or Urdu. Only acted on when this chat has a
 // delivery order today (deliveryStatus returns text), so an ordinary "where are you located?" still goes to the AI.
 const WHERE_RE = /\b(where|kahan|kaha+n?|kidhar|kidar|kitni der|kitna time|kab tak|kab (?:aa|pohnch|pahunch)|track|location|rider|late|der ho|status|pohncha|pahuncha)\b|کہاں|کدھر|کتنی دیر|کب|رائیڈر|لوکیشن/i;
 
-function createAssistant({ store, wa, ask, cfg, stt = null, sttCfg = {}, log = console, menuPictures = () => [], allowed = () => true, deliveryStatus = () => null }) {
+function createAssistant({ store, wa, ask, cfg, stt = null, sttCfg = {}, log = console, menuPictures = () => [], allowed = () => true, deliveryStatus = () => null, cleanup = cleanupTranscript }) {
   const batches = new Map();   // chatId -> { rows, timer }
   const chains = new Map();    // chatId -> promise (one turn at a time per chat)
   let running = 0;
@@ -90,7 +91,7 @@ function createAssistant({ store, wa, ask, cfg, stt = null, sttCfg = {}, log = c
         try {
           const t = await stt.transcribe(wa.mediaPath(r.meta.file));
           // Then read the WHOLE transcript with the menu and write what the customer most likely said
-          const c = t.text && sttCfg.cleanup ? await cleanupTranscript(t.text) : null;
+          const c = t.text && sttCfg.cleanup ? await cleanup(t.text) : null;
           store.updateMeta(r.id, { transcript: t.text, stt_ms: t.ms, stt_logprob: t.avg_logprob, stt_model: sttCfg.model,
             understood: c?.text ?? null, understood_confidence: c?.confidence ?? null, cleanup_ms: c?.ms ?? null },
           t.text ? `🎤 ${c?.text || t.text}` : '🎤 (voice note: no speech heard)');

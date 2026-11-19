@@ -22,7 +22,7 @@ module.exports = function whatsapp(app, db, pos) {
   const chatId = req => req.params.id;
 
   // Connection state + counts for badges and banners
-  app.get('/api/whatsapp/status', (req, res) => res.json({ ...wa.status(), ...store.counts(), assistant: assistant.enabled(), assistant_paused_unpaid: !(pos.aiAllowed?.() ?? true), business_hours: config.assistant.business_hours, stt: stt.status() }));
+  app.get('/api/whatsapp/status', (req, res) => res.json({ ...wa.status(), ...store.counts(), assistant: assistant.enabled(), assistant_paused_unpaid: !(pos.aiAllowed?.() ?? true) && !pos.cloudBot?.(), cloud_bot: !!pos.cloudBot?.(), business_hours: config.assistant.business_hours, stt: stt.status() }));
   app.post('/api/whatsapp/connect', async (req, res) => { try { await wa.connect(); res.json(wa.status()); } catch (e) { fail(res, e); } });
   app.post('/api/whatsapp/logout', async (req, res) => { await wa.logout(); res.json(wa.status()); });
   app.post('/api/whatsapp/assistant', (req, res) => { assistant.setEnabled(!!req.body.enabled); res.json({ assistant: assistant.enabled() }); });

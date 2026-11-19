@@ -4,6 +4,8 @@ const path = require('path');
 
 const ROOT = path.join(__dirname, '..');
 const config = JSON.parse(fs.readFileSync(path.join(ROOT, 'config', 'rag.config.json'), 'utf8'));
+// DEEPSEEK_BASE_URL: tests point the assistant at a fake DeepSeek (same variable as cloud/index.js)
+if (process.env.DEEPSEEK_BASE_URL) config.llm.base_url = process.env.DEEPSEEK_BASE_URL.replace(/\/+$/, '');
 
 const paths = {
   root: ROOT,

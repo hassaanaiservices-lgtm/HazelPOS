@@ -3,7 +3,7 @@ import { api, ago, fileBase64, shrinkImage, downloadCsv } from './lib'
 import { run, toast, toastError, confirmBox, inputBox } from './notify'
 import { Stage, WhatsApp, Check } from './ui'
 
-const TABS = ['Overview', 'Details', 'Menu', 'Tables', 'Delivery areas', 'Staff', 'Health & errors']
+const TABS = ['Overview', 'Details', 'Menu', 'Tables', 'Delivery areas', 'Staff', 'WhatsApp bot', 'Health & errors']
 
 // One branch: prepare its setup before the restaurant installs, give the activation code, then watch its health
 export default function Branch({ id }) {
@@ -36,6 +36,7 @@ export default function Branch({ id }) {
       {tab === 'Tables' && <Tables tables={d.setup.tables || []} floors={d.setup.floors || []} save={save} />}
       {tab === 'Delivery areas' && <Zones zones={d.setup.zones || []} save={save} />}
       {tab === 'Staff' && <><PinReset id={id} /><Staff staff={d.setup.staff || []} save={save} /></>}
+      {tab === 'WhatsApp bot' && <CloudBot id={id} />}
       {tab === 'Health & errors' && <Health d={d} />}
     </>
   )
@@ -458,5 +459,36 @@ function Health({ d }) {
           : <div className="empty">No errors reported. 👍</div>}
       </div>
     </>
+  )
+}
+
+// The WhatsApp bot running on HazelPOS Cloud, so it answers customers even when the restaurant's PC is off.
+// Phase 1: it answers questions from the menu the POS sends; confirmed orders don't reach the POS yet.
+const WA_STATUS = { off: 'Switched off', disconnected: 'Not linked', connecting: 'Connecting…', qr: 'Scan the QR code', connected: 'Connected', reconnecting: 'Reconnecting…' }
+function CloudBot({ id }) {
+  const [w, setW] = useState(null)
+  const load = () => api(`/branches/${id}/whatsapp`).then(setW)
+  useEffect(() => { run(load)(); const t = setInterval(() => load().catch(() => {}), 4000); return () => clearInterval(t) }, [id])
+  const post = (p, body = {}) => run(async () => setW(await api(`/branches/${id}/whatsapp${p}`, body)))
+  if (!w) return <div className="card"><p className="muted">Loading…</p></div>
+  const toggle = run(async () => {
+    if (!w.enabled && !(await confirmBox('Switch on the cloud WhatsApp bot for this restaurant? Its POS stops answering by itself within 2 minutes, so customers never get two answers.'))) return
+    setW(await api(`/branches/${id}/whatsapp/enable`, { enabled: !w.enabled }))
+  })
+  return (
+    <div className="card"><h3>WhatsApp bot on the cloud</h3>
+      <p className="muted">Answers customers on WhatsApp even when the restaurant's PC is off. It uses the menu, delivery areas, FAQ and menu photos that the restaurant's POS sends (every 2 minutes when they change). Test stage: orders customers confirm are not sent to the POS yet.</p>
+      <p style={{ marginTop: 12 }}><b>{WA_STATUS[w.status] || w.status}</b>{w.me ? ` · ${w.me}` : ''}{w.error ? <span className="muted"> · {w.error}</span> : null}</p>
+      <p className="muted small">{w.menu_at ? `Menu from the POS: ${w.menu_items} items, ${w.menu_pictures} photos, ${ago(w.menu_at)}` : 'No menu from the POS yet: the bot stays quiet until the POS (online, version 1.0.4 or later) sends it.'}</p>
+      <div className="row" style={{ marginTop: 12, gap: 8, flexWrap: 'wrap' }}>
+        <button onClick={toggle}>{w.enabled ? 'Switch off' : 'Switch on'}</button>
+        {w.enabled && !['connected', 'qr', 'connecting'].includes(w.status) && <button onClick={post('/connect')}>Link WhatsApp</button>}
+        {w.enabled && w.status === 'connected' && <button onClick={post('/assistant', { enabled: !w.assistant })}>{w.assistant ? 'Pause the bot' : 'Start the bot'}</button>}
+        {w.enabled && w.me && <button onClick={run(async () => { if (await confirmBox('Unlink this WhatsApp number from the cloud?')) post('/logout')() })}>Unlink</button>}
+      </div>
+      {w.qr && <div style={{ marginTop: 12 }}><p className="muted small">On the restaurant's phone: WhatsApp → Linked devices → Link a device, then scan this.</p><img src={w.qr} alt="WhatsApp QR code" width={280} height={280} /></div>}
+      {!!w.log?.length && <table style={{ marginTop: 16 }}><thead><tr><th>When</th><th>Customer said</th><th>What the bot did</th></tr></thead>
+        <tbody>{w.log.map((l, i) => <tr key={i}><td className="muted small">{ago(l.at)}</td><td className="small">{(l.in_text || '').slice(0, 120)}</td><td className="small">{l.action}{l.reply ? `: ${l.reply.slice(0, 160)}` : ''}{l.error ? ` (${l.error})` : ''}</td></tr>)}</tbody></table>}
+    </div>
   )
 }

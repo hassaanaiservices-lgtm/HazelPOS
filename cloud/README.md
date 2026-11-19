@@ -58,7 +58,7 @@ doesn't stop billing. The rules (offline days, grace days) are in `server/licenc
 
 ## Deploy on Railway (your vendor cloud)
 
-1. In the Railway project: **New → GitHub repo → HazelPOS**, as a new service next to the demo. Leave the root directory as the repo root (the menu upload uses `server/menu-import.js`). Build command `npm --prefix cloud ci`, start command `node cloud/index.js`.
+1. In the Railway project: **New → GitHub repo → HazelPOS**, as a new service next to the demo. Leave the root directory as the repo root (the menu upload uses `server/menu-import.js`). Build command `npm --prefix cloud ci && npm --prefix server ci --omit=dev` (the second part is for the WhatsApp bot hosted on the cloud, `cloud/wa-host.js`; without it the cloud runs fine and the cloud bot is simply not available), start command `node cloud/index.js`.
 2. **Add a volume** to this service, mounted at `/data`. Do this before adding any restaurant: without it, every redeploy wipes `cloud.db` (memberships, keys, backups). See RISKS.md A3.
 3. Variables: `DATA_DIR=/data`, `VENDOR_API_KEY=<openssl rand -hex 32>`, `DEEPSEEK_API_KEY=…`, `GROQ_API_KEY=…`. Railway sets `PORT` itself.
 4. Settings → Networking → **Generate domain** (HTTPS comes with it). Pick a region close to Pakistan (RISKS.md A1).

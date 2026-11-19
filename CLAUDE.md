@@ -53,7 +53,7 @@ See [rag/README.md](rag/README.md) for the other rag scripts (export-pos, valida
 
 **rag/** is the WhatsApp assistant's knowledge base and prompts. There is no vector search: live menu and restaurant data is read from `pos.db` and put into the prompt for every message (`src/context/`). All settings are in `rag/config/rag.config.json`, and all prompts in `rag/prompts/`. The code that decides when to reply lives in `server/whatsapp/assistant.js`.
 
-**cloud/** is a separate Express app with its own `cloud.db`. Branches push paid orders, expenses, stock, closed shifts and backups to it, and it upserts by branch and local id.
+**cloud/** is a separate Express app with its own `cloud.db`. Branches push paid orders, expenses, stock, closed shifts and backups to it, and it upserts by branch and local id. `cloud/wa-host.js` can also run a restaurant's WhatsApp bot on the cloud (switched on per branch in the admin app), reusing `server/whatsapp/*` with one folder per branch under `DATA_DIR/wa/<id>/` and the menu the POS pushes (`/api/sync/wa-knowledge`); while it is on, the POS's own bot stays quiet.
 
 **site/** is the static landing page. Its images are screenshots of the demo. If the domain changes, update it in `robots.txt`, `sitemap.xml`, `llms.txt` and the head of `index.html`. The FAQ in the JSON-LD must match the FAQ on the page word for word.
 
