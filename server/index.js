@@ -1832,10 +1832,24 @@ const syncWaCloud = async () => {
   } catch (e) { if (!/not reachable|too long/i.test(e.message)) console.error('Cloud WhatsApp:', e.message); }
 };
 setTimeout(syncWaCloud, 15_000).unref(); setInterval(syncWaCloud, 120_000).unref();
+// "Where is my order?" on the cloud bot: today's delivery status of its chats, in the three languages (sent when changed)
+let lastWaStatus = '', lastWaStatusAt = 0;
+const pushWaStatus = async () => {
+  const chats = {};
+  for (const r of db.prepare("SELECT DISTINCT chat_id FROM wa_orders WHERE cloud_id IS NOT NULL AND status='accepted' AND handled_at >= ?").all(new Date(Date.now() - 864e5).toISOString())) {
+    const t = Object.fromEntries(['en', 'roman_ur', 'ur'].map(l => [l, deliveryStatus(r.chat_id, l)]));
+    if (t.en) chats[r.chat_id] = t;
+  }
+  const j = JSON.stringify(chats);
+  if (j === lastWaStatus && Date.now() - lastWaStatusAt < 600_000) return; // again every 10 min: the cloud keeps it in memory only
+  await cloud.call('/api/sync/wa-status', { chats });
+  lastWaStatus = j; lastWaStatusAt = Date.now();
+};
 // Orders customers confirmed with the cloud bot: shown to the cashier within 20 s, like orders taken here
 setInterval(async () => {
   if (!waCloudMode || !waModule || !cloud.status().connected || cloud.isHeld()) return;
   try {
+    await pushWaStatus();
     const list = await cloud.call('/api/sync/wa-orders');
     if (!Array.isArray(list) || !list.length) return;
     for (const o of list) waModule.store.importCloudOrder(o);
@@ -2009,7 +2023,7 @@ function createOrder({ type, zone_id, customer, phone, address, items, userName,
     return orderId;
   });
 }
-const waModule = require('./whatsapp')(app, db, { createOrder, getOrder, printKitchen, getSettings, aiAllowed: () => lic.aiAllowed() && !waCloudMode, cloudBot: () => waCloudMode, cloudCall: (p, b) => cloud.call(p, b), deliveryStatus });
+const waModule = require('./whatsapp')(app, db, { createOrder, getOrder, printKitchen, getSettings, aiAllowed: () => lic.aiAllowed() && !waCloudMode, cloudBot: () => waCloudMode, cloudCall: (p, b) => cloud.call(p, b), cloudRaw: p => cloud.fetchRaw(p), deliveryStatus });
 const lowStock = require('./stock-alert')(db, { getSettings, wa: waModule.wa });
 // Settings → Alerts: what would be sent now, and a test send
 app.get('/api/low-stock-alert/preview', (req, res) => { const r = lowStock.report(); res.json({ low: r.low, text: r.text, enough: r.enough }); });

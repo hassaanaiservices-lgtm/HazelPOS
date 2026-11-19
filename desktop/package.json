@@ -1,7 +1,7 @@
 {
   "name": "hazelpos-desktop",
   "productName": "HazelPOS",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "description": "HazelPOS restaurant point of sale",
   "author": "HazelPOS",
   "private": true,

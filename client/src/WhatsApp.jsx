@@ -29,6 +29,14 @@ export default function WhatsApp({ notify }) {
 
 function LinkScreen({ st, onStatus }) {
   const start = run(async () => onStatus(await api('/whatsapp/connect', {})))
+  if (st.cloud_bot) return (
+    <div className="wa-link"><div className="wa-link-card"><div className="wa-link-text">
+      <h1>WhatsApp runs on HazelPOS Cloud</h1>
+      <p className="wa-note">This restaurant's WhatsApp answers customers from HazelPOS Cloud, so it works even when this PC is off.
+        It is not connected right now. Ask HazelPOS to link it again.</p>
+      {st.error && <p className="wa-error">{st.error}</p>}
+    </div></div></div>
+  )
   const waiting = st.status === 'connecting' || (st.status === 'qr' && !st.qr)
   return (
     <div className="wa-link">
@@ -86,12 +94,15 @@ function Inbox({ st, notify, onStatus }) {
             {st.assistant ? 'Auto-reply on' : 'Auto-reply off'}</button>
           <div className="wa-menu-wrap">
             <button className="wa-icon" title="More" aria-label="More" onClick={() => setMenu(!menu)}><Icon name="menu" /></button>
-            {menu && <div className="wa-menu" onMouseLeave={() => setMenu(false)}><button id="wa-logout" onClick={logout}>Unlink WhatsApp</button></div>}
+            {menu && <div className="wa-menu" onMouseLeave={() => setMenu(false)}>{st.cloud_bot
+              ? <span className="wa-note" style={{ display: 'block', margin: 8 }}>Runs on HazelPOS Cloud. To unlink, ask HazelPOS.</span>
+              : <button id="wa-logout" onClick={logout}>Unlink WhatsApp</button>}</div>}
           </div>
         </header>
         {st.assistant_paused_unpaid && <div className="wa-conn">The assistant is paused because the HazelPOS membership isn't paid. Customers' messages still arrive here: reply yourself, or pay to switch it back on.</div>}
         {st.stt?.state === 'failed' && <div className="wa-conn">Voice notes can't be transcribed: {st.stt.error}</div>}
-        {st.status === 'reconnecting' && <div className="wa-conn">No internet, reconnecting. The POS keeps working; new messages will arrive when it's back.</div>}
+        {st.cloud_bot && st.status === 'reconnecting' && <div className="wa-conn">Can't reach HazelPOS Cloud (internet?). Customers still get answers from the cloud; chats show here again when the internet is back.</div>}
+        {!st.cloud_bot && st.status === 'reconnecting' && <div className="wa-conn">No internet, reconnecting. The POS keeps working; new messages will arrive when it's back.</div>}
         {orderChats > 0 && <button className="wa-order-alert" onClick={() => setFilter('orders')}>
           <Icon name="receipt" size={16} />{orderChats} WhatsApp {orderChats === 1 ? 'order is' : 'orders are'} waiting for you to accept</button>}
         {offlineChats > 0 && <button className="wa-offline-alert" onClick={() => setFilter('offline')}>

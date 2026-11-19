@@ -144,5 +144,7 @@ module.exports = function cloudSync(db) {
 
   setInterval(syncNow, 60 * 1000).unref();
   setTimeout(syncNow, 5000).unref();
-  return { syncNow, backupNow, connect, disconnect, status, downloadLatestBackup, hold, call, isHeld: () => held };
+  // A file from the cloud as it is (voice notes of the cloud WhatsApp bot)
+  const fetchRaw = urlPath => fetch(get('url').replace(/\/+$/, '') + urlPath, { headers: { Authorization: 'Bearer ' + get('key') }, signal: AbortSignal.timeout(30000) });
+  return { syncNow, backupNow, connect, disconnect, status, downloadLatestBackup, hold, call, fetchRaw, isHeld: () => held };
 };

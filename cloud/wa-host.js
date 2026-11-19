@@ -28,6 +28,7 @@ module.exports = function waHost({ app, db, dataDir, branchAuth, vendorAuth, ven
   const dirOf = id => path.join(dataDir, 'wa', String(+id));
   const knowledgeFile = id => path.join(dirOf(id), 'knowledge.json');
   const cache = new Map(); // branch id -> { pos, pictures, at, hash }
+  const statusTexts = new Map(); // branch id -> { chatId: { en, roman_ur, ur } }
 
   function knowledge(id) {
     if (cache.has(id)) return cache.get(id);
@@ -58,6 +59,8 @@ module.exports = function waHost({ app, db, dataDir, branchAuth, vendorAuth, ven
       menuPictures: () => knowledge(id)?.pictures || [],
       // Quiet until this restaurant's POS has sent its menu, and when its membership no longer covers the bot
       allowed: () => !!pos() && membership(branch(id)?.owner_id).ai_active !== false,
+      // "Where is my order?": the live status the POS sends for today's delivery orders (POST /api/sync/wa-status)
+      deliveryStatus: (chatId, lang) => { const t = statusTexts.get(id)?.[chatId]; return t ? t[lang] || t.roman_ur || null : null; },
       log: { error: (...a) => console.error(`[wa ${id}]`, ...a) },
     });
     const h = { store, wa, assistant, sdb };
@@ -178,6 +181,69 @@ module.exports = function waHost({ app, db, dataDir, branchAuth, vendorAuth, ven
     t.push(Date.now()); sendTimes.set(req.branch.id, t);
     try { await h.wa.send(chatId, text, String(req.body.label || 'Order update').slice(0, 40), 'system'); res.json({ ok: true }); }
     catch (e) { res.status(409).json({ error: e.message }); }
+  });
+
+  // ---------- The POS's inbox and replies (POS → /api/whatsapp/* → here, while the cloud bot is on) ----------
+  const W = '/api/sync/wa';
+  const chatOf = (req, res, h) => { const c = h.store.chat(req.params.id); if (!c) res.status(404).json({ error: 'Chat not found' }); return c; };
+  app.get(`${W}/status`, branchAuth, (req, res) => {
+    const h = liveFor(req, res); if (!h) return;
+    const { qr, ...st } = h.wa.status(); // eslint-disable-line no-unused-vars
+    res.json({ ...st, ...h.store.counts(), assistant: h.assistant.enabled() });
+  });
+  app.get(`${W}/chats`, branchAuth, (req, res) => { const h = liveFor(req, res); if (h) res.json(h.store.chats()); });
+  app.get(`${W}/chats/:id/messages`, branchAuth, (req, res) => { const h = liveFor(req, res); if (h) res.json(h.store.messages(req.params.id, +req.query.after || 0)); });
+  app.get(`${W}/chats/:id/log`, branchAuth, (req, res) => { const h = liveFor(req, res); if (h) res.json(h.store.logFor(req.params.id)); });
+  app.post(`${W}/chats/:id/read`, branchAuth, (req, res) => {
+    const h = liveFor(req, res); if (!h || !chatOf(req, res, h)) return;
+    h.wa.markRead(req.params.id, h.store.markRead(req.params.id)); res.json({ ok: true });
+  });
+  app.post(`${W}/chats/:id/handled`, branchAuth, (req, res) => {
+    const h = liveFor(req, res); if (!h || !chatOf(req, res, h)) return;
+    h.store.resolveOffline(req.params.id, String(req.body.by || 'POS').slice(0, 80)); h.store.setChatFlag(req.params.id, 'needs_attention', 0); res.json({ ok: true });
+  });
+  app.post(`${W}/chats/:id/bot`, branchAuth, (req, res) => {
+    const h = liveFor(req, res); if (!h || !chatOf(req, res, h)) return;
+    h.store.setChatFlag(req.params.id, 'bot_paused', !!req.body.paused); res.json({ ok: true });
+  });
+  app.post(`${W}/chats/:id/send`, branchAuth, async (req, res) => {
+    const h = liveFor(req, res); if (!h || !chatOf(req, res, h)) return;
+    const text = String(req.body.text || '').trim();
+    if (!text) return res.status(400).json({ error: 'Type a message first' });
+    if (text.length > 4000) return res.status(400).json({ error: 'Message is too long' });
+    try {
+      const m = await h.wa.send(req.params.id, text, String(req.body.by || 'Staff').slice(0, 80), 'staff');
+      h.store.setChatFlag(req.params.id, 'needs_attention', 0);
+      res.json(m);
+    } catch (e) { res.status(400).json({ error: e.message }); }
+  });
+  app.post(`${W}/assistant`, branchAuth, (req, res) => {
+    const h = liveFor(req, res); if (!h) return;
+    h.assistant.setEnabled(!!req.body.enabled); res.json({ assistant: h.assistant.enabled() });
+  });
+  app.get(`${W}/messages/:id/audio`, branchAuth, (req, res) => {
+    const h = liveFor(req, res); if (!h) return;
+    const m = h.store.message(+req.params.id);
+    const file = m?.meta?.file && h.wa.mediaPath(m.meta.file);
+    if (!file || !fs.existsSync(file)) return res.status(404).json({ error: 'Voice note not available (deleted after a while)' });
+    res.type('audio/ogg').sendFile(file);
+  });
+  app.post(`${W}/messages/:id/transcript`, branchAuth, (req, res) => {
+    const h = liveFor(req, res); if (!h) return;
+    const m = h.store.message(+req.params.id);
+    if (!m?.meta?.file) return res.status(404).json({ error: 'Not a voice note' });
+    const corrected = req.body.corrected == null ? null : String(req.body.corrected).trim().slice(0, 2000);
+    const rating = [1, -1].includes(+req.body.rating) ? +req.body.rating : null;
+    h.store.updateMeta(m.id, { stt_rating: rating ?? m.meta.stt_rating ?? null, ...(corrected != null ? { corrected } : {}) });
+    res.json({ ok: true, message: h.store.message(m.id) });
+  });
+  // Today's delivery status per chat, in the three languages, so the cloud bot can answer "where is my order?"
+  app.post('/api/sync/wa-status', branchAuth, (req, res) => {
+    const out = {};
+    for (const [chat, t] of Object.entries(req.body.chats || {}).slice(0, 500))
+      if (t && typeof t === 'object') out[String(chat).slice(0, 120)] = Object.fromEntries(['en', 'roman_ur', 'ur'].map(l => [l, String(t[l] || '').slice(0, 1000)]));
+    statusTexts.set(req.branch.id, out);
+    res.json({ ok: true });
   });
 
   return { live, start, stop, knowledge, hashOf: v => crypto.createHash('sha256').update(JSON.stringify(v)).digest('hex') };

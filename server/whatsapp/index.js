@@ -22,6 +22,38 @@ module.exports = function whatsapp(app, db, pos) {
   const cloudResult = (w, body) => pos.cloudCall ? pos.cloudCall(`/api/sync/wa-orders/${w.cloud_id}/result`, body).then(r => !!r.message_sent, () => false) : Promise.resolve(false);
   const chatId = req => req.params.id;
 
+  // While the bot runs on HazelPOS Cloud (cloud/wa-host.js), the chats live there: the inbox and the replies go through
+  // the cloud. WhatsApp orders, accepting and rejecting them stay here (the cloud's orders are copied in every 20 s).
+  const CLOUD_ROUTES = /^(GET \/(status|chats)|GET \/chats\/[^/]+\/(messages|log)|POST \/chats\/[^/]+\/(read|handled|bot|send)|POST \/assistant|GET \/messages\/\d+\/audio|POST \/messages\/\d+\/transcript)$/;
+  app.use('/api/whatsapp', async (req, res, next) => {
+    if (!pos.cloudBot?.()) return next();
+    const route = `${req.method} ${req.path}`;
+    if (/^POST \/(connect|logout)$/.test(route)) return res.status(400).json({ error: 'WhatsApp for this restaurant runs on HazelPOS Cloud. Link or unlink it from HazelPOS Admin.' });
+    if (!CLOUD_ROUTES.test(route)) return next();
+    const local = { cloud_bot: true, assistant_paused_unpaid: false, business_hours: config.assistant.business_hours, stt: stt.status(), orders_pending: store.counts().orders_pending };
+    const url = '/api/sync/wa' + req.url; // keeps ?after=
+    try {
+      if (req.method === 'GET' && /\/audio$/.test(req.path)) {
+        const r = await pos.cloudRaw(url);
+        if (!r.ok) return res.status(r.status).json(await r.json().catch(() => ({ error: 'Voice note not available' })));
+        return res.type('audio/ogg').send(Buffer.from(await r.arrayBuffer()));
+      }
+      const body = req.method === 'POST' ? { ...req.body, by: req.user.name } : undefined;
+      const data = await pos.cloudCall(url, body);
+      if (req.path === '/status') return res.json({ ...data, ...local });
+      if (/\/transcript$/.test(req.path) && data.message) {
+        const m = data.message;
+        db.prepare('INSERT INTO stt_feedback (message_id,file,model,transcript,corrected,rating,at,by_user) VALUES (?,?,?,?,?,?,?,?)')
+          .run(m.id, m.meta?.file || '', m.meta?.stt_model || '', m.meta?.transcript || '', m.meta?.corrected ?? null, m.meta?.stt_rating ?? null, new Date().toISOString(), req.user.name);
+        return res.json({ ok: true });
+      }
+      res.json(data);
+    } catch (e) {
+      if (req.path === '/status') return res.json({ status: 'reconnecting', error: e.message, unread: 0, offline_chats: 0, needs_attention: 0, ...local });
+      res.status(503).json({ error: e.message });
+    }
+  });
+
   // Connection state + counts for badges and banners
   app.get('/api/whatsapp/status', (req, res) => res.json({ ...wa.status(), ...store.counts(), assistant: assistant.enabled(), assistant_paused_unpaid: !(pos.aiAllowed?.() ?? true) && !pos.cloudBot?.(), cloud_bot: !!pos.cloudBot?.(), business_hours: config.assistant.business_hours, stt: stt.status() }));
   app.post('/api/whatsapp/connect', async (req, res) => { try { await wa.connect(); res.json(wa.status()); } catch (e) { fail(res, e); } });
