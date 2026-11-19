@@ -662,7 +662,7 @@ app.get('/api/vendor/owners', vendorAuth, (req, res) => {
   res.json(db.prepare('SELECT id, email, name, phone, plan, notes, paid_until, suspended, created_at, wa_grace_days AS wa_grace_custom, pos_grace_days AS pos_grace_custom, monthly_fee, install_fee, install_paid FROM owners ORDER BY id DESC').all().map(o => ({
     ...o, ...membership(o.id),
     branches: db.prepare('SELECT id, name, created_at, last_sync, last_ip, code_created_at, code_used_at, health, health_at, locked_orders, locked_orders_last FROM branches WHERE owner_id=? ORDER BY id').all(o.id).map(b => ({
-      ...b, health: JSON.parse(b.health || 'null'),
+      ...b, health: withCloudWa(b.id, JSON.parse(b.health || 'null')),
       setup: setupSummary(b.id),
       errors_24h: db.prepare('SELECT COUNT(*) c FROM branch_errors WHERE branch_id=? AND at > ?').get(b.id, new Date(Date.now() - 864e5).toISOString()).c,
       ai: db.prepare(`SELECT COUNT(*) calls, COALESCE(SUM(tokens_in),0) tokens_in, COALESCE(SUM(tokens_cached),0) tokens_cached,
@@ -779,7 +779,7 @@ app.get('/api/vendor/branches/:id/setup', vendorAuth, (req, res) => {
   const { st, data } = getSetup(b.id);
   res.json({
     owner: db.prepare("SELECT id, COALESCE(NULLIF(name,''), email) name FROM owners WHERE id=?").get(b.owner_id),
-    branch: { id: b.id, name: b.name, code_created_at: b.code_created_at, code_used_at: b.code_used_at, last_sync: b.last_sync, health: JSON.parse(b.health || 'null'), health_at: b.health_at },
+    branch: { id: b.id, name: b.name, code_created_at: b.code_created_at, code_used_at: b.code_used_at, last_sync: b.last_sync, health: withCloudWa(b.id, JSON.parse(b.health || 'null')), health_at: b.health_at },
     setup: data, summary: setupSummary(b.id), applied: JSON.parse(st?.applied || 'null'), menu_upload: !!menuImport,
     images: db.prepare('SELECT id, caption, length(data) size FROM setup_images WHERE branch_id=? ORDER BY sort, id').all(b.id),
     errors: db.prepare('SELECT at, text FROM branch_errors WHERE branch_id=? ORDER BY at DESC LIMIT 50').all(b.id),
@@ -1102,8 +1102,11 @@ app.post('/api/ai/transcribe', aiAuth, async (req, res) => {
 });
 
 // WhatsApp bot hosted here, per restaurant (cloud/wa-host.js). Needs the POS's packages: npm --prefix server ci --omit=dev
+let waHostApi = null;
+// The admin app's WhatsApp badge: for a restaurant on the cloud bot, the cloud's connection, not the POS's
+function withCloudWa(id, h) { const w = waHostApi?.statusOf(id); return w && h ? { ...h, whatsapp: w } : h; }
 if (process.env.WA_HOST !== 'off') {
-  try { require('./wa-host')({ app, db, dataDir: DATA, branchAuth, vendorAuth, vendorBranch, membership, now }); }
+  try { waHostApi = require('./wa-host')({ app, db, dataDir: DATA, branchAuth, vendorAuth, vendorBranch, membership, now }); }
   catch (e) { console.error('Cloud WhatsApp bot not available:', e.message); }
 }
 

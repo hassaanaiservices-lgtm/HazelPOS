@@ -15,7 +15,8 @@ module.exports = function whatsapp(app, db, pos) {
     transcript TEXT, corrected TEXT, rating INTEGER, at TEXT, by_user TEXT)`); // staff ratings/corrections = the STT test set
   let assistant;
   const stt = createStt(config.stt);
-  const wa = waConnection(store, { onIncoming: row => assistant.onIncoming(row), keepAudioDays: config.stt.keep_audio_days });
+  // cloud_mode: the bot runs on HazelPOS Cloud, so this POS does not connect its own WhatsApp at start (server/index.js sets it)
+  const wa = waConnection(store, { onIncoming: row => assistant.onIncoming(row), keepAudioDays: config.stt.keep_audio_days, autoConnect: () => store.meta.get('cloud_mode') !== '1' });
   const menuPictures = () => db.prepare('SELECT id, caption, mime, data FROM menu_images ORDER BY sort, id').all(); // table made in server/index.js
   assistant = createAssistant({ store, wa, ask, cfg: config.assistant, stt, sttCfg: config.stt, menuPictures, allowed: pos.aiAllowed || (() => true), deliveryStatus: pos.deliveryStatus || (() => null) });
   const fail = (res, e, code = 400) => res.status(code).json({ error: e.message });
@@ -24,11 +25,10 @@ module.exports = function whatsapp(app, db, pos) {
 
   // While the bot runs on HazelPOS Cloud (cloud/wa-host.js), the chats live there: the inbox and the replies go through
   // the cloud. WhatsApp orders, accepting and rejecting them stay here (the cloud's orders are copied in every 20 s).
-  const CLOUD_ROUTES = /^(GET \/(status|chats)|GET \/chats\/[^/]+\/(messages|log)|POST \/chats\/[^/]+\/(read|handled|bot|send)|POST \/assistant|GET \/messages\/\d+\/audio|POST \/messages\/\d+\/transcript)$/;
+  const CLOUD_ROUTES = /^(POST \/(connect|logout)|GET \/(status|chats)|GET \/chats\/[^/]+\/(messages|log)|POST \/chats\/[^/]+\/(read|handled|bot|send)|POST \/assistant|GET \/messages\/\d+\/audio|POST \/messages\/\d+\/transcript)$/;
   app.use('/api/whatsapp', async (req, res, next) => {
     if (!pos.cloudBot?.()) return next();
     const route = `${req.method} ${req.path}`;
-    if (/^POST \/(connect|logout)$/.test(route)) return res.status(400).json({ error: 'WhatsApp for this restaurant runs on HazelPOS Cloud. Link or unlink it from HazelPOS Admin.' });
     if (!CLOUD_ROUTES.test(route)) return next();
     const local = { cloud_bot: true, assistant_paused_unpaid: false, business_hours: config.assistant.business_hours, stt: stt.status(), orders_pending: store.counts().orders_pending };
     const url = '/api/sync/wa' + req.url; // keeps ?after=
@@ -40,7 +40,7 @@ module.exports = function whatsapp(app, db, pos) {
       }
       const body = req.method === 'POST' ? { ...req.body, by: req.user.name } : undefined;
       const data = await pos.cloudCall(url, body);
-      if (req.path === '/status') return res.json({ ...data, ...local });
+      if (/^\/(status|connect|logout)$/.test(req.path)) return res.json({ ...data, ...local });
       if (/\/transcript$/.test(req.path) && data.message) {
         const m = data.message;
         db.prepare('INSERT INTO stt_feedback (message_id,file,model,transcript,corrected,rating,at,by_user) VALUES (?,?,?,?,?,?,?,?)')

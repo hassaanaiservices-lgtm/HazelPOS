@@ -194,11 +194,11 @@ module.exports = function waConnection(store, hooks = {}) {
   cleanMedia(); const cleaner = setInterval(cleanMedia, 864e5); cleaner.unref();
 
   // Already linked before: reconnect by itself when the POS starts
-  if (!OFF && fs.existsSync(path.join(AUTH_DIR, 'creds.json'))) setTimeout(() => connect().catch(e => console.error('WhatsApp reconnect:', e.message)), 1500);
+  if (!OFF && hooks.autoConnect?.() !== false && fs.existsSync(path.join(AUTH_DIR, 'creds.json'))) setTimeout(() => connect().catch(e => console.error('WhatsApp reconnect:', e.message)), 1500);
 
   // Close the connection but stay linked (the cloud stops a restaurant's bot; the login is kept for later)
   function stop() {
-    wanted = false; clearTimeout(retryTimer); clearInterval(cleaner);
+    wanted = false; clearTimeout(retryTimer);
     const s = sock; sock = null; goOffline(); status = 'disconnected'; qr = null;
     try { s?.end(undefined); } catch { /* already closed */ }
   }

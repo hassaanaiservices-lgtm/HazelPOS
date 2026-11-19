@@ -26,7 +26,8 @@ export const Stage = ({ b }) => { const [k, l] = stageOf(b); return <span classN
 export function WhatsApp({ h }) {
   if (!h?.whatsapp) return <span className="muted">—</span>
   const st = h.whatsapp.status
-  return st === 'connected' ? <span className="pill ok">On</span> : <span className={'pill ' + (st ? 'warn' : '')}>{st || 'Not linked'}</span>
+  const where = h.whatsapp.on_cloud ? ' (cloud)' : ''
+  return st === 'connected' ? <span className="pill ok">On{where}</span> : <span className={'pill ' + (st ? 'warn' : '')}>{(st || 'Not linked') + where}</span>
 }
 
 export const LastSeen = ({ b }) => <span title={b.health_at || b.last_sync || ''}>{ago(b.health_at || b.last_sync)}</span>

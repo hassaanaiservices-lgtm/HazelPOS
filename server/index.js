@@ -1289,8 +1289,8 @@ app.post('/api/riders/:id/send-link', userErrors(async (req, res) => {
   if (!r.link) throw new UserError('Connect the cloud first (Settings → Cloud): the rider screen runs there');
   const jid = lowStock.toJid(r.phone);
   if (!jid) throw new UserError("Add the rider's WhatsApp number first");
-  if (!waModule.wa.isConnected()) throw new UserError('WhatsApp is not connected (Settings → WhatsApp bot)');
-  await waModule.wa.send(jid, `Salam ${r.name}! ${getSettings().name} ka rider screen: ${r.link}\n\nIsay phone par kholein aur browser ke menu se "Add to Home screen" karein. Delivery ke waqt yeh screen khuli rakhein.`, 'Rider link', 'system');
+  if (!waOut.isConnected()) throw new UserError('WhatsApp is not connected (Settings → WhatsApp bot)');
+  await waOut.send(jid, `Salam ${r.name}! ${getSettings().name} ka rider screen: ${r.link}\n\nIsay phone par kholein aur browser ke menu se "Add to Home screen" karein. Delivery ke waqt yeh screen khuli rakhein.`, 'Rider link', 'system');
   res.json({ ok: true });
 }));
 // ---------- The rider's own screen (role rider, client/src/RiderHome.jsx) ----------
@@ -1825,7 +1825,13 @@ const syncWaCloud = async () => {
   if (!cloud.status().connected || cloud.isHeld()) return;
   try {
     const mode = await cloud.call('/api/sync/wa-mode');
+    const was = waCloudMode;
     waCloudMode = !!mode?.cloud;
+    // Switched to the cloud: this POS lets go of WhatsApp (stays linked, so switching back needs no new QR).
+    // Switched back: it connects again by itself.
+    waModule?.store.meta.set('cloud_mode', waCloudMode ? '1' : '0');
+    if (waCloudMode && (!was || waModule?.wa.isConnected())) waModule?.wa.stop();
+    if (!waCloudMode && was) waModule?.wa.connect().catch(() => {});
     if (!waCloudMode) return;
     const k = waKnowledge();
     if (k.hash !== mode.knowledge_hash) await cloud.call('/api/sync/wa-knowledge', k);
@@ -2024,7 +2030,12 @@ function createOrder({ type, zone_id, customer, phone, address, items, userName,
   });
 }
 const waModule = require('./whatsapp')(app, db, { createOrder, getOrder, printKitchen, getSettings, aiAllowed: () => lic.aiAllowed() && !waCloudMode, cloudBot: () => waCloudMode, cloudCall: (p, b) => cloud.call(p, b), cloudRaw: p => cloud.fetchRaw(p), deliveryStatus });
-const lowStock = require('./stock-alert')(db, { getSettings, wa: waModule.wa });
+// Messages the restaurant sends to a number (rider link, low-stock alert): from the cloud while the bot runs there
+const waOut = {
+  isConnected: () => waCloudMode || waModule.wa.isConnected(),
+  send: (jid, text, label, sender) => waCloudMode ? cloud.call('/api/sync/wa-send-phone', { jid, text, label }) : waModule.wa.send(jid, text, label, sender),
+};
+const lowStock = require('./stock-alert')(db, { getSettings, wa: waOut });
 // Settings → Alerts: what would be sent now, and a test send
 app.get('/api/low-stock-alert/preview', (req, res) => { const r = lowStock.report(); res.json({ low: r.low, text: r.text, enough: r.enough }); });
 app.post('/api/low-stock-alert/test', async (req, res) => {

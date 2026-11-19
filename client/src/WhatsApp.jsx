@@ -29,14 +29,7 @@ export default function WhatsApp({ notify }) {
 
 function LinkScreen({ st, onStatus }) {
   const start = run(async () => onStatus(await api('/whatsapp/connect', {})))
-  if (st.cloud_bot) return (
-    <div className="wa-link"><div className="wa-link-card"><div className="wa-link-text">
-      <h1>WhatsApp runs on HazelPOS Cloud</h1>
-      <p className="wa-note">This restaurant's WhatsApp answers customers from HazelPOS Cloud, so it works even when this PC is off.
-        It is not connected right now. Ask HazelPOS to link it again.</p>
-      {st.error && <p className="wa-error">{st.error}</p>}
-    </div></div></div>
-  )
+
   const waiting = st.status === 'connecting' || (st.status === 'qr' && !st.qr)
   return (
     <div className="wa-link">
@@ -49,8 +42,11 @@ function LinkScreen({ st, onStatus }) {
             <li>Tap <b>Linked devices</b> and then <b>Link a device</b></li>
             <li>Point the phone at this screen to scan the QR code</li>
           </ol>
-          <p className="wa-note">Customers' chats will then show here. The POS keeps working without internet;
-            messages sent while it was offline appear when it reconnects, marked for you to contact.</p>
+          {st.cloud_bot
+            ? <p className="wa-note">Your WhatsApp runs on HazelPOS Cloud: customers get answers even when this PC is off.
+              Customers' chats will show here whenever this PC is on and online.</p>
+            : <p className="wa-note">Customers' chats will then show here. The POS keeps working without internet;
+              messages sent while it was offline appear when it reconnects, marked for you to contact.</p>}
           {st.error && <p className="wa-error">{st.error}</p>}
         </div>
         <div className="wa-qr">
@@ -94,9 +90,7 @@ function Inbox({ st, notify, onStatus }) {
             {st.assistant ? 'Auto-reply on' : 'Auto-reply off'}</button>
           <div className="wa-menu-wrap">
             <button className="wa-icon" title="More" aria-label="More" onClick={() => setMenu(!menu)}><Icon name="menu" /></button>
-            {menu && <div className="wa-menu" onMouseLeave={() => setMenu(false)}>{st.cloud_bot
-              ? <span className="wa-note" style={{ display: 'block', margin: 8 }}>Runs on HazelPOS Cloud. To unlink, ask HazelPOS.</span>
-              : <button id="wa-logout" onClick={logout}>Unlink WhatsApp</button>}</div>}
+            {menu && <div className="wa-menu" onMouseLeave={() => setMenu(false)}><button id="wa-logout" onClick={logout}>Unlink WhatsApp</button></div>}
           </div>
         </header>
         {st.assistant_paused_unpaid && <div className="wa-conn">The assistant is paused because the HazelPOS membership isn't paid. Customers' messages still arrive here: reply yourself, or pay to switch it back on.</div>}

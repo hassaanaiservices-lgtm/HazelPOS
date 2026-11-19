@@ -172,24 +172,45 @@ module.exports = function waHost({ app, db, dataDir, branchAuth, vendorAuth, ven
   });
   // "Your order is ready" / "the rider is on the way": only to customers who already chat with this restaurant
   const sendTimes = new Map(); // branch id -> recent send times (at most 30 a minute)
+  const tooMany = req => {
+    const t = (sendTimes.get(req.branch.id) || []).filter(x => x > Date.now() - 60_000);
+    if (t.length >= 30) return true;
+    t.push(Date.now()); sendTimes.set(req.branch.id, t); return false;
+  };
   app.post('/api/sync/wa-send', branchAuth, async (req, res) => {
     const h = liveFor(req, res); if (!h) return;
     const chatId = String(req.body.chat_id || ''), text = String(req.body.text || '').trim().slice(0, 4000);
     if (!text || !h.store.chat(chatId)) return res.status(400).json({ error: 'Unknown chat' });
-    const t = (sendTimes.get(req.branch.id) || []).filter(x => x > Date.now() - 60_000);
-    if (t.length >= 30) return res.status(429).json({ error: 'Too many messages: try again in a minute' });
-    t.push(Date.now()); sendTimes.set(req.branch.id, t);
+    if (tooMany(req)) return res.status(429).json({ error: 'Too many messages: try again in a minute' });
     try { await h.wa.send(chatId, text, String(req.body.label || 'Order update').slice(0, 40), 'system'); res.json({ ok: true }); }
+    catch (e) { res.status(409).json({ error: e.message }); }
+  });
+
+  // The restaurant's own messages to a number (the rider's link, the owner's low-stock alert), from its own WhatsApp
+  app.post('/api/sync/wa-send-phone', branchAuth, async (req, res) => {
+    const h = liveFor(req, res); if (!h) return;
+    const jid = String(req.body.jid || ''), text = String(req.body.text || '').trim().slice(0, 4000);
+    if (!/^\d{10,15}@s\.whatsapp\.net$/.test(jid) || !text) return res.status(400).json({ error: 'Bad number or empty message' });
+    if (tooMany(req)) return res.status(429).json({ error: 'Too many messages: try again in a minute' });
+    try { await h.wa.send(jid, text, String(req.body.label || 'Message').slice(0, 40), 'system'); res.json({ ok: true }); }
     catch (e) { res.status(409).json({ error: e.message }); }
   });
 
   // ---------- The POS's inbox and replies (POS → /api/whatsapp/* → here, while the cloud bot is on) ----------
   const W = '/api/sync/wa';
   const chatOf = (req, res, h) => { const c = h.store.chat(req.params.id); if (!c) res.status(404).json({ error: 'Chat not found' }); return c; };
+  // The QR is passed on too: the owner can link the restaurant's number from the POS (it is their own branch key)
   app.get(`${W}/status`, branchAuth, (req, res) => {
     const h = liveFor(req, res); if (!h) return;
-    const { qr, ...st } = h.wa.status(); // eslint-disable-line no-unused-vars
-    res.json({ ...st, ...h.store.counts(), assistant: h.assistant.enabled() });
+    res.json({ ...h.wa.status(), ...h.store.counts(), assistant: h.assistant.enabled() });
+  });
+  app.post(`${W}/connect`, branchAuth, async (req, res) => {
+    const h = liveFor(req, res); if (!h) return;
+    try { await h.wa.connect(); res.json(h.wa.status()); } catch (e) { res.status(400).json({ error: e.message }); }
+  });
+  app.post(`${W}/logout`, branchAuth, async (req, res) => {
+    const h = liveFor(req, res); if (!h) return;
+    await h.wa.logout(); res.json(h.wa.status());
   });
   app.get(`${W}/chats`, branchAuth, (req, res) => { const h = liveFor(req, res); if (h) res.json(h.store.chats()); });
   app.get(`${W}/chats/:id/messages`, branchAuth, (req, res) => { const h = liveFor(req, res); if (h) res.json(h.store.messages(req.params.id, +req.query.after || 0)); });
@@ -246,5 +267,11 @@ module.exports = function waHost({ app, db, dataDir, branchAuth, vendorAuth, ven
     res.json({ ok: true });
   });
 
-  return { live, start, stop, knowledge, hashOf: v => crypto.createHash('sha256').update(JSON.stringify(v)).digest('hex') };
+  const statusOf = id => {
+    if (!enabled(id)) return null;
+    const h = live.get(id), w = h?.wa.status() || {};
+    return { status: w.status || 'off', connected_at: w.connected_at || null, error: w.error || '', assistant: h ? h.assistant.enabled() : null, on_cloud: true };
+  };
+
+  return { statusOf, live, start, stop, knowledge, hashOf: v => crypto.createHash('sha256').update(JSON.stringify(v)).digest('hex') };
 };

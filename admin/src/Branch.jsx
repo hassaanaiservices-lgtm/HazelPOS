@@ -477,9 +477,9 @@ function CloudBot({ id }) {
   })
   return (
     <div className="card"><h3>WhatsApp bot on the cloud</h3>
-      <p className="muted">Answers customers on WhatsApp even when the restaurant's PC is off. It uses the menu, delivery areas, FAQ and menu photos that the restaurant's POS sends (every 2 minutes when they change). Orders customers confirm reach the cashier's WhatsApp orders on the POS within 20 seconds when the POS is online (version 1.0.5 or later); until then they wait here.</p>
+      <p className="muted">Answers customers on WhatsApp even when the restaurant's PC is off. It uses the menu, delivery areas, FAQ and menu photos that the restaurant's POS sends (every 2 minutes when they change). Orders customers confirm reach the cashier's WhatsApp orders on the POS within 20 seconds when the POS is online (version 1.0.7 or later); until then they wait here.</p>
       <p style={{ marginTop: 12 }}><b>{WA_STATUS[w.status] || w.status}</b>{w.me ? ` · ${w.me}` : ''}{w.error ? <span className="muted"> · {w.error}</span> : null}</p>
-      <p className="muted small">{w.menu_at ? `Menu from the POS: ${w.menu_items} items, ${w.menu_pictures} photos, ${ago(w.menu_at)}` : 'No menu from the POS yet: the bot stays quiet until the POS (online, version 1.0.5 or later) sends it.'}</p>
+      <p className="muted small">{w.menu_at ? `Menu from the POS: ${w.menu_items} items, ${w.menu_pictures} photos, ${ago(w.menu_at)}` : 'No menu from the POS yet: the bot stays quiet until the POS (online, version 1.0.7 or later) sends it.'}</p>
       <div className="row" style={{ marginTop: 12, gap: 8, flexWrap: 'wrap' }}>
         <button onClick={toggle}>{w.enabled ? 'Switch off' : 'Switch on'}</button>
         {w.enabled && !['connected', 'qr', 'connecting'].includes(w.status) && <button onClick={post('/connect')}>Link WhatsApp</button>}
