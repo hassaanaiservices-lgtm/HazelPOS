@@ -57,7 +57,8 @@ function startServer() {
 
 const tail = file => { try { return fs.readFileSync(file, 'utf8').split('\n').slice(-12).join('\n'); } catch { return ''; } };
 
-async function waitForServer(ms = 30_000) {
+// 90 s: the first start after an update can be slow on Windows (antivirus scans the new files)
+async function waitForServer(ms = 90_000) {
   for (const end = Date.now() + ms; Date.now() < end;) {
     try { if ((await fetch(`${LOCAL}/api/settings`)).ok) return true; } catch { /* not up yet */ }
     await new Promise(r => setTimeout(r, 300));
@@ -65,12 +66,24 @@ async function waitForServer(ms = 30_000) {
   return false;
 }
 
+const STARTING = 'data:text/html;charset=utf-8,' + encodeURIComponent(`<!doctype html><meta charset="utf-8"><title>HazelPOS</title>
+<style>body{margin:0;height:100vh;display:grid;place-items:center;background:#12110f;color:#f3efe8;font:18px system-ui,sans-serif;text-align:center}small{color:#a8a39a}</style>
+<div><b>HazelPOS is starting…</b><br><small>This can take up to a minute after an update.</small></div>`);
+
 function showWindow() {
   if (win) { if (win.isMinimized()) win.restore(); win.show(); win.focus(); return; }
-  win = new BrowserWindow({ width: 1366, height: 860, minWidth: 900, minHeight: 600, icon: ICON, autoHideMenuBar: true, show: false, title: 'HazelPOS',
+  win = new BrowserWindow({ width: 1366, height: 860, minWidth: 900, minHeight: 600, icon: ICON, autoHideMenuBar: true, show: false, title: 'HazelPOS', backgroundColor: '#12110f',
     webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, webSecurity: true, allowRunningInsecureContent: false } }); // the POS page can never reach the PC itself
   win.loadURL(LOCAL);
   win.once('ready-to-show', () => { win.maximize(); win.show(); });
+  // The server isn't answering yet (slow start, or it is restarting): show "starting…" and try again every 2 s,
+  // instead of leaving a blank white window that never reloads.
+  win.webContents.on('did-fail-load', (e, code, desc, url, isMain) => {
+    if (!isMain || code === -3 /* aborted */ || !String(url).startsWith(LOCAL)) return;
+    win.loadURL(STARTING).catch(() => {});
+    setTimeout(() => { if (win && !win.isDestroyed()) win.loadURL(LOCAL).catch(() => {}); }, 2000);
+  });
+  setTimeout(() => { if (win && !win.isDestroyed() && !win.isVisible()) { win.maximize(); win.show(); } }, 5000); // never stay invisible
   // Map links, table QR links etc. open in the normal browser, not inside the POS window
   require('./harden')(win, () => LOCAL, u => shell.openExternal(u)); // only web and phone links leave the app (harden.js)
   win.on('close', e => { if (!quitting) { e.preventDefault(); win.hide(); } }); // keep serving the kitchen screen and WhatsApp
@@ -188,10 +201,11 @@ app.whenReady().then(async () => {
   PORT = chosen.port; LOCAL = `http://localhost:${PORT}`;
   startServer();
   buildTray();
+  showWindow(); // shows "starting…" until the server answers
   if (!(await waitForServer())) {
-    dialog.showErrorBox('HazelPOS is taking too long to start', `Details are in:\n${path.join(LOG_DIR, 'server.log')}\n\n${tail(path.join(LOG_DIR, 'server.log'))}`);
+    dialog.showMessageBox({ type: 'warning', title: 'HazelPOS is taking too long to start', message: 'HazelPOS is taking too long to start.',
+      detail: `It keeps trying. If this stays, restart the PC.\nDetails are in:\n${path.join(LOG_DIR, 'server.log')}\n\n${tail(path.join(LOG_DIR, 'server.log'))}` }).catch(() => {});
   }
-  showWindow();
   if (chosen.changed) dialog.showMessageBox({ type: 'info', title: 'HazelPOS address changed', message: `HazelPOS is using port ${PORT} on this PC.`,
     detail: `Another program already uses port ${chosen.saved || 4000}. Kitchen screens and tablets must now open:\n\n${lanUrls().join('\n') || LOCAL}\n\n(Tray icon → Connect other screens shows a QR code.)` }).catch(() => {});
   setupUpdater();
