@@ -85,9 +85,13 @@ CREATE INDEX IF NOT EXISTS rider_events_open ON rider_events (branch_id, applied
 CREATE TABLE IF NOT EXISTS rider_trail (branch_id INTEGER, rider_local_id INTEGER, lat REAL, lng REAL, at TEXT);
 -- A forgotten PIN, reset by you from the admin app: the POS picks it up within a minute, the person must choose a new one at login.
 -- The temporary PIN is wiped as soon as the POS has it (or after a day).
+-- The PIN list of the admin app: each login's PIN, encrypted (key from PIN_VAULT_KEY, else derived from VENDOR_API_KEY: a stolen
+-- database alone shows nothing). set_at = the POS's pin_changed_at that this PIN belongs to ('pending' = you set it, the POS has not applied it yet).
+CREATE TABLE IF NOT EXISTS pin_vault (branch_id INTEGER, user_id INTEGER, name TEXT, role TEXT, pin_enc TEXT, set_at TEXT, pos_changed_at TEXT, updated_at TEXT, PRIMARY KEY (branch_id, user_id));
 CREATE TABLE IF NOT EXISTS pin_resets (id INTEGER PRIMARY KEY, branch_id INTEGER, user_id INTEGER, user_name TEXT, pin TEXT, created_at TEXT, by_who TEXT, applied_at TEXT, result TEXT);
 CREATE INDEX IF NOT EXISTS rider_trail_r ON rider_trail (branch_id, rider_local_id, at);
 `);
+try { db.exec('ALTER TABLE pin_resets ADD COLUMN force_change INTEGER DEFAULT 0'); } catch { /* exists */ } // 1 = the person must choose a new PIN at the next login (after the table is created)
 
 const now = () => new Date().toISOString();
 const sha = s => crypto.createHash('sha256').update(String(s)).digest('hex');
@@ -312,7 +316,7 @@ app.get('/api/setup', branchAuth, (req, res) => {
   if (!st) return res.json({ setup: null });
   const images = db.prepare('SELECT caption, mime, data FROM setup_images WHERE branch_id=? ORDER BY sort, id').all(req.branch.id)
     .map(i => ({ caption: i.caption, mime: i.mime, data: Buffer.from(i.data).toString('base64') }));
-  res.json({ setup: { ...JSON.parse(st.data || '{}'), images }, updated_at: st.updated_at });
+  res.json({ setup: { ...getSetup(req.branch.id).data, images }, updated_at: st.updated_at }); // staff PINs unsealed for the POS
 });
 // The POS applied it (or couldn't). Staff PINs are removed from the cloud copy once they're on the PC.
 app.post('/api/setup/applied', branchAuth, (req, res) => {
@@ -511,10 +515,31 @@ app.get('/api/track/:token', (req, res) => {
 // The owner's map: today's trail of one rider
 // ---------- PIN reset (admin app -> POS) ----------
 const PIN_RESET_HOURS = 24;
+const VAULT_KEY = crypto.createHash('sha256').update('hazelpos-pin-vault|' + (process.env.PIN_VAULT_KEY || process.env.VENDOR_API_KEY || '')).digest();
+const vaultSeal = pin => { const iv = crypto.randomBytes(12), c = crypto.createCipheriv('aes-256-gcm', VAULT_KEY, iv); const ct = Buffer.concat([c.update(String(pin), 'utf8'), c.final()]); return [iv, c.getAuthTag(), ct].map(b => b.toString('base64')).join('.'); };
+const vaultOpen = s => { try { const [iv, tag, ct] = String(s).split('.').map(x => Buffer.from(x, 'base64')); const d = crypto.createDecipheriv('aes-256-gcm', VAULT_KEY, iv); d.setAuthTag(tag); return Buffer.concat([d.update(ct), d.final()]).toString('utf8'); } catch { return null; } };
+// The POS sends its logins; a PIN comes along only when it was just set or changed there
+app.post('/api/sync/pins', branchAuth, (req, res) => {
+  const b = req.branch.id, users = (Array.isArray(req.body.users) ? req.body.users : []).slice(0, 200).filter(u => Number.isInteger(+u.id));
+  tx(() => {
+    const ids = users.map(u => +u.id);
+    db.prepare(`DELETE FROM pin_vault WHERE branch_id=? AND user_id NOT IN (${ids.map(() => '?').join(',') || 'NULL'})`).run(b, ...ids);
+    const withPin = db.prepare(`INSERT INTO pin_vault (branch_id, user_id, name, role, pin_enc, set_at, pos_changed_at, updated_at) VALUES (?,?,?,?,?,?,?,?)
+      ON CONFLICT(branch_id, user_id) DO UPDATE SET name=excluded.name, role=excluded.role, pin_enc=excluded.pin_enc, set_at=excluded.set_at, pos_changed_at=excluded.pos_changed_at, updated_at=excluded.updated_at`);
+    const noPin = db.prepare(`INSERT INTO pin_vault (branch_id, user_id, name, role, pos_changed_at, updated_at) VALUES (?,?,?,?,?,?)
+      ON CONFLICT(branch_id, user_id) DO UPDATE SET name=excluded.name, role=excluded.role, pos_changed_at=excluded.pos_changed_at, updated_at=excluded.updated_at`);
+    for (const u of users) {
+      const name = String(u.name || '').slice(0, 80), role = String(u.role || '').slice(0, 20), at = String(u.changed_at || '').slice(0, 40);
+      if (typeof u.pin === 'string' && /^[a-z0-9]{4,12}$/i.test(u.pin)) withPin.run(b, +u.id, name, role, vaultSeal(u.pin), at, at, now());
+      else noPin.run(b, +u.id, name, role, at, now());
+    }
+  });
+  res.json({ ok: true });
+});
 app.get('/api/sync/pin-resets', branchAuth, (req, res) => {
   db.prepare("UPDATE pin_resets SET pin=NULL, result='expired', applied_at=? WHERE branch_id=? AND applied_at IS NULL AND created_at < ?")
     .run(now(), req.branch.id, new Date(Date.now() - PIN_RESET_HOURS * 3600e3).toISOString());
-  res.json(db.prepare('SELECT id, user_id, pin FROM pin_resets WHERE branch_id=? AND applied_at IS NULL ORDER BY id').all(req.branch.id));
+  res.json(db.prepare('SELECT id, user_id, pin, force_change FROM pin_resets WHERE branch_id=? AND applied_at IS NULL ORDER BY id').all(req.branch.id).map(r => ({ ...r, pin: vaultOpen(r.pin) }))); // sealed in the database
 });
 app.post('/api/sync/pin-resets/ack', branchAuth, (req, res) => {
   const up = db.prepare('UPDATE pin_resets SET pin=NULL, applied_at=?, result=? WHERE id=? AND branch_id=? AND applied_at IS NULL');
@@ -593,7 +618,8 @@ const vendorAuth = (req, res, next) => {
     return res.status(403).json({ error: 'Only an owner can manage the team' });
   if (req.method !== 'GET' && !/^\/api\/vendor\/team\/login$/.test(req.path)) res.on('finish', () => {
     if (res.statusCode >= 400) return;
-    const { password, file, image, data, rows, menu, ...rest } = req.body || {}; // no passwords, no big files in the log
+    const { password, pin, file, image, data, rows, menu, staff, ...rest } = req.body || {}; // no passwords, PINs or big files in the log
+    if (Array.isArray(staff)) rest.staff = staff.map(({ pin: _p, ...u }) => u);
     const extra = [file && 'file', image && 'photo', data && 'picture', rows && `${rows.length} rows`, menu && `menu of ${menu.length}`].filter(Boolean).join(', ');
     db.prepare('INSERT INTO vendor_audit (at, who, action, detail) VALUES (?,?,?,?)')
       .run(now(), req.who, `${req.method} ${req.path.replace('/api/vendor', '')}`, (JSON.stringify(rest) + (extra ? ` + ${extra}` : '')).slice(0, 600));
@@ -724,10 +750,16 @@ try { menuImport = require('../server/menu-import'); } catch { /* cloud deployed
 const CODE_CHARS = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'; // no 0/O, 1/I/L: read out on the phone without mistakes
 const newCode = () => { const c = Array.from(crypto.randomBytes(8), x => CODE_CHARS[x % CODE_CHARS.length]).join(''); return `HZ-${c.slice(0, 4)}-${c.slice(4)}`; };
 const codeHash = code => sha(code.toUpperCase().replace(/[^A-Z0-9]/g, ''));
-const getSetup = id => { const st = db.prepare('SELECT * FROM setups WHERE branch_id=?').get(id); return { st, data: JSON.parse(st?.data || '{}') }; };
+// Staff PINs of a prepared setup are sealed in the database (a stolen file shows none); everything else reads them as before
+const sealStaff = (data, fn) => ({ ...data, staff: Array.isArray(data.staff) ? data.staff.map(u => u.pin ? { ...u, pin: fn(u.pin) } : u) : data.staff });
+const SEALED = 'v1:';
+const getSetup = id => {
+  const st = db.prepare('SELECT * FROM setups WHERE branch_id=?').get(id), data = JSON.parse(st?.data || '{}');
+  return { st, data: sealStaff(data, p => String(p).startsWith(SEALED) ? (vaultOpen(String(p).slice(SEALED.length)) ?? '') : p) };
+};
 function saveSetup(id, data) {
   db.prepare(`INSERT INTO setups (branch_id, data, updated_at) VALUES (?,?,?)
-    ON CONFLICT(branch_id) DO UPDATE SET data=excluded.data, updated_at=excluded.updated_at, applied_at=NULL, error=NULL`).run(id, JSON.stringify(data), now());
+    ON CONFLICT(branch_id) DO UPDATE SET data=excluded.data, updated_at=excluded.updated_at, applied_at=NULL, error=NULL`).run(id, JSON.stringify(sealStaff(data, p => SEALED + vaultSeal(p))), now());
 }
 function setupSummary(id) {
   const { st, data } = getSetup(id);
@@ -951,12 +983,36 @@ app.post('/api/vendor/branches/:id/pin-reset', vendorAuth, (req, res) => {
   const pin = String(req.body.pin || '').trim(), userId = +req.body.user_id;
   if (!/^[a-z0-9]{4,12}$/i.test(pin)) return res.status(400).json({ error: 'The temporary PIN must be 4 to 12 letters or numbers' });
   if (['1234', '1111', '2222', '3333', '0000', '4321'].includes(pin.toLowerCase())) return res.status(400).json({ error: 'Choose a less easy temporary PIN' });
-  const users = JSON.parse(b.health || 'null')?.users || [];
+  const users = [...(JSON.parse(b.health || 'null')?.users || []), ...db.prepare('SELECT user_id id, name, role FROM pin_vault WHERE branch_id=?').all(b.id)];
   const u = users.find(x => x.id === userId);
   if (!u) return res.status(400).json({ error: "That login is not on this POS's last report. Wait for the POS to report again (within 3 hours), or ask the owner to reset it in Settings → Staff & PINs" });
   db.prepare("UPDATE pin_resets SET pin=NULL, applied_at=?, result='replaced by a newer reset' WHERE branch_id=? AND user_id=? AND applied_at IS NULL").run(now(), b.id, userId);
-  db.prepare('INSERT INTO pin_resets (branch_id, user_id, user_name, pin, created_at, by_who) VALUES (?,?,?,?,?,?)').run(b.id, userId, String(u.name), pin, now(), req.who);
+  db.prepare('INSERT INTO pin_resets (branch_id, user_id, user_name, pin, created_at, by_who, force_change) VALUES (?,?,?,?,?,?,?)').run(b.id, userId, String(u.name), vaultSeal(pin), now(), req.who, req.body.force_change ? 1 : 0);
+  // visible in the PIN list straight away; 'pending' until their POS has applied it
+  db.prepare(`INSERT INTO pin_vault (branch_id, user_id, name, role, pin_enc, set_at, updated_at) VALUES (?,?,?,?,?,'pending',?)
+    ON CONFLICT(branch_id, user_id) DO UPDATE SET pin_enc=excluded.pin_enc, set_at='pending', updated_at=excluded.updated_at`).run(b.id, userId, String(u.name), String(u.role || ''), vaultSeal(pin), now());
   res.json({ ok: true });
+});
+// The logins of that POS and what is known about their PINs (never the PIN itself: "Show" asks for it, and is logged)
+app.get('/api/vendor/branches/:id/pins', vendorAuth, (req, res) => {
+  const b = vendorBranch(req, res); if (!b) return;
+  const vault = new Map(db.prepare('SELECT * FROM pin_vault WHERE branch_id=?').all(b.id).map(v => [v.user_id, v]));
+  const health = JSON.parse(b.health || 'null')?.users || [];
+  const ids = [...new Set([...health.map(u => u.id), ...vault.keys()])].sort((x, y) => x - y);
+  res.json(ids.map(id => {
+    const v = vault.get(id), h = health.find(u => u.id === id);
+    return { id, name: v?.name || h?.name, role: v?.role || h?.role, has_pin: !!v?.pin_enc,
+      pending: v?.set_at === 'pending', fresh: !!v?.pin_enc && v.set_at !== 'pending' && v.set_at === (v.pos_changed_at || h?.pin_changed_at) };
+  }));
+});
+app.post('/api/vendor/branches/:id/pins/:uid/reveal', vendorAuth, (req, res) => {
+  if (req.vendorRole !== 'owner') return res.status(403).json({ error: 'Only an owner can see PINs' });
+  const b = vendorBranch(req, res); if (!b) return;
+  const v = db.prepare('SELECT * FROM pin_vault WHERE branch_id=? AND user_id=?').get(b.id, +req.params.uid);
+  const pin = v?.pin_enc ? vaultOpen(v.pin_enc) : null;
+  if (!pin) return res.status(404).json({ error: 'This PIN is not known yet. It appears when someone sets or changes it, or press Set PIN.' });
+  db.prepare('INSERT INTO vendor_audit (at, who, action, detail) VALUES (?,?,?,?)').run(now(), req.who, 'PIN VIEWED', `${v.name} (${v.role}) of branch ${b.name}`);
+  res.json({ pin });
 });
 app.post('/api/vendor/branches/:id/code', vendorAuth, (req, res) => {
   const b = vendorBranch(req, res); if (!b) return;

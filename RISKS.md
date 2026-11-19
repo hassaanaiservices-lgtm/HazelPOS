@@ -113,3 +113,10 @@ The accepted ones:
 | X3 | Suspend only reaches a PC that can reach the cloud | Same lease option | accepted |
 | X4 | Backups on your volume are not encrypted at rest | Protect Railway access; privacy line in the agreement; later encrypt | open |
 | X5 | Anyone on the restaurant Wi-Fi can open the login page | PIN lock-out; advise a guest Wi-Fi | accepted |
+
+## PIN list in the admin app (decided 19 Nov 2026)
+
+| # | Risk | What was decided | Status |
+|---|---|---|---|
+| P1 | The admin app now shows everyone's PIN, and keeps it in sync with their POS (both directions, needs internet). So the cloud holds PINs. | Sealed with AES-256-GCM; the key comes from `PIN_VAULT_KEY`, else from `VENDOR_API_KEY` on the server, so a stolen database file alone shows nothing (tested). Only an **owner** of your team can press Show, and every Show is in the activity log. The POS itself still stores only the scrambled PIN. PINs you type are no longer written in the activity log (they were). | accepted |
+| P2 | Anyone who can use your admin app as an owner, or who gets `VENDOR_API_KEY`, can read every restaurant's PINs. | Keep the owner login of the admin app to one person; keep Railway access protected. | accepted |

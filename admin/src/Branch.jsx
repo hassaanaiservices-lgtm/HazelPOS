@@ -35,7 +35,7 @@ export default function Branch({ id }) {
       {tab === 'Menu' && <><MenuPictures id={id} images={d.images} reload={load} /><Menu id={id} d={d} reload={load} /><Deals menu={d.setup.menu || []} save={save} /></>}
       {tab === 'Tables' && <Tables tables={d.setup.tables || []} floors={d.setup.floors || []} save={save} />}
       {tab === 'Delivery areas' && <Zones zones={d.setup.zones || []} save={save} />}
-      {tab === 'Staff' && <><PinReset id={id} branch={d.branch} /><Staff staff={d.setup.staff || []} save={save} /></>}
+      {tab === 'Staff' && <><PinReset id={id} /><Staff staff={d.setup.staff || []} save={save} /></>}
       {tab === 'Health & errors' && <Health d={d} />}
     </>
   )
@@ -378,31 +378,38 @@ function Zones({ zones, save }) {
   )
 }
 
-// Someone forgot their PIN: you set a temporary one here, their POS picks it up within a minute, and at their next login
-// they must choose a new one. PINs are never stored readable anywhere, so nobody (not even you) can look them up.
+// The logins on their POS and their PINs. A PIN set or changed on the POS appears here (stored encrypted on the cloud); a PIN you
+// set here reaches their POS within a minute. Both need internet at the restaurant. "Show" is for owners only and is logged.
 const tempPin = () => Array.from(crypto.getRandomValues(new Uint8Array(6)), n => 'abcdefghjkmnpqrstuvwxyz23456789'[n % 31]).join('')
 const ROLE_NAMES = { admin: 'Owner (admin)', cashier: 'Cashier', kitchen: 'Kitchen', rider: 'Rider' }
-function PinReset({ id, branch }) {
-  const users = branch.health?.users || []
-  const [list, setList] = useState([])
-  const load = () => api(`/branches/${id}/pin-resets`).then(setList)
-  useEffect(() => { run(load)(); const t = setInterval(() => run(load)(), 15000); return () => clearInterval(t) }, [id])
-  const reset = run(async u => {
-    const pin = await inputBox(`Temporary PIN for ${u.name}. Tell them this PIN; at their next login the POS makes them choose a new one.`, { value: tempPin(), confirmLabel: 'Reset PIN' })
+function PinReset({ id }) {
+  const [users, setUsers] = useState(null)
+  const [resets, setResets] = useState([])
+  const [shown, setShown] = useState({}) // user id -> PIN, for 20 seconds
+  const load = () => Promise.all([api(`/branches/${id}/pins`).then(setUsers), api(`/branches/${id}/pin-resets`).then(setResets)])
+  useEffect(() => { run(load)(); const t = setInterval(() => run(load)(), 10000); return () => clearInterval(t) }, [id])
+  const show = run(async u => {
+    const r = await api(`/branches/${id}/pins/${u.id}/reveal`, {})
+    setShown(s => ({ ...s, [u.id]: r.pin })); setTimeout(() => setShown(s => { const n = { ...s }; delete n[u.id]; return n }), 20000)
+  })
+  const setPin = run(async u => {
+    const pin = await inputBox(`New PIN for ${u.name}. It reaches their POS within a minute (their POS must be online).`, { value: tempPin(), confirmLabel: 'Set PIN' })
     if (!pin) return
     await api(`/branches/${id}/pin-reset`, { user_id: u.id, pin: pin.trim() })
-    toast(`Done. ${u.name}'s POS gets it within a minute (when it is online). Tell them: log in with ${pin.trim()}`); load()
+    toast(`${u.name}'s PIN will be ${pin.trim()} as soon as their POS is online`); load()
   })
-  const last = u => list.find(r => r.user_id === u.id)
+  const failed = u => resets.find(r => r.user_id === u.id && r.applied_at && r.result !== 'ok' && r.result !== 'replaced by a newer reset')
+  const state = u => failed(u) ? <span className="err">{failed(u).result}</span> : u.pending ? 'sending to their POS…' : u.fresh ? 'in sync' : u.has_pin ? 'changed on the POS, waiting to sync' : 'not known yet'
   return (
-    <div className="card"><h3>Forgot a PIN?</h3>
-      <p className="muted">PINs are stored scrambled and each person chooses their own, so nobody can see them. Reset it instead: set a temporary PIN here, tell the person, and at their next login the POS asks them to choose a new one.</p>
-      {!users.length ? <p className="muted" style={{ marginTop: 12 }}>The list of logins appears after their POS reports in (within 3 hours of starting).</p>
-        : <table style={{ marginTop: 12 }}><thead><tr><th>Login</th><th>Role</th><th>Last reset</th><th /></tr></thead>
-          <tbody>{users.map(u => { const r = last(u); return (
+    <div className="card"><h3>Logins and PINs</h3>
+      <p className="muted">Everyone's PIN, kept in sync with their POS. A PIN changed on the POS shows here; a PIN you set here goes to their POS. Both need internet at the restaurant.</p>
+      {!users?.length ? <p className="muted" style={{ marginTop: 12 }}>The list appears after their POS reports in (within 10 minutes of starting version 1.0.2 or newer).</p>
+        : <table style={{ marginTop: 12 }}><thead><tr><th>Login</th><th>Role</th><th>PIN</th><th>Status</th><th /></tr></thead>
+          <tbody>{users.map(u => (
             <tr key={u.id}><td><b>{u.name}</b></td><td className="muted">{ROLE_NAMES[u.role] || u.role}</td>
-              <td className="muted small">{!r ? '—' : !r.applied_at ? `waiting for their POS (${ago(r.created_at)})` : r.result === 'ok' ? `done ${ago(r.applied_at)}` : r.result}</td>
-              <td><button onClick={() => reset(u)}>Reset PIN</button></td></tr>) })}</tbody></table>}
+              <td>{shown[u.id] ? <b style={{ letterSpacing: '0.1em' }}>{shown[u.id]}</b> : u.has_pin ? <><span className="muted">••••••</span> <button className="link" style={{ padding: 0, minHeight: 0 }} onClick={() => show(u)}>Show</button></> : <span className="muted">—</span>}</td>
+              <td className="muted small">{state(u)}</td>
+              <td><button onClick={() => setPin(u)}>Set PIN</button></td></tr>))}</tbody></table>}
     </div>
   )
 }

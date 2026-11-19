@@ -13,7 +13,7 @@ const crypto = require('crypto');
 const ROLES = ['admin', 'cashier', 'kitchen', 'rider']; // riders get a staff record too (the Riders section, their fee and phone link)
 const FLOOR_COLORS = ['#ff9f43', '#a55eea', '#26de81', '#4bcffa', '#ff6b81'];
 
-module.exports = function setupApplier(db, { hashPin }) {
+module.exports = function setupApplier(db, { hashPin, onPin }) {
   const hasOrders = () => db.prepare('SELECT COUNT(*) c FROM orders').get().c > 0;
 
   // Throws with a message for the owner. Returns what was set up.
@@ -68,7 +68,8 @@ module.exports = function setupApplier(db, { hashPin }) {
           // A rider is also a staff member (Riders section: delivery fee, phone link); their login points at that record
           const emp = u.role !== 'rider' ? null : db.prepare("INSERT INTO employees (name, phone, job, salary, active, joined, delivery_fee, rider_token) VALUES (?,?,'Rider',0,1,date('now'),?,?)")
             .run(String(u.name).trim(), String(u.phone || ''), Math.max(0, +u.delivery_fee || 0), crypto.randomBytes(16).toString('hex')).lastInsertRowid;
-          db.prepare('INSERT INTO users (name, pin, role, must_change_pin, employee_id) VALUES (?,?,?,1,?)').run(String(u.name).trim(), hashPin(String(u.pin)), u.role, emp); // each person chooses their own PIN at the first login (the cloud held this one in plain text)
+          const uid = db.prepare('INSERT INTO users (name, pin, role, must_change_pin, employee_id) VALUES (?,?,?,1,?)').run(String(u.name).trim(), hashPin(String(u.pin)), u.role, emp).lastInsertRowid;
+          onPin?.(uid, u.pin); // the admin app's PIN list // each person chooses their own PIN at the first login (the cloud held this one in plain text)
         }
         done.staff = staff.length;
       }

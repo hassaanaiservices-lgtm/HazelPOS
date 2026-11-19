@@ -103,6 +103,7 @@ for (const sql of [
   // the customer's tracking link secret, and whether the rider took it on their phone
   'ALTER TABLE employees ADD COLUMN delivery_fee REAL DEFAULT 0',
   'ALTER TABLE users ADD COLUMN employee_id INTEGER', // a rider's login (role rider) points at their staff record
+  'ALTER TABLE users ADD COLUMN pin_changed_at TEXT', // when this login's PIN last changed (the PIN list in the admin app compares it)
   'ALTER TABLE users ADD COLUMN must_change_pin INTEGER DEFAULT 0', // logged in with a starting PIN (1234…): must choose their own first
   'ALTER TABLE employees ADD COLUMN rider_token TEXT',
   'ALTER TABLE orders ADD COLUMN rider_fee REAL DEFAULT 0',
@@ -110,6 +111,9 @@ for (const sql of [
   'ALTER TABLE orders ADD COLUMN accepted_by_rider INTEGER DEFAULT 0',
   'ALTER TABLE orders ADD COLUMN ready_at TEXT', // when the kitchen pressed Mark ready (the counter sees how long food has been waiting)
 ]) { try { db.exec(sql); } catch { /* column exists */ } }
+// Every time a PIN is set or changed (any route), note the time
+db.exec(`CREATE TRIGGER IF NOT EXISTS users_pin_ts AFTER UPDATE OF pin ON users BEGIN UPDATE users SET pin_changed_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = NEW.id; END;
+  CREATE TRIGGER IF NOT EXISTS users_pin_ts_new AFTER INSERT ON users BEGIN UPDATE users SET pin_changed_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = NEW.id; END;`);
 
 // Product details & sizes
 const PRODUCT_DETAILS = {
@@ -396,6 +400,24 @@ const DEFAULT_PINS = ['1234', '1111', '2222', '3333'];
 const WEAK_PINS = [...DEFAULT_PINS, '0000', '4321'];
 const FORCE_PIN = !DEMO && (process.env.HAZEL_LICENCE === '1' || process.env.FORCE_PIN_CHANGE === '1');
 const PIN_WEAK = pin => FORCE_PIN && WEAK_PINS.includes(normPin(pin));
+// The PIN list in your admin app: a PIN set or changed here is sent to HazelPOS Cloud (encrypted there), so you can see it and
+// help someone who forgot it. A PIN changed in the admin app comes here (PIN reset, below). Offline: kept in memory and sent
+// as soon as the internet is back. The POS itself only stores the scrambled PIN.
+const pinOutbox = new Map(); // login id -> the PIN just set, until the cloud has it
+let pinPushing = false;
+async function pushPins() {
+  if (pinPushing || !cloud?.status().connected || cloud.isHeld()) return;
+  pinPushing = true;
+  try {
+    const users = db.prepare('SELECT id, name, role, pin_changed_at changed_at FROM users ORDER BY id').all().map(u => ({ ...u, pin: pinOutbox.get(u.id) }));
+    await cloud.call('/api/sync/pins', { users });
+    for (const u of users) if (u.pin !== undefined && pinOutbox.get(u.id) === u.pin) pinOutbox.delete(u.id);
+  } catch { /* offline or an older cloud: the next minute */ } finally { pinPushing = false; }
+}
+const vaultPin = (id, pin) => { if (id && pin) pinOutbox.set(+id, String(pin)); setTimeout(pushPins, 400).unref?.(); };
+setInterval(() => { if (pinOutbox.size) pushPins(); }, 60_000).unref();
+setInterval(pushPins, 10 * 60_000).unref(); // also keeps the list of logins (names, roles) up to date
+setTimeout(pushPins, 25_000).unref();
 const PIN_WEAK_MSG = 'That PIN is too easy to guess. Choose another (letters and numbers, for example your name and a number).';
 const hashPin = pin => {
   const salt = crypto.randomBytes(16).toString('hex');
@@ -697,7 +719,7 @@ app.post('/api/users', (req, res) => {
     if (cur.role === 'admin' && role !== 'admin' && adminCount() === 1) return res.status(400).json({ error: 'Keep at least one admin' });
     db.prepare('UPDATE users SET name=?, role=? WHERE id=?').run(name.trim(), role, id);
     if (pin) {
-      db.prepare('UPDATE users SET pin=?, must_change_pin=0 WHERE id=?').run(hashPin(pin), id);
+      db.prepare('UPDATE users SET pin=?, must_change_pin=0 WHERE id=?').run(hashPin(pin), id); vaultPin(id, pin);
       if (+id !== req.user.id) db.prepare('DELETE FROM sessions WHERE user_id=?').run(id); // new PIN: that person is signed out everywhere
     }
     db.prepare('DELETE FROM sessions WHERE user_id=? AND token != ?').run(id, req.token); // PIN/role change logs them out elsewhere
@@ -712,7 +734,7 @@ app.post('/api/me/pin', (req, res) => {
   if (PIN_WEAK(pin)) return res.status(400).json({ error: PIN_WEAK_MSG });
   const taken = userByPin(pin);
   if (taken && taken.id !== req.user.id) return res.status(400).json({ error: 'That PIN is already used by someone else. Choose another.' });
-  db.prepare('UPDATE users SET pin=?, must_change_pin=0 WHERE id=?').run(hashPin(pin), req.user.id);
+  db.prepare('UPDATE users SET pin=?, must_change_pin=0 WHERE id=?').run(hashPin(pin), req.user.id); vaultPin(req.user.id, pin);
   db.prepare('DELETE FROM sessions WHERE user_id=? AND token != ?').run(req.user.id, req.token); // other devices signed in with the old PIN are out
   res.json({ ok: true });
 });
@@ -1225,8 +1247,8 @@ function setRiderLogin(employeeId, name, pin, active) {
   }
   if (u) {
     db.prepare('UPDATE users SET name=? WHERE id=?').run(name, u.id);
-    if (pin) { db.prepare('UPDATE users SET pin=?, must_change_pin=0 WHERE id=?').run(hashPin(String(pin)), u.id); db.prepare('DELETE FROM sessions WHERE user_id=?').run(u.id); }
-  } else if (pin) db.prepare('INSERT INTO users (name,pin,role,employee_id) VALUES (?,?,?,?)').run(name, hashPin(String(pin)), 'rider', employeeId);
+    if (pin) { vaultPin(u.id, pin); db.prepare('UPDATE users SET pin=?, must_change_pin=0 WHERE id=?').run(hashPin(String(pin)), u.id); db.prepare('DELETE FROM sessions WHERE user_id=?').run(u.id); }
+  } else if (pin) vaultPin(db.prepare('INSERT INTO users (name,pin,role,employee_id) VALUES (?,?,?,?)').run(name, hashPin(String(pin)), 'rider', employeeId).lastInsertRowid, pin);
 }
 app.get('/api/riders', (req, res) => res.json(riderRows(req.query.all ? '1' : 'e.active=1', req.user.role === 'admin')));
 // Where every rider is (from their phones, through the cloud), for the map
@@ -1794,7 +1816,7 @@ setInterval(async () => {
       const taken = userByPin(String(r.pin || ''));
       if (!PIN_OK(r.pin)) return { id: r.id, result: 'Not a valid PIN' };
       if (taken && taken.id !== u.id) return { id: r.id, result: 'Someone else on this POS already uses that PIN: choose another' };
-      db.prepare('UPDATE users SET pin=?, must_change_pin=1 WHERE id=?').run(hashPin(String(r.pin)), u.id);
+      db.prepare('UPDATE users SET pin=?, must_change_pin=? WHERE id=?').run(hashPin(String(r.pin)), r.force_change ? 1 : 0, u.id); vaultPin(u.id, r.pin);
       db.prepare('DELETE FROM sessions WHERE user_id=?').run(u.id);
       db.prepare('INSERT INTO audit_log (at,user_id,user_name,role,ip,action,status,detail) VALUES (?,?,?,?,?,?,?,?)').run(now(), null, 'HazelPOS (remote)', '', '', 'PIN RESET', 200, `PIN of ${u.name} reset from HazelPOS Admin`);
       return { id: r.id, result: 'ok' };
@@ -1834,12 +1856,12 @@ app.post('/api/cloud/disconnect', (req, res) => {
 });
 
 // ---------- Membership (installed app only: HAZEL_LICENCE=1, see server/licence.js) ----------
-const setupApplier = require('./setup')(db, { hashPin });
+const setupApplier = require('./setup')(db, { hashPin, onPin: vaultPin });
 // What your admin app sees about this POS. Never customer data: counts, statuses and error messages only.
 const health = () => {
   const w = waModule?.wa.status() || {};
   return {
-    users: db.prepare('SELECT id, name, role FROM users ORDER BY id').all().map(u => ({ ...u })), // names and roles only: your admin app's "Reset PIN"
+    users: db.prepare('SELECT id, name, role, pin_changed_at FROM users ORDER BY id').all().map(u => ({ ...u })), // names and roles only: your admin app's "Reset PIN"
     version: process.env.HAZEL_VERSION || require('./package.json').version, platform: `${process.platform} ${process.arch}`, node: process.versions.node,
     uptime_min: Math.round(process.uptime() / 60),
     whatsapp: { status: w.status, connected_at: w.connected_at, error: w.error || '', assistant: waModule?.assistant.enabled() ?? null },
