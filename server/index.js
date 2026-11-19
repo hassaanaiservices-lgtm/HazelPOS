@@ -1368,17 +1368,22 @@ function deliverOrder(orderId, { riderId = null } = {}) {
   return getOrder(o.id);
 }
 // A WhatsApp takeaway customer hears their order is ready to collect
+// An order the cloud WhatsApp bot took: its chat is on the cloud, so the message goes out from there
+function waNotify(w, text, what) {
+  const sent = w.cloud_id ? cloud.call('/api/sync/wa-send', { chat_id: w.chat_id, text })
+    : waModule.wa.isConnected() ? waModule.wa.send(w.chat_id, text, 'Order update', 'system') : null;
+  sent?.catch(e => console.error(`${what} message:`, e.message));
+}
 function notifyReadyForPickup(orderId) {
   const w = waModule?.store.chatForOrder(orderId);
-  if (!w || !waModule.wa.isConnected()) return;
-  waModule.wa.send(w.chat_id, readyPickupMessage({ id: orderId }, w.lang, getSettings().name), 'Order update', 'system').catch(e => console.error('Ready message:', e.message));
+  if (w) waNotify(w, readyPickupMessage({ id: orderId }, w.lang, getSettings().name), 'Ready');
 }
 // A WhatsApp customer hears that their order left, with the live-tracking link when the cloud is connected
 function notifyOnTheWay(orderId, riderName) {
   const w = waModule?.store.chatForOrder(orderId);
-  if (!w || !waModule.wa.isConnected()) return;
+  if (!w) return;
   const o = getOrder(orderId);
-  waModule.wa.send(w.chat_id, onTheWayMessage(o, w.lang, riderName, trackUrl(o)), 'Order update', 'system').catch(e => console.error('On-the-way message:', e.message));
+  waNotify(w, onTheWayMessage(o, w.lang, riderName, trackUrl(o)), 'On-the-way');
 }
 // "Where is my order?" on WhatsApp: this chat's delivery order of today, as text (null = nothing to say, the AI answers)
 function deliveryStatus(chatId, lang) {
@@ -1827,6 +1832,16 @@ const syncWaCloud = async () => {
   } catch (e) { if (!/not reachable|too long/i.test(e.message)) console.error('Cloud WhatsApp:', e.message); }
 };
 setTimeout(syncWaCloud, 15_000).unref(); setInterval(syncWaCloud, 120_000).unref();
+// Orders customers confirmed with the cloud bot: shown to the cashier within 20 s, like orders taken here
+setInterval(async () => {
+  if (!waCloudMode || !waModule || !cloud.status().connected || cloud.isHeld()) return;
+  try {
+    const list = await cloud.call('/api/sync/wa-orders');
+    if (!Array.isArray(list) || !list.length) return;
+    for (const o of list) waModule.store.importCloudOrder(o);
+    await cloud.call('/api/sync/wa-orders/ack', { ids: list.map(o => o.id) });
+  } catch (e) { if (!/not reachable|too long/i.test(e.message)) console.error('Cloud WhatsApp orders:', e.message); }
+}, 20_000).unref();
 // A PIN you reset from the admin app (someone forgot theirs): picked up within a minute. The person logs in with the
 // temporary PIN and must choose a new one straight away; their other open sessions are signed out.
 setInterval(async () => {
@@ -1994,7 +2009,7 @@ function createOrder({ type, zone_id, customer, phone, address, items, userName,
     return orderId;
   });
 }
-const waModule = require('./whatsapp')(app, db, { createOrder, getOrder, printKitchen, getSettings, aiAllowed: () => lic.aiAllowed() && !waCloudMode, cloudBot: () => waCloudMode, deliveryStatus });
+const waModule = require('./whatsapp')(app, db, { createOrder, getOrder, printKitchen, getSettings, aiAllowed: () => lic.aiAllowed() && !waCloudMode, cloudBot: () => waCloudMode, cloudCall: (p, b) => cloud.call(p, b), deliveryStatus });
 const lowStock = require('./stock-alert')(db, { getSettings, wa: waModule.wa });
 // Settings → Alerts: what would be sent now, and a test send
 app.get('/api/low-stock-alert/preview', (req, res) => { const r = lowStock.report(); res.json({ low: r.low, text: r.text, enough: r.enough }); });

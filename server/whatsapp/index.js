@@ -19,6 +19,7 @@ module.exports = function whatsapp(app, db, pos) {
   const menuPictures = () => db.prepare('SELECT id, caption, mime, data FROM menu_images ORDER BY sort, id').all(); // table made in server/index.js
   assistant = createAssistant({ store, wa, ask, cfg: config.assistant, stt, sttCfg: config.stt, menuPictures, allowed: pos.aiAllowed || (() => true), deliveryStatus: pos.deliveryStatus || (() => null) });
   const fail = (res, e, code = 400) => res.status(code).json({ error: e.message });
+  const cloudResult = (w, body) => pos.cloudCall ? pos.cloudCall(`/api/sync/wa-orders/${w.cloud_id}/result`, body).then(r => !!r.message_sent, () => false) : Promise.resolve(false);
   const chatId = req => req.params.id;
 
   // Connection state + counts for badges and banners
@@ -83,8 +84,11 @@ module.exports = function whatsapp(app, db, pos) {
     store.finishOrder(w.id, 'accepted', req.user.name, { order_id: orderId });
     const order = pos.getOrder(orderId);
     const kitchen_print = await pos.printKitchen(orderId, order.items, false);
+    const text = acceptedMessage(order, w.lang, pos.getSettings().name);
     let message_sent = true;
-    try { await wa.send(w.chat_id, acceptedMessage(order, w.lang, pos.getSettings().name), 'Order update', 'system'); }
+    // An order the cloud bot took: the customer's chat is on the cloud, so the answer goes back through it
+    if (w.cloud_id) message_sent = await cloudResult(w, { status: 'accepted', order_id: orderId, by: req.user.name, message: text });
+    else try { await wa.send(w.chat_id, text, 'Order update', 'system'); }
     catch { message_sent = false; }
     res.json({ ok: true, order_id: orderId, total: order.total, kitchen_print, message_sent });
   });
@@ -93,7 +97,8 @@ module.exports = function whatsapp(app, db, pos) {
     const reason = String(req.body.reason || '').slice(0, 200);
     if (!w || !store.finishOrder(w.id, 'rejected', req.user.name, { reason })) return res.status(404).json({ error: 'This order was already handled' });
     let message_sent = true;
-    try { await wa.send(w.chat_id, rejectedMessage(w.lang, reason), 'Order update', 'system'); } catch { message_sent = false; }
+    if (w.cloud_id) message_sent = await cloudResult(w, { status: 'rejected', reason, by: req.user.name, message: rejectedMessage(w.lang, reason) });
+    else try { await wa.send(w.chat_id, rejectedMessage(w.lang, reason), 'Order update', 'system'); } catch { message_sent = false; }
     res.json({ ok: true, message_sent });
   });
 

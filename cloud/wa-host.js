@@ -1,8 +1,9 @@
 // WhatsApp bot hosted on HazelPOS Cloud, so it keeps answering when the restaurant's PC is off.
 //
-// Phase 1: one WhatsApp connection per restaurant that you switch on in the admin app. It answers customers' questions
-// from the menu, delivery zones, FAQ and menu photos that the restaurant's POS sends here whenever they change
-// (POST /api/sync/wa-knowledge). Orders the customer confirms are kept here; sending them to the POS is phase 2.
+// One WhatsApp connection per restaurant that you switch on in the admin app. It answers customers' questions from the
+// menu, delivery zones, FAQ and menu photos that the restaurant's POS sends here whenever they change
+// (POST /api/sync/wa-knowledge). Orders the customer confirms wait here until the POS takes them (GET /api/sync/wa-orders,
+// every 20 s); the cashier's accept / reject, and later "ready" / "on the way" messages, are sent back through here.
 //
 // Each restaurant has its own folder (DATA_DIR/wa/<branch id>/): its WhatsApp login, voice notes, chats database and
 // the last menu its POS sent. Nothing is shared between restaurants.
@@ -137,6 +138,46 @@ module.exports = function waHost({ app, db, dataDir, branchAuth, vendorAuth, ven
   app.post('/api/vendor/branches/:id/whatsapp/assistant', vendorAuth, (req, res) => {
     const x = running(req, res); if (!x) return;
     x.h.assistant.setEnabled(!!req.body.enabled); res.json(view(x.b.id));
+  });
+
+  // ---------- Orders: the POS takes the confirmed ones and sends the cashier's answer back ----------
+  const liveFor = (req, res) => {
+    const h = live.get(req.branch.id);
+    if (!h) res.status(409).json({ error: 'The cloud WhatsApp bot is switched off for this restaurant' });
+    return h;
+  };
+  app.get('/api/sync/wa-orders', branchAuth, (req, res) => {
+    const h = live.get(req.branch.id);
+    res.json(h ? h.store.ordersForPos() : []);
+  });
+  app.post('/api/sync/wa-orders/ack', branchAuth, (req, res) => {
+    const h = liveFor(req, res); if (!h) return;
+    for (const id of (Array.isArray(req.body.ids) ? req.body.ids : []).slice(0, 50)) h.store.markPosReceived(+id);
+    res.json({ ok: true });
+  });
+  // The cashier accepted (order_id = the POS order) or rejected it; message = what the customer gets, written by the POS
+  app.post('/api/sync/wa-orders/:id/result', branchAuth, async (req, res) => {
+    const h = liveFor(req, res); if (!h) return;
+    const status = req.body.status === 'accepted' ? 'accepted' : 'rejected';
+    const w = h.store.getOrder(+req.params.id);
+    if (!w || !h.store.finishOrder(w.id, status, String(req.body.by || 'POS').slice(0, 80),
+      { order_id: status === 'accepted' ? +req.body.order_id || null : null, reason: String(req.body.reason || '').slice(0, 200) })) return res.status(404).json({ error: 'This order was already handled' });
+    let message_sent = false;
+    const text = String(req.body.message || '').slice(0, 4000);
+    if (text) try { await h.wa.send(w.chat_id, text, 'Order update', 'system'); message_sent = true; } catch { /* WhatsApp not connected */ }
+    res.json({ ok: true, message_sent });
+  });
+  // "Your order is ready" / "the rider is on the way": only to customers who already chat with this restaurant
+  const sendTimes = new Map(); // branch id -> recent send times (at most 30 a minute)
+  app.post('/api/sync/wa-send', branchAuth, async (req, res) => {
+    const h = liveFor(req, res); if (!h) return;
+    const chatId = String(req.body.chat_id || ''), text = String(req.body.text || '').trim().slice(0, 4000);
+    if (!text || !h.store.chat(chatId)) return res.status(400).json({ error: 'Unknown chat' });
+    const t = (sendTimes.get(req.branch.id) || []).filter(x => x > Date.now() - 60_000);
+    if (t.length >= 30) return res.status(429).json({ error: 'Too many messages: try again in a minute' });
+    t.push(Date.now()); sendTimes.set(req.branch.id, t);
+    try { await h.wa.send(chatId, text, String(req.body.label || 'Order update').slice(0, 40), 'system'); res.json({ ok: true }); }
+    catch (e) { res.status(409).json({ error: e.message }); }
   });
 
   return { live, start, stop, knowledge, hashOf: v => crypto.createHash('sha256').update(JSON.stringify(v)).digest('hex') };
