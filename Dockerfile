@@ -17,7 +17,6 @@ COPY --from=build /app/client/dist client/dist
 RUN mkdir -p /data && chown -R node:node /data /app
 # Railway mounts volumes owned by root: set RAILWAY_RUN_UID=0 there. On a VPS: chown -R 1000:1000 ./data
 USER node
-VOLUME /data
 EXPOSE 4000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
   CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||4000)+'/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
