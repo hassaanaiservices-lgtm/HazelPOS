@@ -89,6 +89,10 @@ app.use('/api', async (req, res) => {
       headers: { 'X-Admin-User': user.email ? `${user.name} <${user.email}>` : user.name }, // who did it: the server's activity log
       body: req.method !== 'GET' ? JSON.stringify(req.body || {}) : undefined,
     });
+    // The POS refusing our key is a setup problem, not "you are logged out": never answer 401/503 for it (the screen would loop to login)
+    if (r.status === 401 || r.status === 503) return res.status(502).json({ error: r.status === 401
+      ? 'The POS server refused the admin key: VENDOR_API_KEY must be exactly the same on the POS and the admin services'
+      : 'The POS server has no VENDOR_API_KEY set' });
     const body = Buffer.from(await r.arrayBuffer());
     res.status(r.status).type(r.headers.get('content-type') || 'application/json').send(body);
   } catch (e) {
