@@ -42,11 +42,7 @@ function LinkScreen({ st, onStatus }) {
             <li>Tap <b>Linked devices</b> and then <b>Link a device</b></li>
             <li>Point the phone at this screen to scan the QR code</li>
           </ol>
-          {st.cloud_bot
-            ? <p className="wa-note">Your WhatsApp runs on HazelPOS Cloud: customers get answers even when this PC is off.
-              Customers' chats will show here whenever this PC is on and online.</p>
-            : <p className="wa-note">Customers' chats will then show here. The POS keeps working without internet;
-              messages sent while it was offline appear when it reconnects, marked for you to contact.</p>}
+          <p className="wa-note">Customers' chats will then show here, and the assistant answers them even when no till is open.</p>
           {st.error && <p className="wa-error">{st.error}</p>}
         </div>
         <div className="wa-qr">
@@ -95,8 +91,7 @@ function Inbox({ st, notify, onStatus }) {
         </header>
         {st.assistant_paused_unpaid && <div className="wa-conn">The WhatsApp bot is paused because the HazelPOS membership isn't paid. Customers' messages still arrive here: reply yourself, or pay to switch it back on.</div>}
         {st.stt?.state === 'failed' && <div className="wa-conn">Voice notes can't be transcribed: {st.stt.error}</div>}
-        {st.cloud_bot && st.status === 'reconnecting' && <div className="wa-conn">Can't reach HazelPOS Cloud (internet?). Customers still get answers from the cloud; chats show here again when the internet is back.</div>}
-        {!st.cloud_bot && st.status === 'reconnecting' && <div className="wa-conn">No internet, reconnecting. The POS keeps working; new messages will arrive when it's back.</div>}
+        {!st.cloud_bot && st.status === 'reconnecting' && <div className="wa-conn">WhatsApp is reconnecting. New messages will arrive as soon as it's back.</div>}
         {orderChats > 0 && <button className="wa-order-alert" onClick={() => setFilter('orders')}>
           <Icon name="receipt" size={16} />{orderChats} WhatsApp {orderChats === 1 ? 'order is' : 'orders are'} waiting for you to accept</button>}
         {offlineChats > 0 && <button className="wa-offline-alert" onClick={() => setFilter('offline')}>

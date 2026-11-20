@@ -37,7 +37,7 @@ export default function RiderMap({ height = 340 }) {
   }, [d]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => () => { map.current?.remove(); map.current = null; markers.current.clear() }, [])
   const foot = !d ? 'Loading…'
-    : !d.cloud ? 'Connect the cloud (Settings → HazelPOS account) to see riders on the map: their phones send their location through it.'
+    : !d.cloud ? 'Rider locations are not available.'
     : !riders.length ? 'No rider has shared a location yet. Riders press "On duty" on their phone screen (Riders → Phone link).'
     : riders.map(r => `${r.name}: ${r.on_road ? 'delivering' : r.on_duty ? 'free' : 'off duty'}, ${ago(r.at)}`).join(' · ')
   return (

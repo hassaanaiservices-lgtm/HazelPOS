@@ -10,7 +10,7 @@ const cloudLink = () => (link.url && link.key ? link : null);
 // POST to the cloud's AI proxy. Returns the provider's own response body, like a direct call would.
 async function viaCloud(urlPath, { body, headers = {}, signal }) {
   const c = cloudLink();
-  if (!c) throw new Error('No AI key on this PC and HazelPOS Cloud is not connected (Settings → Cloud)');
+  if (!c) throw new Error('No AI key: set DEEPSEEK_API_KEY and GROQ_API_KEY in the server's variables (Railway → Variables)');
   const r = await fetch(c.url + urlPath, { method: 'POST', body, headers: { ...headers, Authorization: 'Bearer ' + c.key }, signal });
   const data = await r.json().catch(() => ({}));
   return { r, data };
