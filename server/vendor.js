@@ -130,7 +130,7 @@ router.post('/tenants', wrap(async (req, res) => {
   if (!ownerName) return fail(res, 400, "Enter the owner's name");
   if (!vendorWa.normalise(phone)) return fail(res, 400, "Enter the owner's mobile number, like 03001234567");
   if (!Number.isFinite(fee) || fee < 0) return fail(res, 400, 'The monthly fee must be a number');
-  const ownerPassword = req.body.owner_password ? String(req.body.owner_password) : '';
+  const ownerPassword = String(req.body.owner_password || '').trim(); // a space typed or pasted at the end is not part of it
   if (ownerPassword && ownerPassword.length < 8) return fail(res, 400, 'The owner password needs at least 8 characters');
   let slug = String(req.body.slug || '').trim().toLowerCase();
   if (slug) { if (!tenancy.SLUG.test(slug)) return fail(res, 400, 'The restaurant code must be 3 to 40 lowercase letters, numbers or dashes'); if (tenancy.bySlug(slug)) return fail(res, 400, 'That restaurant code is already used'); }
@@ -144,9 +144,11 @@ router.post('/tenants', wrap(async (req, res) => {
     const oid = Number(control.prepare('INSERT INTO owners (phone,name,pass_hash,created_at) VALUES (?,?,NULL,?)').run(phone, ownerName, now()).lastInsertRowid);
     owner = control.prepare('SELECT * FROM owners WHERE id=?').get(oid);
   }
-  // A password set here by HazelPOS: the owner signs in with it straight away (no welcome link needed)
-  if (ownerPassword && !owner.pass_hash) {
+  // A password set here by HazelPOS: the owner signs in with it straight away (no welcome link needed). It replaces an
+  // existing owner's old password too, since the admin screen shows this one as the password to use.
+  if (ownerPassword) {
     control.prepare('UPDATE owners SET pass_hash=? WHERE id=?').run(hashPassword(ownerPassword), owner.id);
+    control.prepare('DELETE FROM owner_sessions WHERE owner_id=?').run(owner.id);
     owner = control.prepare('SELECT * FROM owners WHERE id=?').get(owner.id);
   }
   const pin = randomPin();
@@ -206,7 +208,7 @@ router.post('/tenants/:id/restore', (req, res) => { // this restaurant only; the
 router.post('/tenants/:id/owner-password', (req, res) => {
   const t = tenancy.tenantRow(+req.params.id);
   if (!t) return fail(res, 404, 'Restaurant not found');
-  const pw = String(req.body.password || '');
+  const pw = String(req.body.password || '').trim();
   if (pw.length < 8) return fail(res, 400, 'The password needs at least 8 characters');
   const ot = control.prepare('SELECT owner_id FROM owner_tenants WHERE tenant_id=? LIMIT 1').get(t.id);
   if (!ot) return fail(res, 400, 'This restaurant has no owner');

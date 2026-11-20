@@ -11,7 +11,7 @@ const crypto = require('crypto');
 const path = require('path');
 const fs = require('fs');
 
-const ADMIN_PASSWORD = String(process.env.ADMIN_PASSWORD || ''), VENDOR_API_KEY = String(process.env.VENDOR_API_KEY || '').trim(); // a pasted key may carry a space or new line
+const ADMIN_PASSWORD = String(process.env.ADMIN_PASSWORD || '').trim(), VENDOR_API_KEY = String(process.env.VENDOR_API_KEY || '').trim(); // a pasted key may carry a space or new line
 const SERVER_URL = String(process.env.SERVER_URL || process.env.CLOUD_URL || '').replace(/\/+$/, '');
 const problems = [
   ADMIN_PASSWORD.length < 12 && 'ADMIN_PASSWORD must be at least 12 characters',
@@ -61,7 +61,7 @@ app.post('/api/login', async (req, res) => {
   if (f.until > Date.now()) return res.status(429).json({ error: `Too many attempts. Try again in ${Math.ceil((f.until - Date.now()) / 60000)} min` });
   // shortcut: one shared ADMIN_PASSWORD. The Team page (own email and password per person) is hidden until there is a team.
   let user = null;
-  if (crypto.timingSafeEqual(sha(req.body?.password || ''), sha(ADMIN_PASSWORD))) user = { id: 0, email: '', name: 'Owner', role: 'owner' };
+  if (crypto.timingSafeEqual(sha(String(req.body?.password || '').trim()), sha(ADMIN_PASSWORD))) user = { id: 0, email: '', name: 'Owner', role: 'owner' };
   if (!user) {
     f.n++; if (f.n >= 5) { f.n = 0; f.until = Date.now() + 15 * 60 * 1000; }
     fails.set(req.ip, f);

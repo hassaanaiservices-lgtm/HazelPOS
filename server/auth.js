@@ -20,7 +20,9 @@ const hashPassword = pw => {
 const passwordMatches = (pw, stored) => {
   const [v, salt, hash] = String(stored || '').split('$');
   if (v !== 's1' || !hash) return false;
-  return crypto.timingSafeEqual(crypto.scryptSync(String(pw), salt, 32), Buffer.from(hash, 'hex'));
+  const ok = p => crypto.timingSafeEqual(crypto.scryptSync(p, salt, 32), Buffer.from(hash, 'hex'));
+  // Phones add a space after autocomplete: the trimmed password is tried too (passwords are saved trimmed)
+  return ok(String(pw)) || (String(pw).trim() !== String(pw) && ok(String(pw).trim()));
 };
 
 const DUMMY_HASH = 's1$00000000000000000000000000000000$' + '0'.repeat(64);
@@ -154,7 +156,7 @@ r.get('/owner/link/:token', (req, res) => {
   res.json({ purpose: l.purpose, name: o.name, phone_masked: o.phone.slice(0, 4) + '•••' + o.phone.slice(-3) });
 });
 r.post('/owner/link/:token', (req, res) => {
-  const device = String(req.body.device_id || ''), password = String(req.body.password || '');
+  const device = String(req.body.device_id || ''), password = String(req.body.password || '').trim();
   if (limited('link', 'x', req.ip, 30)) return bad(res, 429, 'Too many tries. Please wait a few minutes');
   countHit('link', 'x', req.ip);
   const l = usableLink(req.params.token);
