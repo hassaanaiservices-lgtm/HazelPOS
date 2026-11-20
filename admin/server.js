@@ -20,8 +20,12 @@ const problems = [
 ].filter(Boolean);
 if (problems.length) { console.error('HazelPOS Admin cannot start:\n- ' + problems.join('\n- ')); process.exit(1); }
 
-const SESSION_IDLE_MS = 12 * 60 * 60 * 1000;
-const sessions = new Map(); // token -> { seen, user: {id, email, name, role} }; in memory, so a restart means logging in again
+// A login lasts 30 days and survives restarts and deploys: the cookie carries its own expiry, signed with a key made from
+// ADMIN_PASSWORD and VENDOR_API_KEY. Changing ADMIN_PASSWORD signs everyone out.
+const SESSION_MS = 30 * 24 * 60 * 60 * 1000;
+const SESSION_KEY = crypto.createHash('sha256').update('hz-admin-session|' + ADMIN_PASSWORD + '|' + VENDOR_API_KEY).digest();
+const OWNER = { id: 0, email: '', name: 'Owner', role: 'owner' };
+const signSession = exp => `${exp}.${crypto.createHmac('sha256', SESSION_KEY).update(String(exp)).digest('hex')}`;
 const fails = new Map();    // ip -> { n, until }
 const sha = s => crypto.createHash('sha256').update(String(s)).digest();
 
@@ -41,11 +45,13 @@ app.use(express.json({ limit: '4mb' })); // menu Excel files and menu pictures t
 const cookie = req => Object.fromEntries((req.get('cookie') || '').split(';').map(c => c.trim().split('=')).filter(([k]) => k).map(([k, ...v]) => [k, v.join('=')]));
 const setCookie = (req, res, value, maxAge) => res.set('Set-Cookie',
   `hz_admin=${value}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${maxAge}${req.secure ? '; Secure' : ''}`);
-const loggedIn = req => {
-  const t = cookie(req).hz_admin, s = t && sessions.get(t);
-  if (!s || Date.now() - s.seen > SESSION_IDLE_MS) { if (t) sessions.delete(t); return null; }
-  s.seen = Date.now();
-  return s.user;
+const loggedIn = (req, res) => {
+  const [exp, mac] = String(cookie(req).hz_admin || '').split('.');
+  if (!exp || !mac || !/^\d+$/.test(exp) || +exp < Date.now()) return null;
+  const want = Buffer.from(signSession(exp).split('.')[1], 'hex'), got = Buffer.from(mac, 'hex');
+  if (got.length !== want.length || !crypto.timingSafeEqual(got, want)) return null;
+  if (res && +exp - Date.now() < SESSION_MS / 2) { const e = Date.now() + SESSION_MS; setCookie(req, res, signSession(e), SESSION_MS / 1000); } // used often: stays logged in
+  return OWNER;
 };
 const server = (p, opts = {}) => fetch(SERVER_URL + '/api/vendor' + p, { ...opts, signal: AbortSignal.timeout(60000),
   headers: { Authorization: 'Bearer ' + VENDOR_API_KEY, 'Content-Type': 'application/json', ...(opts.headers || {}) } });
@@ -62,13 +68,11 @@ app.post('/api/login', async (req, res) => {
     return res.status(401).json({ error: 'Wrong password' });
   }
   fails.delete(req.ip);
-  const token = crypto.randomBytes(32).toString('hex');
-  sessions.set(token, { seen: Date.now(), user: { id: user.id, email: user.email, name: user.name, role: user.role } });
-  setCookie(req, res, token, SESSION_IDLE_MS / 1000);
+  setCookie(req, res, signSession(Date.now() + SESSION_MS), SESSION_MS / 1000);
   res.json({ ok: true });
 });
-app.post('/api/logout', (req, res) => { sessions.delete(cookie(req).hz_admin); setCookie(req, res, '', 0); res.json({ ok: true }); });
-app.get('/api/me', (req, res) => { const u = loggedIn(req); res.json(u ? { ok: true, server: SERVER_URL, user: u } : { ok: false }); });
+app.post('/api/logout', (req, res) => { setCookie(req, res, '', 0); res.json({ ok: true }); });
+app.get('/api/me', (req, res) => { const u = loggedIn(req, res); res.json(u ? { ok: true, server: SERVER_URL, user: u } : { ok: false }); });
 // (200 when logged out, so the browser console shows no red error)
 
 // Everything else under /api goes to the HazelPOS server's vendor API. Writes must come from this app's own pages
