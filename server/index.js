@@ -1821,10 +1821,12 @@ const waKnowledge = () => {
   const hash = crypto.createHash('sha256').update(JSON.stringify({ pos, pictures })).digest('hex');
   return { pos, pictures, hash };
 };
-const syncWaCloud = async () => {
-  if (!cloud.status().connected || cloud.isHeld()) return;
+const cloudReady = () => { try { return cloud.status().connected && !cloud.isHeld(); } catch { return false; } };
+// on: true/false = the owner pressed "Link WhatsApp" / "Move to cloud" on this POS; undefined = just ask the cloud
+const syncWaCloud = async on => {
+  if (!cloudReady()) { if (on !== undefined) throw new Error('This PC is not connected to HazelPOS Cloud (internet?)'); return; }
   try {
-    const mode = await cloud.call('/api/sync/wa-mode');
+    const mode = on === undefined ? await cloud.call('/api/sync/wa-mode') : await cloud.call('/api/sync/wa-mode', { enabled: !!on });
     const was = waCloudMode;
     waCloudMode = !!mode?.cloud;
     // Switched to the cloud: this POS lets go of WhatsApp (stays linked, so switching back needs no new QR).
@@ -1835,9 +1837,9 @@ const syncWaCloud = async () => {
     if (!waCloudMode) return;
     const k = waKnowledge();
     if (k.hash !== mode.knowledge_hash) await cloud.call('/api/sync/wa-knowledge', k);
-  } catch (e) { if (!/not reachable|too long/i.test(e.message)) console.error('Cloud WhatsApp:', e.message); }
+  } catch (e) { if (on !== undefined) throw e; if (!/not reachable|too long/i.test(e.message)) console.error('Cloud WhatsApp:', e.message); }
 };
-setTimeout(syncWaCloud, 15_000).unref(); setInterval(syncWaCloud, 120_000).unref();
+setTimeout(() => syncWaCloud(), 15_000).unref(); setInterval(() => syncWaCloud(), 120_000).unref();
 // "Where is my order?" on the cloud bot: today's delivery status of its chats, in the three languages (sent when changed)
 let lastWaStatus = '', lastWaStatusAt = 0;
 const pushWaStatus = async () => {
@@ -2029,7 +2031,7 @@ function createOrder({ type, zone_id, customer, phone, address, items, userName,
     return orderId;
   });
 }
-const waModule = require('./whatsapp')(app, db, { createOrder, getOrder, printKitchen, getSettings, aiAllowed: () => lic.aiAllowed() && !waCloudMode, cloudBot: () => waCloudMode, cloudCall: (p, b) => cloud.call(p, b), cloudRaw: p => cloud.fetchRaw(p), deliveryStatus });
+const waModule = require('./whatsapp')(app, db, { createOrder, getOrder, printKitchen, getSettings, aiAllowed: () => lic.aiAllowed() && !waCloudMode, cloudBot: () => waCloudMode, cloudReady, setCloudBot: on => syncWaCloud(!!on), cloudCall: (p, b) => cloud.call(p, b), cloudRaw: p => cloud.fetchRaw(p), deliveryStatus });
 // Messages the restaurant sends to a number (rider link, low-stock alert): from the cloud while the bot runs there
 const waOut = {
   isConnected: () => waCloudMode || waModule.wa.isConnected(),

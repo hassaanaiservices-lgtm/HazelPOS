@@ -26,7 +26,16 @@ module.exports = function whatsapp(app, db, pos) {
   // While the bot runs on HazelPOS Cloud (cloud/wa-host.js), the chats live there: the inbox and the replies go through
   // the cloud. WhatsApp orders, accepting and rejecting them stay here (the cloud's orders are copied in every 20 s).
   const CLOUD_ROUTES = /^(POST \/(connect|logout)|GET \/(status|chats)|GET \/chats\/[^/]+\/(messages|log)|POST \/chats\/[^/]+\/(read|handled|bot|send)|POST \/assistant|GET \/messages\/\d+\/audio|POST \/messages\/\d+\/transcript)$/;
+  // The WhatsApp bot runs on HazelPOS Cloud whenever this POS is connected to it, so it keeps answering when this PC is
+  // off. "Link WhatsApp" switches the cloud bot on first; "Move to cloud" moves a number linked to this PC.
+  app.post('/api/whatsapp/cloud', async (req, res) => {
+    try { await pos.setCloudBot(req.body.enabled !== false); res.json({ cloud_bot: !!pos.cloudBot?.() }); }
+    catch (e) { fail(res, e); }
+  });
   app.use('/api/whatsapp', async (req, res, next) => {
+    if (req.method === 'POST' && req.path === '/connect' && !pos.cloudBot?.() && pos.cloudReady?.()) {
+      try { await pos.setCloudBot(true); } catch (e) { return fail(res, e); }
+    }
     if (!pos.cloudBot?.()) return next();
     const route = `${req.method} ${req.path}`;
     if (!CLOUD_ROUTES.test(route)) return next();
@@ -55,7 +64,7 @@ module.exports = function whatsapp(app, db, pos) {
   });
 
   // Connection state + counts for badges and banners
-  app.get('/api/whatsapp/status', (req, res) => res.json({ ...wa.status(), ...store.counts(), assistant: assistant.enabled(), assistant_paused_unpaid: !(pos.aiAllowed?.() ?? true) && !pos.cloudBot?.(), cloud_bot: !!pos.cloudBot?.(), business_hours: config.assistant.business_hours, stt: stt.status() }));
+  app.get('/api/whatsapp/status', (req, res) => res.json({ ...wa.status(), ...store.counts(), assistant: assistant.enabled(), assistant_paused_unpaid: !(pos.aiAllowed?.() ?? true) && !pos.cloudBot?.(), cloud_bot: !!pos.cloudBot?.(), cloud_available: !!pos.cloudReady?.(), business_hours: config.assistant.business_hours, stt: stt.status() }));
   app.post('/api/whatsapp/connect', async (req, res) => { try { await wa.connect(); res.json(wa.status()); } catch (e) { fail(res, e); } });
   app.post('/api/whatsapp/logout', async (req, res) => { await wa.logout(); res.json(wa.status()); });
   app.post('/api/whatsapp/assistant', (req, res) => { assistant.setEnabled(!!req.body.enabled); res.json({ assistant: assistant.enabled() }); });

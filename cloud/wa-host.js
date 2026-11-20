@@ -96,10 +96,23 @@ module.exports = function waHost({ app, db, dataDir, branchAuth, vendorAuth, ven
   });
   // What the POS needs to know: the hash of the menu we have (so it only sends changes), and whether the bot runs
   // here (then the POS's own bot stays quiet, so a customer never gets two answers)
-  app.get('/api/sync/wa-mode', branchAuth, (req, res) => {
+  const modeOf = id => {
     let hash = null;
-    try { hash = JSON.parse(fs.readFileSync(knowledgeFile(req.branch.id), 'utf8')).hash || null; } catch { /* none yet */ }
-    res.json({ cloud: enabled(req.branch.id), knowledge_hash: hash });
+    try { hash = JSON.parse(fs.readFileSync(knowledgeFile(id), 'utf8')).hash || null; } catch { /* none yet */ }
+    return { cloud: enabled(id), knowledge_hash: hash };
+  };
+  const setEnabled = (id, on, by) => {
+    db.prepare('INSERT INTO wa_cloud (branch_id, enabled, changed_at, changed_by) VALUES (?,?,?,?) ON CONFLICT(branch_id) DO UPDATE SET enabled=excluded.enabled, changed_at=excluded.changed_at, changed_by=excluded.changed_by')
+      .run(id, on ? 1 : 0, now(), by);
+    if (on) start(id); else stop(id);
+  };
+  app.get('/api/sync/wa-mode', branchAuth, (req, res) => res.json(modeOf(req.branch.id)));
+  // The owner pressed "Link WhatsApp" / "Move to cloud" on their POS
+  app.post('/api/sync/wa-mode', branchAuth, (req, res) => {
+    const on = !!req.body.enabled;
+    if (on && membership(req.branch.owner_id).ai_active === false) return res.status(402).json({ error: 'The HazelPOS membership is not active, so the WhatsApp bot cannot be switched on' });
+    if (on !== enabled(req.branch.id)) setEnabled(req.branch.id, on, `POS: ${req.branch.name}`);
+    res.json(modeOf(req.branch.id));
   });
 
   // ---------- Admin app: switch on, link by QR, see what the bot did ----------
@@ -118,10 +131,7 @@ module.exports = function waHost({ app, db, dataDir, branchAuth, vendorAuth, ven
   });
   app.post('/api/vendor/branches/:id/whatsapp/enable', vendorAuth, (req, res) => {
     const b = vendorBranch(req, res); if (!b) return;
-    const on = !!req.body.enabled;
-    db.prepare('INSERT INTO wa_cloud (branch_id, enabled, changed_at, changed_by) VALUES (?,?,?,?) ON CONFLICT(branch_id) DO UPDATE SET enabled=excluded.enabled, changed_at=excluded.changed_at, changed_by=excluded.changed_by')
-      .run(b.id, on ? 1 : 0, now(), req.who);
-    if (on) start(b.id); else stop(b.id);
+    setEnabled(b.id, !!req.body.enabled, req.who);
     res.json(view(b.id));
   });
   const running = (req, res) => {

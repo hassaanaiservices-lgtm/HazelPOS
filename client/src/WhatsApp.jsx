@@ -42,11 +42,11 @@ function LinkScreen({ st, onStatus }) {
             <li>Tap <b>Linked devices</b> and then <b>Link a device</b></li>
             <li>Point the phone at this screen to scan the QR code</li>
           </ol>
-          {st.cloud_bot
-            ? <p className="wa-note">Your WhatsApp runs on HazelPOS Cloud: customers get answers even when this PC is off.
-              Customers' chats will show here whenever this PC is on and online.</p>
-            : <p className="wa-note">Customers' chats will then show here. The POS keeps working without internet;
-              messages sent while it was offline appear when it reconnects, marked for you to contact.</p>}
+          {st.cloud_bot || st.cloud_available
+            ? <p className="wa-note">Your WhatsApp will run on HazelPOS Cloud: customers get answers even when this PC is off.
+              Customers' chats show here whenever this PC is on and online.</p>
+            : <p className="wa-error">This PC is not connected to HazelPOS Cloud, so WhatsApp will run on this PC:
+              customers get no answers while it is off. Connect the internet and open this screen again to run it on the cloud.</p>}
           {st.error && <p className="wa-error">{st.error}</p>}
         </div>
         <div className="wa-qr">
@@ -75,6 +75,11 @@ function Inbox({ st, notify, onStatus }) {
   const offlineChats = chats.filter(c => c.offline_pending > 0).length
   const orderChats = chats.filter(c => c.orders_pending > 0).length
   const toggleAssistant = run(async () => { await api('/whatsapp/assistant', { enabled: !st.assistant }); onStatus({ ...st, assistant: !st.assistant }); notify(st.assistant ? 'Assistant switched off: staff reply to everything' : 'Assistant switched on') })
+  const moveToCloud = run(async () => {
+    if (!await confirmBox('Move WhatsApp to HazelPOS Cloud? Customers then get answers even when this PC is off. You scan the QR code once more with the restaurant\'s phone.')) return
+    await api('/whatsapp/cloud', { enabled: true })
+    onStatus(await api('/whatsapp/status')); notify('Moved to the cloud. Press "Link WhatsApp" and scan the QR code with the restaurant\'s phone.')
+  })
   const logout = run(async () => {
     if (!await confirmBox('Unlink WhatsApp from this POS? Chats stay saved; you will need to scan the QR again.')) return
     onStatus(await api('/whatsapp/logout', {})); notify('WhatsApp unlinked')
@@ -93,6 +98,8 @@ function Inbox({ st, notify, onStatus }) {
             {menu && <div className="wa-menu" onMouseLeave={() => setMenu(false)}><button id="wa-logout" onClick={logout}>Unlink WhatsApp</button></div>}
           </div>
         </header>
+        {!st.cloud_bot && st.cloud_available && <div className="wa-conn">WhatsApp runs on this PC: customers get no answers while it is off.
+          <button className="wa-btn" id="wa-move-cloud" style={{ marginTop: 8 }} onClick={moveToCloud}>Move to cloud</button></div>}
         {st.assistant_paused_unpaid && <div className="wa-conn">The assistant is paused because the HazelPOS membership isn't paid. Customers' messages still arrive here: reply yourself, or pay to switch it back on.</div>}
         {st.stt?.state === 'failed' && <div className="wa-conn">Voice notes can't be transcribed: {st.stt.error}</div>}
         {st.cloud_bot && st.status === 'reconnecting' && <div className="wa-conn">Can't reach HazelPOS Cloud (internet?). Customers still get answers from the cloud; chats show here again when the internet is back.</div>}
