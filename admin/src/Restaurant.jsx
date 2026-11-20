@@ -33,6 +33,10 @@ export default function Restaurant({ id }) {
     if (pw == null) return
     await api(`/tenants/${id}/owner-password`, { password: pw }); toast('Password set. Give it to the owner')
   })
+  const newPin = run(async () => {
+    if (!await confirmBox(`Make a new till PIN for ${t.owner?.name || 'the owner'}? The old PIN stops working.`, { title: 'New till PIN', confirmLabel: 'Make new PIN' })) return
+    const r = await api(`/tenants/${id}/owner-pin`, {}); setLink({ kind: 'Owner till PIN', pin: r.pin })
+  })
   const copyLink = run(async () => { await navigator.clipboard.writeText(link.link); toast('Link copied') })
 
   return (
@@ -70,9 +74,11 @@ export default function Restaurant({ id }) {
         <div className="row">
           <button id="btn-resend" onClick={sendLink('resend-welcome', 'Welcome link')}>Resend welcome</button>
           <button className="primary" id="btn-setpw" onClick={setPassword}>Set password</button>
+          <button id="btn-pin" onClick={newPin}>New till PIN</button>
           <button id="btn-reset" onClick={sendLink('owner-reset', 'Reset link')}>Send reset link</button>
         </div>
-        {link && <div className="notice" style={{ marginTop: 12 }}>
+        {link?.pin && <div className="notice" style={{ marginTop: 12 }}><b>{link.kind}</b>: <b id="new-pin">{link.pin}</b> <span className="muted small">(shown once: give it to the owner)</span></div>}
+        {link && !link.pin && <div className="notice" style={{ marginTop: 12 }}>
           <b>{link.kind}</b>: <a href={link.link} target="_blank" rel="noreferrer" id="made-link">{link.link}</a>
           <div className="row" style={{ marginTop: 8 }}><button onClick={copyLink}>Copy link</button></div></div>}
       </div>

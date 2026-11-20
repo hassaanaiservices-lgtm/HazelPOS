@@ -217,6 +217,18 @@ router.post('/tenants/:id/owner-password', (req, res) => {
   audit(req.who, 'tenant.owner-password', { id: t.id, slug: t.slug });
   res.json({ ok: true });
 });
+// A new till PIN for the owner's own login in this restaurant (the first one is shown only once, when it is created)
+router.post('/tenants/:id/owner-pin', (req, res) => {
+  const t = tenancy.tenantRow(+req.params.id);
+  if (!t) return fail(res, 404, 'Restaurant not found');
+  const ot = control.prepare('SELECT user_id FROM owner_tenants WHERE tenant_id=? LIMIT 1').get(t.id);
+  if (!ot) return fail(res, 400, 'This restaurant has no owner');
+  const pin = randomPin();
+  const ok = tenancy.run(t.id, () => tenancy.db.prepare('UPDATE users SET pin=? WHERE id=?').run(hashPin(pin), ot.user_id).changes);
+  if (!ok) return fail(res, 400, "The owner's login in this restaurant no longer exists");
+  audit(req.who, 'tenant.owner-pin', { id: t.id, slug: t.slug });
+  res.json({ ok: true, pin });
+});
 router.post('/tenants/:id/resend-welcome', wrap((req, res) => sendLink(req, res, 'welcome')));
 router.post('/tenants/:id/owner-reset', wrap((req, res) => sendLink(req, res, 'reset')));
 
