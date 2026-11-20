@@ -3,6 +3,7 @@ import { api, rs, run } from './lib'
 import { Icon } from './ui'
 import { toast, toastError, confirmBox } from './notify'
 import RiderMap from './RiderMap'
+import { printOrder } from './Bill'
 
 const mins = iso => iso ? Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 60000)) : 0
 const mapUrl = address => `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address || '')}`
@@ -28,7 +29,11 @@ export default function Delivery({ notify, embedded }) {
     notify(`#${o.id} out with ${rider.name}`); load()
   })
   const delivered = run(async o => { await api(`/orders/${o.id}/delivered`, {}); load() })
-  const printBill = run(async o => { await api(`/print/receipt/${o.id}`, {}); notify('Bill printed') })
+  const printBill = run(async o => {
+    const st = await api('/settings')
+    if (!st.printing) return printOrder(await api('/orders/' + o.id), st) // no printer helper: the browser print dialog, showing only the bill
+    await api(`/print/receipt/${o.id}`, {}); notify('Sent to printer')
+  })
   const cashIn = run(async o => {
     if (!await confirmBox(`Mark #${o.id} paid: ${rs(o.total)} cash received from ${o.rider?.name || 'the rider'}?`, { confirmLabel: 'Cash received' })) return
     await api(`/riders/${o.rider_id}/settle`, { order_ids: [o.id] }); notify(`#${o.id} paid: ${rs(o.total)} cash`); load()

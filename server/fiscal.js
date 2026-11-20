@@ -6,8 +6,7 @@
 const PAYMENT_MODE = { cash: 1, card: 2, online: 5 };
 
 module.exports = function fiscal(db, { getSettings, secret, getOrder }) {
-  for (const sql of ['ALTER TABLE orders ADD COLUMN fiscal_no TEXT', 'ALTER TABLE orders ADD COLUMN fiscal_status TEXT', 'ALTER TABLE orders ADD COLUMN fiscal_error TEXT'])
-    try { db.exec(sql); } catch { /* column exists */ }
+  // (the fiscal columns on orders are added when a restaurant's database opens: tenant-init.js)
   const enabled = () => ['pra', 'fbr'].includes(getSettings().fiscal_mode);
 
   function payload(o, s) {
@@ -51,14 +50,15 @@ module.exports = function fiscal(db, { getSettings, secret, getOrder }) {
     }
   }
 
-  setInterval(async () => {
+  // Called every 2 minutes for each restaurant (tenancy.forEach in server/index.js)
+  async function tick() {
     if (!enabled()) return;
     for (const { id } of db.prepare("SELECT id FROM orders WHERE status='paid' AND fiscal_status='pending' ORDER BY id LIMIT 50").all())
       try { await submit(id); } catch { break; } // still offline: wait for the next round
-  }, 2 * 60 * 1000).unref();
+  }
 
   return {
-    enabled, submit, payload,
+    enabled, submit, payload, tick,
     onPaid: id => { if (enabled()) db.prepare("UPDATE orders SET fiscal_status='pending' WHERE id=? AND fiscal_no IS NULL").run(id); },
     pending: () => db.prepare("SELECT id, invoice_no, fiscal_error FROM (SELECT id, 'INV-' || strftime('%Y', created_at) || '-' || printf('%04d', id) invoice_no, fiscal_error FROM orders WHERE status='paid' AND fiscal_status='pending') ORDER BY id").all(),
   };

@@ -5,7 +5,7 @@ import { toastError } from './notify'
 import { Logo } from './ui'
 
 // Mobile ordering page opened by scanning a table's QR code
-export default function CustomerOrder({ token }) {
+export default function CustomerOrder({ slug, token }) {
   const [data, setData] = useState(null)
   const [error, setError] = useState('')
   const [cat, setCat] = useState(0)
@@ -18,14 +18,14 @@ export default function CustomerOrder({ token }) {
   const [choosing, setChoosing] = useState(null) // product whose size/options sheet is open
 
   useEffect(() => {
-    api('/qr/' + token).then(d => { setData(d); document.title = `${d.restaurant.name} · ${d.table.name}` })
+    api('/qr/' + token, undefined, { tenant: slug }).then(d => { setData(d); document.title = `${d.restaurant.name} · ${d.table.name}` })
       .catch(e => setError(e.message))
   }, [token])
 
   // Poll order status after placing
   useEffect(() => {
     if (!placed || placed.status !== 'pending') return
-    const t = setInterval(() => api(`/qr/${token}/status/${placed.id}`).then(setPlaced).catch(() => {}), 4000)
+    const t = setInterval(() => api(`/qr/${token}/status/${placed.id}`, undefined, { tenant: slug }).then(setPlaced).catch(() => {}), 4000)
     return () => clearInterval(t)
   }, [placed, token])
 
@@ -52,7 +52,7 @@ export default function CustomerOrder({ token }) {
     setSending(true)
     try {
       const items = cart.map(i => ({ product_id: i.product_id, size: i.size, mods: i.mods, qty: i.qty, note: i.note }))
-      const r = await api(`/qr/${token}/order`, { items, note, customer: name })
+      const r = await api(`/qr/${token}/order`, { items, note, customer: name }, { tenant: slug })
       setPlaced(r); setCart([]); setNote(''); setShowCart(false)
     } catch (e) { toastError(e.message) }
     setSending(false)

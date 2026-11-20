@@ -2,30 +2,25 @@ import { useEffect, useState } from 'react'
 import { api } from './lib'
 import { run } from './notify'
 
-// Everything changed through this app, with who did it (cloud: vendor_audit). Newest first.
-const WHAT = [
-  [/^LOGIN$/, () => 'Logged in'],
-  [/^POST \/owners$/, () => 'Added a client'],
-  [/^POST \/owners\/(\d+)\/extend$/, d => `Marked paid +${d.months || 1} month(s)`],
-  [/^POST \/owners\/(\d+)\/branches$/, () => 'Added a branch (new activation code)'],
-  [/^POST \/owners\/(\d+)\/early$/, d => d.early ? 'Made a test client for updates' : 'Removed from test clients'],
-  [/^POST \/owners\/(\d+)$/, d => d.cancelled === true ? 'Cancelled a membership' : d.cancelled === false ? 'Reactivated a membership' : d.suspended === true ? 'Stopped a client' : d.suspended === false ? 'Resumed a client' : d.paid_until ? `Set paid until ${d.paid_until}` : 'Changed client details'],
-  [/^POST \/branches\/(\d+)\/code$/, () => 'Made a new activation code'],
-  [/^POST \/branches\/(\d+)\/setup\/menu-photo$/, () => 'Read a menu photo (AI)'],
-  [/^POST \/branches\/(\d+)\/setup/, () => 'Changed a branch setup'],
-  [/^POST \/updates\/release$/, d => `Released version ${d.version} to everyone`],
-  [/^POST \/updates\/request$/, () => 'Asked all apps to check for updates'],
-  [/^POST \/team/, () => 'Changed the team'],
-]
+// Everything changed through this panel or by the daily job, with who did it (server: vendor_audit). Newest first.
+const WHAT = {
+  'tenant.create': d => `Created ${d.name}`,
+  'tenant.update': d => `Changed ${d.slug}${d.status ? ` (status ${d.status})` : ''}`,
+  'tenant.status': d => `${d.slug}: ${d.from} to ${d.to}${d.why ? ` (${d.why})` : ''}`,
+  'tenant.resend-welcome': d => `Resent the welcome link to ${d.slug}`,
+  'tenant.owner-reset': d => `Made a password reset link for ${d.slug}`,
+  'invoices.generate': d => `Created ${d.created} invoice(s) for ${d.month}`,
+  'invoice.paid': d => `Marked paid: ${d.tenant} ${d.month} (${d.method}${d.ref ? ', ' + d.ref : ''})`,
+  'invoice.void': d => `Voided invoice ${d.id}`,
+  'lifecycle.run': d => `Checked statuses (${d.changes} change(s))`,
+  'wa.link': () => 'Started linking the HazelPOS WhatsApp number',
+  'wa.logout': () => 'Unlinked the HazelPOS WhatsApp number',
+}
 export default function Activity() {
   const [list, setList] = useState(null)
   useEffect(() => { run(async () => setList(await api('/audit?limit=500')))() }, [])
   if (!list) return <p className="muted">Loading…</p>
-  const describe = a => {
-    let d = {}; try { d = JSON.parse(String(a.detail).split(' + ')[0]) } catch { /* not JSON */ }
-    const hit = WHAT.find(([re]) => re.test(a.action))
-    return hit ? hit[1](d) : a.action
-  }
+  const describe = a => { let d = {}; try { d = JSON.parse(a.detail) } catch { /* not JSON */ } return WHAT[a.action]?.(d) || a.action }
   return (
     <>
       <div className="page-head"><h1>Activity</h1></div>

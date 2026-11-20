@@ -48,6 +48,7 @@ module.exports = function stockAlert(db, { getSettings, wa, log = console }) {
     return { sent, low: r.low.length };
   }
 
-  setInterval(() => run().catch(e => log.error?.('Low-stock alert:', e.message)), 60 * 1000).unref();
-  return { run, report, toJid };
+  // Called every minute for each restaurant (tenancy.forEach in server/index.js)
+  const tick = () => run().catch(e => log.error?.('Low-stock alert:', e.message));
+  return { run, report, toJid, tick };
 };

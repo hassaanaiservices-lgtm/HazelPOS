@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self'; script-src 'self'; img-src 'self' data:">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HazelPOS Printer</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <h1>HazelPOS Printer</h1>
+  <span id="status" class="pill off"><i></i><span id="statusText">Not set up yet</span></span>
+</header>
+<main>
+  <section id="s1" class="card">
+    <h2><b>1</b> Connect to HazelPOS</h2>
+    <div id="pairForm">
+      <label for="code">Enter the code from HazelPOS → Settings → Printers</label>
+      <input id="code" inputmode="numeric" maxlength="7" autocomplete="off" placeholder="6 digits">
+      <button id="pair" class="primary">Connect</button>
+      <details id="adv">
+        <summary>Advanced</summary>
+        <label for="server">Server address</label>
+        <input id="server" autocomplete="off" spellcheck="false">
+        <label for="key">Key (if you were given one instead of a code)</label>
+        <input id="key" autocomplete="off" spellcheck="false" placeholder="Paste the key">
+        <button id="useKey" class="ghost">Use a key instead</button>
+      </details>
+    </div>
+    <div id="pairedInfo" hidden>
+      <p class="ok-line">Connected to <b id="rname"></b></p>
+      <button id="unpair" class="ghost">Connect to a different restaurant</button>
+    </div>
+    <p id="msg1" class="msg" role="status"></p>
+  </section>
+
+  <section id="s2" class="card off">
+    <h2><b>2</b> Printers</h2>
+    <button id="find" class="ghost">Find printers</button>
+    <p id="found" class="hint"></p>
+    <label for="receipt">Receipt printer</label>
+    <input id="receipt" list="foundList" autocomplete="off" spellcheck="false" placeholder="192.168.1.50:9100">
+    <label for="kitchen">Kitchen printer</label>
+    <input id="kitchen" list="foundList" autocomplete="off" spellcheck="false" placeholder="192.168.1.51:9100 (optional)">
+    <datalist id="foundList"></datalist>
+    <div id="chips" class="chips"></div>
+    <p class="hint">A USB printer on this PC: COM3 or \\.\USB001.</p>
+    <button id="save" class="primary">Save printers</button>
+    <p id="msg2" class="msg" role="status"></p>
+  </section>
+
+  <section id="s3" class="card off">
+    <h2><b>3</b> Print a test page</h2>
+    <div class="row">
+      <button id="testReceipt" class="ghost">Test receipt printer</button>
+      <button id="testKitchen" class="ghost">Test kitchen printer</button>
+    </div>
+    <p id="msg3" class="msg" role="status"></p>
+  </section>
+
+  <label class="check"><input type="checkbox" id="autostart"> Start with Windows</label>
+  <p class="hint">You can close this window. HazelPOS Printer keeps running next to the clock.</p>
+</main>
+<script src="app.js"></script>
+</body>
+</html>

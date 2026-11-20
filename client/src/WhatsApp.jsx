@@ -42,11 +42,11 @@ function LinkScreen({ st, onStatus }) {
             <li>Tap <b>Linked devices</b> and then <b>Link a device</b></li>
             <li>Point the phone at this screen to scan the QR code</li>
           </ol>
-          {st.cloud_bot || st.cloud_available
-            ? <p className="wa-note">Your WhatsApp will run on HazelPOS Cloud: customers get answers even when this PC is off.
-              Customers' chats show here whenever this PC is on and online.</p>
-            : <p className="wa-error">This PC is not connected to HazelPOS Cloud, so WhatsApp will run on this PC:
-              customers get no answers while it is off. Connect the internet and open this screen again to run it on the cloud.</p>}
+          {st.cloud_bot
+            ? <p className="wa-note">Your WhatsApp runs on HazelPOS Cloud: customers get answers even when this PC is off.
+              Customers' chats will show here whenever this PC is on and online.</p>
+            : <p className="wa-note">Customers' chats will then show here. The POS keeps working without internet;
+              messages sent while it was offline appear when it reconnects, marked for you to contact.</p>}
           {st.error && <p className="wa-error">{st.error}</p>}
         </div>
         <div className="wa-qr">
@@ -74,12 +74,7 @@ function Inbox({ st, notify, onStatus }) {
   const open = chats.find(c => c.id === openId)
   const offlineChats = chats.filter(c => c.offline_pending > 0).length
   const orderChats = chats.filter(c => c.orders_pending > 0).length
-  const toggleAssistant = run(async () => { await api('/whatsapp/assistant', { enabled: !st.assistant }); onStatus({ ...st, assistant: !st.assistant }); notify(st.assistant ? 'Assistant switched off: staff reply to everything' : 'Assistant switched on') })
-  const moveToCloud = run(async () => {
-    if (!await confirmBox('Move WhatsApp to HazelPOS Cloud? Customers then get answers even when this PC is off. You scan the QR code once more with the restaurant\'s phone.')) return
-    await api('/whatsapp/cloud', { enabled: true })
-    onStatus(await api('/whatsapp/status')); notify('Moved to the cloud. Press "Link WhatsApp" and scan the QR code with the restaurant\'s phone.')
-  })
+  const toggleAssistant = run(async () => { await api('/whatsapp/assistant', { enabled: !st.assistant }); onStatus({ ...st, assistant: !st.assistant }); notify(st.assistant ? 'Bot replies are off: staff reply to everything' : 'Bot replies are on') })
   const logout = run(async () => {
     if (!await confirmBox('Unlink WhatsApp from this POS? Chats stay saved; you will need to scan the QR again.')) return
     onStatus(await api('/whatsapp/logout', {})); notify('WhatsApp unlinked')
@@ -91,16 +86,14 @@ function Inbox({ st, notify, onStatus }) {
         <header className="wa-head">
           <div className="wa-head-name"><b>WhatsApp</b><small>{st.me ? `+92 ${st.me.slice(1)}` : ''}</small></div>
           <button id="wa-assistant" className={'wa-bot-switch' + (st.assistant ? ' on' : '')} onClick={toggleAssistant}
-            title={st.assistant ? 'The assistant replies automatically. Click to switch off.' : 'Staff reply to everything. Click to let the assistant reply.'}>
-            {st.assistant ? 'Auto-reply on' : 'Auto-reply off'}</button>
+            title={st.assistant ? 'The WhatsApp bot replies automatically. Click to switch off.' : 'Staff reply to everything. Click to let the bot reply.'}>
+            {st.assistant ? 'Bot replies: on' : 'Bot replies: off'}</button>
           <div className="wa-menu-wrap">
             <button className="wa-icon" title="More" aria-label="More" onClick={() => setMenu(!menu)}><Icon name="menu" /></button>
             {menu && <div className="wa-menu" onMouseLeave={() => setMenu(false)}><button id="wa-logout" onClick={logout}>Unlink WhatsApp</button></div>}
           </div>
         </header>
-        {!st.cloud_bot && st.cloud_available && <div className="wa-conn">WhatsApp runs on this PC: customers get no answers while it is off.
-          <button className="wa-btn" id="wa-move-cloud" style={{ marginTop: 8 }} onClick={moveToCloud}>Move to cloud</button></div>}
-        {st.assistant_paused_unpaid && <div className="wa-conn">The assistant is paused because the HazelPOS membership isn't paid. Customers' messages still arrive here: reply yourself, or pay to switch it back on.</div>}
+        {st.assistant_paused_unpaid && <div className="wa-conn">The WhatsApp bot is paused because the HazelPOS membership isn't paid. Customers' messages still arrive here: reply yourself, or pay to switch it back on.</div>}
         {st.stt?.state === 'failed' && <div className="wa-conn">Voice notes can't be transcribed: {st.stt.error}</div>}
         {st.cloud_bot && st.status === 'reconnecting' && <div className="wa-conn">Can't reach HazelPOS Cloud (internet?). Customers still get answers from the cloud; chats show here again when the internet is back.</div>}
         {!st.cloud_bot && st.status === 'reconnecting' && <div className="wa-conn">No internet, reconnecting. The POS keeps working; new messages will arrive when it's back.</div>}
@@ -123,7 +116,7 @@ function Inbox({ st, notify, onStatus }) {
                 <div className="wa-row"><b>{title(c)}</b><span className={c.unread ? 'wa-time new' : 'wa-time'}>{c.last_at && listTime(c.last_at)}</span></div>
                 <div className="wa-row">
                   <span className="wa-last">{c.last_text}</span>
-                  {c.bot_paused ? <span className="wa-off-pill" title="Assistant paused for this chat">paused</span> : null}
+                  {c.bot_paused ? <span className="wa-off-pill" title="The bot is paused for this chat">paused</span> : null}
                   {c.orders_pending > 0 && <span className="wa-order-pill" title="Order waiting for you to accept">order</span>}
                   {c.offline_pending > 0 && <span className="wa-off-pill" title="Messaged while the POS was offline">offline</span>}
                   {c.unread > 0 && <span className="wa-unread">{c.unread}</span>}
@@ -166,7 +159,7 @@ function Thread({ chat, connected, assistantOn, notify, onBack }) {
     catch (e) { toastError(e.message) } finally { setSending(false) }
   }
   const handled = run(async () => { await api(`/whatsapp/chats/${cid}/handled`, {}); notify('Marked as done') })
-  const toggleBot = run(async () => { await api(`/whatsapp/chats/${cid}/bot`, { paused: !chat.bot_paused }); notify(chat.bot_paused ? 'Assistant resumed for this chat' : 'Assistant paused for this chat') })
+  const toggleBot = run(async () => { await api(`/whatsapp/chats/${cid}/bot`, { paused: !chat.bot_paused }); notify(chat.bot_paused ? 'Bot resumed for this chat' : 'Bot paused for this chat') })
   const reject = run(async o => {
     const reason = await promptBox('The customer gets this reason on WhatsApp. Leave it empty to send no reason.', { title: 'Reject this order?', placeholder: 'e.g. kitchen is closing', confirmLabel: 'Reject order' })
     if (reason === null) return
@@ -183,9 +176,9 @@ function Thread({ chat, connected, assistantOn, notify, onBack }) {
         <div className="wa-avatar">{initials(chat)}</div>
         <div className="wa-head-name"><b>{title(chat)}</b><small>{chat.name && chat.phone ? chat.phone : ''}</small></div>
         {assistantOn && <button id="wa-bot-toggle" className={'wa-chip-btn' + (chat.bot_paused ? '' : ' on')} onClick={toggleBot}
-          title={chat.bot_paused ? 'Assistant is paused in this chat. Click to let it reply again.' : 'Assistant replies in this chat. Click to pause it (you reply yourself).'}>
+          title={chat.bot_paused ? 'The bot is paused in this chat. Click to let it reply again.' : 'The bot replies in this chat. Click to pause it (you reply yourself).'}>
           {chat.bot_paused ? 'Bot paused' : 'Bot on'}</button>}
-        <button className="wa-icon" title="Why the assistant replied (or stayed quiet)" aria-label="Assistant log" onClick={() => setShowLog(!showLog)}><Icon name="list" /></button>
+        <button className="wa-icon" title="Why the bot replied (or stayed quiet)" aria-label="Bot log" onClick={() => setShowLog(!showLog)}><Icon name="list" /></button>
         {chat.phone && <a className="wa-icon" href={`tel:${chat.phone}`} title="Call" aria-label="Call"><Icon name="phone" /></a>}
       </header>
       {showLog && <BotLog chatId={chat.id} onClose={() => setShowLog(false)} />}
@@ -202,7 +195,7 @@ function Thread({ chat, connected, assistantOn, notify, onBack }) {
             <div key={m.id}>
               {sep && <div className="wa-day"><span>{day}</span></div>}
               <div className={'wa-msg ' + m.direction + (m.offline && !m.handled_at ? ' offline' : '')}>
-                {m.direction === 'out' && <div className={'wa-by' + (m.sender === 'bot' ? ' bot' : '')}>{m.sender === 'bot' ? 'Assistant' : m.sender === 'system' ? 'Order update (automatic)' : m.sender === 'phone' ? 'From the phone' : m.by_user || 'POS'}</div>}
+                {m.direction === 'out' && <div className={'wa-by' + (m.sender === 'bot' ? ' bot' : '')}>{m.sender === 'bot' ? 'Bot' : m.sender === 'system' ? 'Order update (automatic)' : m.sender === 'phone' ? 'From the phone' : m.by_user || 'POS'}</div>}
                 {m.kind === 'location' && m.meta ? <a href={`https://maps.google.com/?q=${m.meta.lat},${m.meta.lng}`} target="_blank" rel="noreferrer">{m.text} — open map</a>
                   : m.meta?.menu_image ? <img className="wa-img" src={`/api/menu-images/${m.meta.menu_image}/image`} alt={m.text} loading="lazy" />
                   : m.meta?.file ? <VoiceNote m={m} notify={notify} />
@@ -288,13 +281,13 @@ function AcceptOrder({ order, chat, notify, onClose, onDone }) {
   )
 }
 
-// Why the assistant replied or stayed quiet, newest first
+// Why the bot replied or stayed quiet, newest first
 function BotLog({ chatId, onClose }) {
   const [rows, setRows] = useState([])
   useEvery(() => api(`/whatsapp/chats/${encodeURIComponent(chatId)}/log`).then(setRows).catch(() => {}), 3000, [chatId])
   return (
     <div className="wa-log">
-      <div className="wa-log-head"><b>Assistant log</b><button className="wa-icon" onClick={onClose} aria-label="Close"><Icon name="x" size={16} /></button></div>
+      <div className="wa-log-head"><b>Bot log</b><button className="wa-icon" onClick={onClose} aria-label="Close"><Icon name="x" size={16} /></button></div>
       <div className="wa-log-body">
       {!rows.length && <p>Nothing yet.</p>}
       {rows.map(r => (

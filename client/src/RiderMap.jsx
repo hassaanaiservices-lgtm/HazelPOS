@@ -3,7 +3,7 @@ import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { api } from './lib'
 
-// Riders on a map. Their phones send positions through the cloud (server/rider-sync.js); the POS asks every 10 s.
+// Riders on a map. Their phones send positions to the server (rider page /r/<slug>/<token>); the POS asks every 10 s.
 // Map tiles come from OpenStreetMap, so the map needs internet; the rest of the POS does not.
 const ago = iso => { const s = Math.round((Date.now() - Date.parse(iso)) / 1000); return s < 60 ? `${s} s ago` : s < 3600 ? `${Math.round(s / 60)} min ago` : `${Math.round(s / 3600)} h ago` }
 const esc = s => String(s).replace(/[<>&"']/g, '')
@@ -37,7 +37,7 @@ export default function RiderMap({ height = 340 }) {
   }, [d]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => () => { map.current?.remove(); map.current = null; markers.current.clear() }, [])
   const foot = !d ? 'Loading…'
-    : !d.cloud ? 'Connect the cloud (Settings → Cloud) to see riders on the map: their phones send their location through it.'
+    : !d.cloud ? 'Connect the cloud (Settings → HazelPOS account) to see riders on the map: their phones send their location through it.'
     : !riders.length ? 'No rider has shared a location yet. Riders press "On duty" on their phone screen (Riders → Phone link).'
     : riders.map(r => `${r.name}: ${r.on_road ? 'delivering' : r.on_duty ? 'free' : 'off duty'}, ${ago(r.at)}`).join(' · ')
   return (

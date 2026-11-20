@@ -1,8 +1,8 @@
-// Builds the demo restaurant every free-demo visitor starts from (demo/template.db).
+// Builds the demo restaurant every free-demo visitor starts from (demo/template/).
 //
-//   node demo/seed.js            -> writes demo/template.db
+//   node demo/seed.js            -> writes demo/template/ (a DATA_DIR holding the 'demo' restaurant)
 //
-// It starts a private POS server on a spare port against a fresh database, fills it through the POS's own API (so every
+// It starts a private POS server on a spare port against a fresh DATA_DIR (the server creates the 'demo' restaurant; every call sends X-Tenant: demo), fills it through the POS's own API (so every
 // price, tax and total is calculated by the real system), then moves the past orders back over the last seven days.
 // All names, phone numbers and amounts are samples.
 const { spawn } = require('child_process');
@@ -12,9 +12,10 @@ const os = require('os');
 const { DatabaseSync } = require('node:sqlite');
 
 const ROOT = path.join(__dirname, '..');
-const OUT = path.join(__dirname, 'template.db');
+const OUT = path.join(__dirname, 'template');
 // Built in the temp folder (fast to write) and copied over OUT only when complete, so a failed run never leaves a half file
-const WORK = path.join(os.tmpdir(), `hazelpos-seed-${process.pid}.db`);
+const WORK = path.join(os.tmpdir(), `hazelpos-seed-${process.pid}`); // a DATA_DIR
+const WORKDB = path.join(WORK, 'tenants', '1', 'pos.db');
 const PORT = 4390;
 const BASE = `http://localhost:${PORT}/api`;
 
@@ -84,7 +85,7 @@ const SETTINGS = {
 // ---------- helpers ----------
 let tok = {};
 async function call(role, method, p, body) {
-  const r = await fetch(BASE + p, { method, headers: { Authorization: 'Bearer ' + (tok[role] || ''), 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
+  const r = await fetch(BASE + p, { method, headers: { 'X-Tenant': 'demo', Authorization: 'Bearer ' + (tok[role] || ''), 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
   const j = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(`${method} ${p} -> ${r.status} ${j.error || ''}`);
   return j;
@@ -96,19 +97,19 @@ const pick = a => a[Math.floor(rand() * a.length)];
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 async function main() {
-  const clean = f => { for (const x of [f, f + '-wal', f + '-shm', f + '-journal']) fs.rmSync(x, { force: true }); };
-  clean(WORK);
-  const env = { ...process.env, POS_DB: WORK, PORT: String(PORT), WHATSAPP: 'off' }; // never touch the real WhatsApp login
+  const clean = f => fs.rmSync(f, { recursive: true, force: true });
+  clean(WORK); fs.mkdirSync(WORK, { recursive: true });
+  const env = { ...process.env, DATA_DIR: WORK, DEMO: '1', PORT: String(PORT), WHATSAPP: 'off' }; // never touch the real WhatsApp login
   const srv = spawn(process.execPath, [path.join(ROOT, 'server', 'index.js')], { env, cwd: path.join(ROOT, 'server'), stdio: ['ignore', 'pipe', 'pipe'] });
   srv.stderr.on('data', d => { if (!/ExperimentalWarning|trace-warnings/.test(d)) process.stderr.write(d); });
   srv.stdout?.on('data', () => {});
   try {
     let up = false
     // A fresh database takes a while to create on a slow disk: wait up to 90 s
-    for (let i = 0; i < 450 && !up; i++) { if (srv.exitCode != null) break; try { await fetch(BASE + '/settings'); up = true } catch { await sleep(200) } }
+    for (let i = 0; i < 450 && !up; i++) { if (srv.exitCode != null) break; try { await fetch(BASE + '/settings', { headers: { 'X-Tenant': 'demo' } }); up = true } catch { await sleep(200) } }
     if (!up) throw new Error('the seed server did not start')
     for (const [role, pin] of [['admin', '1234'], ['cashier', '1111']]) tok[role] = (await call('', 'POST', '/login', { pin })).token;
-    const db = new DatabaseSync(WORK);
+    const db = new DatabaseSync(WORKDB);
     db.exec('PRAGMA busy_timeout = 10000'); // the server writes to the same file; wait instead of failing
 
     // restaurant + replace the built-in pizza menu
@@ -218,16 +219,17 @@ async function main() {
       await post('/expenses', { title, category, amount, payment_method: 'cash', date: daysAgo(d) });
 
     // nothing private, no leftovers from the seed run
-    db.exec("DELETE FROM sessions; DELETE FROM audit_log; DELETE FROM sync_log; DELETE FROM cloud_config; DELETE FROM secrets;");
+    db.exec("DELETE FROM sessions; DELETE FROM audit_log; DELETE FROM secrets;");
     db.exec("UPDATE settings SET value='' WHERE key IN ('receipt_printer','kitchen_printer','payment_qr','payment_qr_label','fiscal_url','fiscal_pos_id')");
     const n = db.prepare("SELECT COUNT(*) c, COALESCE(SUM(total),0) s FROM orders WHERE status='paid'").get();
     db.close();
     // Stop the server, fold everything into the one file, then swap it in place of the old template in one step
     srv.kill(); await new Promise(r => srv.exitCode != null ? r() : srv.once('exit', r));
-    const fin = new DatabaseSync(WORK); fin.exec('PRAGMA wal_checkpoint(TRUNCATE)'); fin.close();
-    fs.copyFileSync(WORK, OUT + '.new'); fs.renameSync(OUT + '.new', OUT);
-    for (const x of ['-wal', '-shm', '-journal']) fs.rmSync(OUT + x, { force: true });
-    console.log(`demo/template.db ready: ${PRODUCTS.length} menu items, ${n.c} paid orders (Rs ${Math.round(n.s).toLocaleString('en-PK')}), 3 tables running, 1 rider out`);
+    const fin = new DatabaseSync(WORKDB); fin.exec('PRAGMA wal_checkpoint(TRUNCATE)'); fin.close();
+    const ctl = new DatabaseSync(path.join(WORK, 'control.db')); ctl.exec('PRAGMA wal_checkpoint(TRUNCATE)'); ctl.close();
+    for (const f of fs.readdirSync(WORK, { recursive: true })) if (/-(wal|shm|journal)$/.test(f)) fs.rmSync(path.join(WORK, f), { force: true });
+    clean(OUT + '.new'); fs.cpSync(WORK, OUT + '.new', { recursive: true }); clean(OUT); fs.renameSync(OUT + '.new', OUT);
+    console.log(`demo/template ready: ${PRODUCTS.length} menu items, ${n.c} paid orders (Rs ${Math.round(n.s).toLocaleString('en-PK')}), 3 tables running, 1 rider out`);
   } finally { srv.kill(); clean(WORK); }
 }
 function daysAgo(d) { const t = new Date(); t.setDate(t.getDate() - d); return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`; }

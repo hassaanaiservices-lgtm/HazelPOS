@@ -1,52 +1,38 @@
-import { daysTo, ago } from './lib'
+import { useState } from 'react'
+import { api } from './lib'
+import { run, toast } from './notify'
 
-// Shared labels so every screen says the same thing about a client or a branch
+// Shared pieces: status chips (spans, never buttons), the Mark paid dialog, money and date formats.
+const STATUS = { trial: ['info', 'Trial'], active: ['ok', 'Active'], past_due: ['warn', 'Past due'], suspended: ['bad', 'Suspended'], cancelled: ['', 'Cancelled'] }
+export const StatusChip = ({ status }) => { const [k, l] = STATUS[status] || ['', status]; return <span className={'pill ' + k} data-status={status}>{l}</span> }
+export const rs = n => 'Rs ' + Math.round(+n || 0).toLocaleString('en-US')
+export const dateOf = iso => iso ? String(iso).slice(0, 10) : '—'
+export const STATUSES = Object.keys(STATUS)
 
-export function Membership({ o }) {
-  if (o.cancelled) return <span className="pill bad">Cancelled</span>
-  if (o.suspended) return <span className="pill bad">Stopped</span>
-  if (!o.paid_until) return <span className="pill bad">Not paid</span>
-  const d = daysTo(o.paid_until)
-  if (d < 0) return <span className={'pill ' + (o.pos_active ? 'warn' : 'bad')}>Unpaid {-d} day{-d === 1 ? '' : 's'}{!o.pos_active ? ' · POS off' : !o.ai_active ? ' · bot off' : ''}</span>
-  if (d < 5) return <span className="pill warn">Due in {d} day{d === 1 ? '' : 's'}</span>
-  return <span className="pill ok">Paid</span>
+export const invoiceChip = inv => inv
+  ? <span className={'pill ' + (inv.due_date < new Date().toISOString().slice(0, 10) ? 'bad' : 'warn')} title={`${inv.month}, due ${inv.due_date}`}>{rs(inv.amount)} due {inv.due_date}</span>
+  : <span className="muted">None open</span>
+
+// "Mark paid": how it was paid and the reference (receipt number). onDone runs after the server accepted it.
+export function PayDialog({ invoice, onClose, onDone }) {
+  const [method, setMethod] = useState('JazzCash')
+  const [ref, setRef] = useState('')
+  const [busy, setBusy] = useState(false)
+  const submit = run(async e => {
+    e.preventDefault(); setBusy(true)
+    try { await api(`/invoices/${invoice.id}/paid`, { method, ref }); toast(`${invoice.tenant_name || 'Invoice'} marked paid`); onDone() }
+    finally { setBusy(false) }
+  })
+  return (
+    <div className="modal-bg" onClick={onClose}>
+      <form className="modal" role="dialog" aria-modal="true" aria-label="Mark paid" onClick={e => e.stopPropagation()} onSubmit={submit}>
+        <h3>Mark paid</h3>
+        <p className="muted">{invoice.tenant_name ? `${invoice.tenant_name}: ` : ''}{invoice.month}, {rs(invoice.amount)}</p>
+        <label>Paid by<select id="pay-method" value={method} onChange={e => setMethod(e.target.value)}>
+          {['JazzCash', 'Easypaisa', 'Bank transfer', 'Cash', 'Other'].map(m => <option key={m}>{m}</option>)}</select></label>
+        <label>Reference (receipt or transaction number)<input id="pay-ref" value={ref} onChange={e => setRef(e.target.value)} autoFocus /></label>
+        <div className="actions"><button type="button" onClick={onClose}>Cancel</button><button className="primary" id="pay-save" disabled={busy}>Mark paid</button></div>
+      </form>
+    </div>
+  )
 }
-
-// Where a branch is: New → Setup in progress → Activated → Running (reported in the last 24 h) / Offline / Setup failed
-export function stageOf(b) {
-  const s = b.setup || {}
-  const recent = b.health_at && Date.now() - Date.parse(b.health_at) < 864e5
-  if (recent) return s.error ? ['bad', 'Setup failed'] : ['ok', 'Running']
-  if (b.code_used_at) return b.health_at ? ['warn', 'Offline'] : ['info', 'Activated']
-  if (s.menu || s.restaurant) return ['info', 'Setup in progress']
-  return ['', 'New']
-}
-export const Stage = ({ b }) => { const [k, l] = stageOf(b); return <span className={'pill ' + k}>{l}</span> }
-
-export function WhatsApp({ h }) {
-  if (!h?.whatsapp) return <span className="muted">—</span>
-  const st = h.whatsapp.status
-  const where = h.whatsapp.on_cloud ? ' (cloud)' : ''
-  return st === 'connected' ? <span className="pill ok">On{where}</span> : <span className={'pill ' + (st ? 'warn' : '')}>{(st || 'Not linked') + where}</span>
-}
-
-export const LastSeen = ({ b }) => <span title={b.health_at || b.last_sync || ''}>{ago(b.health_at || b.last_sync)}</span>
-
-// A client needs attention when: membership ends within 5 days or ended, a branch is offline/failed, or errors today
-export function needsAttention(o) {
-  const money = o.suspended || o.cancelled || !o.paid_until || daysTo(o.paid_until) < 5
-  const branches = o.branches.some(b => ['Offline', 'Setup failed'].includes(stageOf(b)[1]) || b.errors_24h > 0)
-  return money || branches
-}
-
-// Bot / POS status for an unpaid client: "On", "Stops after 18 Nov", "Off since 18 Nov"
-export function Service({ on, until, stopped }) {
-  if (stopped) return <span className="pill bad">Off</span>
-  if (!until) return <span className="pill">—</span>
-  const left = daysTo(until)
-  if (!on) return <span className="pill bad">Off since {until}</span>
-  if (left < 7) return <span className="pill warn">Stops after {until}</span>
-  return <span className="pill ok">On</span>
-}
-
-export const Check = ({ ok, children }) => <span className={'pill ' + (ok ? 'ok' : '')}>{ok ? '✓' : '○'} {children}</span>

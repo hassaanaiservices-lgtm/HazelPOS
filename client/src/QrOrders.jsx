@@ -14,16 +14,13 @@ export function QrCodesModal({ onClose, only = null }) {
   useEffect(() => {
     api('/qr-info').then(d => {
       setInfo(d)
-      const isLocal = ['localhost', '127.0.0.1'].includes(window.location.hostname)
-      const port = window.location.port ? ':' + window.location.port : ''
-      // Phones can't open "localhost", so use the PC's WiFi address
-      setBase(isLocal && d.ips[0] ? `${window.location.protocol}//${d.ips[0]}${port}` : window.location.origin)
+      setBase(window.location.origin) // online: the link is the HazelPOS address plus the restaurant code
     })
   }, [])
 
   useEffect(() => {
     if (!info || !base) return
-    Promise.all(info.tables.map(async t => [t.id, await QRCode.toDataURL(`${base}/t/${t.qr_token}`, { width: 320, margin: 1 })]))
+    Promise.all(info.tables.map(async t => [t.id, await QRCode.toDataURL(`${base}/t/${info.slug}/${t.qr_token}`, { width: 320, margin: 1 })]))
       .then(list => setCodes(Object.fromEntries(list)))
   }, [info, base])
 
@@ -55,7 +52,7 @@ export function QrCodesModal({ onClose, only = null }) {
                 <div className="qr-card-floor">{t.floor}</div>
                 {codes[t.id] ? <img src={codes[t.id]} alt={`QR code for ${t.name}`} /> : <div className="qr-ph" />}
                 <div className="qr-card-cta">Scan to order</div>
-                <a className="qr-link no-print" href={`${base}/t/${t.qr_token}`} target="_blank" rel="noreferrer">Open link</a>
+                <a className="qr-link no-print" href={`${base}/t/${info.slug}/${t.qr_token}`} target="_blank" rel="noreferrer">Open link</a>
               </div>
             ))}
           </div>
@@ -87,7 +84,7 @@ export function QrOrderAlerts({ notify, onAccepted }) {
 
   const act = async kind => {
     const res = await api(`/qr-requests/${r.id}/${kind}`, {})
-    if (res.kitchen_print && res.kitchen_print !== 'ok') toastError('Kitchen printer: ' + res.kitchen_print)
+    if (res.kitchen_print && res.kitchen_print !== 'ok') toastError('Kitchen ticket: ' + res.kitchen_print)
     setList(l => l.filter(x => x.id !== r.id))
     notify(kind === 'accept' ? `${r.table_name} order sent to kitchen` : `${r.table_name} order rejected`)
     if (kind === 'accept') onAccepted?.()

@@ -1,11 +1,10 @@
-// HazelPOS Admin: your own dashboard (clients, onboarding, memberships, health, AI usage). A separate app with its own
-// address and login. It holds the cloud's VENDOR_API_KEY on the server and passes your requests on to HazelPOS Cloud
+// HazelPOS Admin: your own dashboard (restaurants, invoices, the HazelPOS WhatsApp number). A separate app with its own
+// address and login. It holds the VENDOR_API_KEY and passes your requests on to the main HazelPOS server
 // (/api/vendor/*), so the key never reaches a browser.
 //
-//   ADMIN_PASSWORD   the main owner login here (12+ characters; leave the email empty). Team members (Team page)
-//                    log in with their own email and password, kept on the cloud.
-//   CLOUD_URL        your HazelPOS Cloud, e.g. https://cloud.example.com
-//   VENDOR_API_KEY   the same long secret as on the cloud (32+ characters)
+//   ADMIN_PASSWORD   the login here (12+ characters)
+//   SERVER_URL       the main HazelPOS server, e.g. https://app.example.com (CLOUD_URL is still read as a fallback)
+//   VENDOR_API_KEY   the same long secret as on the server (32+ characters)
 //   PORT             default 4400
 const express = require('express');
 const crypto = require('crypto');
@@ -13,11 +12,11 @@ const path = require('path');
 const fs = require('fs');
 
 const ADMIN_PASSWORD = String(process.env.ADMIN_PASSWORD || ''), VENDOR_API_KEY = String(process.env.VENDOR_API_KEY || '').trim(); // a pasted key may carry a space or new line
-const CLOUD_URL = String(process.env.CLOUD_URL || '').replace(/\/+$/, '');
+const SERVER_URL = String(process.env.SERVER_URL || process.env.CLOUD_URL || '').replace(/\/+$/, '');
 const problems = [
   ADMIN_PASSWORD.length < 12 && 'ADMIN_PASSWORD must be at least 12 characters',
-  !/^https?:\/\//.test(CLOUD_URL) && 'CLOUD_URL must be the cloud address, e.g. https://cloud.example.com',
-  VENDOR_API_KEY.length < 32 && 'VENDOR_API_KEY must be the same 32+ character secret as on the cloud',
+  !/^https?:\/\//.test(SERVER_URL) && 'SERVER_URL must be the HazelPOS server address, e.g. https://app.example.com',
+  VENDOR_API_KEY.length < 32 && 'VENDOR_API_KEY must be the same 32+ character secret as on the server',
 ].filter(Boolean);
 if (problems.length) { console.error('HazelPOS Admin cannot start:\n- ' + problems.join('\n- ')); process.exit(1); }
 
@@ -47,24 +46,19 @@ const loggedIn = req => {
   s.seen = Date.now();
   return s.user;
 };
-const cloud = (p, opts = {}) => fetch(CLOUD_URL + '/api/vendor' + p, { ...opts, signal: AbortSignal.timeout(60000),
+const server = (p, opts = {}) => fetch(SERVER_URL + '/api/vendor' + p, { ...opts, signal: AbortSignal.timeout(60000),
   headers: { Authorization: 'Bearer ' + VENDOR_API_KEY, 'Content-Type': 'application/json', ...(opts.headers || {}) } });
 
 app.post('/api/login', async (req, res) => {
   const f = fails.get(req.ip) || { n: 0, until: 0 };
   if (f.until > Date.now()) return res.status(429).json({ error: `Too many attempts. Try again in ${Math.ceil((f.until - Date.now()) / 60000)} min` });
-  const email = String(req.body?.email || '').trim().toLowerCase();
+  // shortcut: one shared ADMIN_PASSWORD. The Team page (own email and password per person) is hidden until there is a team.
   let user = null;
-  if (!email) { // the main owner password
-    if (crypto.timingSafeEqual(sha(req.body?.password || ''), sha(ADMIN_PASSWORD))) user = { id: 0, email: '', name: 'Owner', role: 'owner' };
-  } else { // a team member: checked by the cloud
-    try { const r = await cloud('/team/login', { method: 'POST', body: JSON.stringify({ email, password: req.body?.password || '' }) }); if (r.ok) user = await r.json(); }
-    catch { return res.status(502).json({ error: `Can't reach HazelPOS Cloud (${CLOUD_URL})` }); }
-  }
+  if (crypto.timingSafeEqual(sha(req.body?.password || ''), sha(ADMIN_PASSWORD))) user = { id: 0, email: '', name: 'Owner', role: 'owner' };
   if (!user) {
     f.n++; if (f.n >= 5) { f.n = 0; f.until = Date.now() + 15 * 60 * 1000; }
     fails.set(req.ip, f);
-    return res.status(401).json({ error: email ? 'Wrong email or password' : 'Wrong password' });
+    return res.status(401).json({ error: 'Wrong password' });
   }
   fails.delete(req.ip);
   const token = crypto.randomBytes(32).toString('hex');
@@ -73,31 +67,27 @@ app.post('/api/login', async (req, res) => {
   res.json({ ok: true });
 });
 app.post('/api/logout', (req, res) => { sessions.delete(cookie(req).hz_admin); setCookie(req, res, '', 0); res.json({ ok: true }); });
-app.get('/api/me', (req, res) => { const u = loggedIn(req); u ? res.json({ ok: true, cloud: CLOUD_URL, user: u }) : res.status(401).json({ error: 'Please log in' }); });
+app.get('/api/me', (req, res) => { const u = loggedIn(req); res.json(u ? { ok: true, server: SERVER_URL, user: u } : { ok: false }); });
+// (200 when logged out, so the browser console shows no red error)
 
-// Everything else under /api goes to the cloud's vendor API. Writes must come from this app's own pages
+// Everything else under /api goes to the HazelPOS server's vendor API. Writes must come from this app's own pages
 // (the cookie is SameSite=Strict, and the header below can't be sent by a form on another site).
 app.use('/api', async (req, res) => {
   const user = loggedIn(req);
   if (!user) return res.status(401).json({ error: 'Please log in' });
   if (req.method !== 'GET' && req.get('x-hazel-admin') !== '1') return res.status(403).json({ error: 'Not allowed' });
-  // Only plain, known-shaped paths go to the cloud: no dot-dot, no encoded slashes or dots, no double slashes
+  // Only plain, known-shaped paths go to the server: no dot-dot, no encoded slashes or dots, no double slashes
   if (!/^\/[a-z0-9_\-]+(\/[a-z0-9_\-]+)*\/?$/i.test(req.path)) return res.status(400).json({ error: 'Bad address' });
-  if (/^\/team(\/|$)/i.test(req.path) && user.role !== 'owner') return res.status(403).json({ error: 'Only an owner can manage the team' });
   try {
-    const r = await cloud(req.url, {
+    const r = await server(req.url, {
       method: req.method,
-      headers: { 'X-Vendor-User': user.email ? `${user.name} <${user.email}>` : user.name, 'X-Vendor-Role': user.role }, // who did it: the cloud's activity log and the owner-only team routes
+      headers: { 'X-Admin-User': user.email ? `${user.name} <${user.email}>` : user.name }, // who did it: the server's activity log
       body: req.method !== 'GET' ? JSON.stringify(req.body || {}) : undefined,
     });
     const body = Buffer.from(await r.arrayBuffer());
-    // A team member switched off or given a new password: sign them out everywhere straight away
-    const m = /^\/team\/(\d+)$/.exec(req.path);
-    if (r.ok && m && req.method === 'POST' && (req.body?.active === false || req.body?.password !== undefined))
-      for (const [t, s] of sessions) if (s.user.id === +m[1]) sessions.delete(t);
     res.status(r.status).type(r.headers.get('content-type') || 'application/json').send(body);
   } catch (e) {
-    res.status(502).json({ error: e.name === 'TimeoutError' ? 'HazelPOS Cloud took too long to answer' : `Can't reach HazelPOS Cloud (${CLOUD_URL})` });
+    res.status(502).json({ error: e.name === 'TimeoutError' ? 'The HazelPOS server took too long to answer' : `Can't reach the HazelPOS server (${SERVER_URL})` });
   }
 });
 
@@ -109,4 +99,4 @@ app.get(/.*/, (req, res) => fs.existsSync(path.join(DIST, 'index.html'))
   : res.status(503).send('Build the admin screens first: npm --prefix admin run build'));
 
 const PORT = process.env.PORT || 4400;
-app.listen(PORT, () => console.log(`HazelPOS Admin on http://localhost:${PORT} (cloud: ${CLOUD_URL})`));
+app.listen(PORT, () => console.log(`HazelPOS Admin on http://localhost:${PORT} (server: ${SERVER_URL})`));

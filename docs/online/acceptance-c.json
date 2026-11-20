@@ -1,0 +1,98 @@
+[
+ {
+  "id": "C-01",
+  "area": "vendor-api",
+  "title": "Vendor API locked without the key",
+  "when": "GET /api/vendor/tenants with no auth, wrong key; then right key. Also start with VENDOR_API_KEY unset",
+  "then": "401/401/200; unset \u2192 503 on every vendor route",
+  "verify": "api"
+ },
+ {
+  "id": "C-02",
+  "area": "onboarding",
+  "title": "Create restaurant from the admin panel sends a welcome link",
+  "when": "Admin panel (admin/ server pointed at the test server) \u2192 + New restaurant: 'Multan Tikka', owner 'Bilal', '03003333333', fee 5000",
+  "then": "Success card shows welcome link + Copy message (contains link and PIN); tenant listed with status trial, trial_ends +14 days; server log shows VENDOR-WA (not connected) line with the link; vendor_audit row with who",
+  "verify": "playwright"
+ },
+ {
+  "id": "C-03",
+  "area": "onboarding",
+  "title": "Welcome link sets the password and signs in",
+  "when": "Open the welcome link in a fresh browser; set password 'multan-pass-1' (+confirm)",
+  "then": "Lands in the app as Multan Tikka admin without an OTP step on this device; link reused \u2192 'expired or used' message; old password-less login impossible",
+  "verify": "playwright"
+ },
+ {
+  "id": "C-04",
+  "area": "auth",
+  "title": "Forgot password via WhatsApp link",
+  "when": "Sign-in \u2192 Forgot password \u2192 phone 03003333333; also an unknown phone; open the reset link, set new password; sign in with old and new",
+  "then": "Same message for both phones; reset link in log only for the real one; old password 401, new works; reset link single-use and expires after 1 h (test by editing expires_at)",
+  "verify": "playwright"
+ },
+ {
+  "id": "C-05",
+  "area": "auth",
+  "title": "OTP goes through the vendor WhatsApp sender",
+  "when": "Sign in on a new device_id with WhatsApp not linked",
+  "then": "Log line 'VENDOR-WA (not connected) to 03\u2026: Your HazelPOS sign-in code is \u2026'; that code works",
+  "verify": "api"
+ },
+ {
+  "id": "C-06",
+  "area": "staff",
+  "title": "Owner adds, edits and removes staff",
+  "when": "Settings \u2192 Staff & PINs: add cashier 'Sana' PIN 4826; add another with the same PIN; edit Sana to kitchen; try removing own login; remove Sana",
+  "then": "Sana appears on the till lock screen and can log in on a till; duplicate PIN \u2192 'Someone here already uses that PIN'; own/last admin removal refused; after removal Sana's sessions stop working (401)",
+  "verify": "playwright"
+ },
+ {
+  "id": "C-07",
+  "area": "staff",
+  "title": "Same PIN allowed in a different restaurant",
+  "when": "Add a staff with PIN 4826 in another restaurant",
+  "then": "Allowed; each logs in only on their own restaurant's till",
+  "verify": "api"
+ },
+ {
+  "id": "C-08",
+  "area": "billing",
+  "title": "Invoices generate, notify and mark paid",
+  "when": "POST /invoices/generate {month}; twice",
+  "then": "One invoice per tenant with fee>0, second call creates none; WhatsApp log line per tenant; Mark paid in admin panel records method/ref/who",
+  "verify": "api"
+ },
+ {
+  "id": "C-09",
+  "area": "lifecycle",
+  "title": "Trial \u2192 past_due \u2192 suspended \u2192 active",
+  "when": "Set trial_ends in the past; run lifecycle; generate invoice with due_date 8 days ago; run lifecycle; mark paid",
+  "then": "past_due (POS owner banner visible); then suspended (new order 402); after paid \u2192 active, ordering works; each change audited",
+  "verify": "api"
+ },
+ {
+  "id": "C-10",
+  "area": "admin-ui",
+  "title": "Admin panel pages work and old pages are gone",
+  "when": "Visit Restaurants, detail, Unpaid, Settings \u2192 HazelPOS WhatsApp, Activity",
+  "then": "All load with no console errors; WhatsApp page shows a QR image after 'Link number' (QR may expire; just an <img> with data:image/png); nav has no installer/activation/setup/updates/usage; buttons \u226544px",
+  "verify": "playwright"
+ },
+ {
+  "id": "C-11",
+  "area": "isolation",
+  "title": "Vendor actions don't leak tenant data into each other",
+  "when": "Create a restaurant while another is active and has orders",
+  "then": "New restaurant has seed menu only, no other restaurant's orders/staff; slice A api suite still passes",
+  "verify": "api"
+ },
+ {
+  "id": "C-12",
+  "area": "print",
+  "title": "Browser print fallback prints only the bill",
+  "when": "Restaurant without a printer helper: receipt Print and delivery 'Print bill'; stub window.print and capture what is visible under print media",
+  "then": "Only the bill is visible in print media (restaurant name, order no, items, totals; delivery: customer, phone, address); app chrome hidden; no failing requests",
+  "verify": "playwright"
+ }
+]

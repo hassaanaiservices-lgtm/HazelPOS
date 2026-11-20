@@ -1,0 +1,402 @@
+[
+  {
+    "id": "A-01", "area": "admin", "title": "New client also creates the Main branch and shows its activation code",
+    "given": "Logged in to the admin app (http://localhost:4400) on an empty cloud",
+    "when": "Clients → '+ New client', fill Restaurant name 'Test Karahi', Owner phone '03001234567', Monthly fee 5000, Installation fee 15000, press 'Add client'",
+    "then": "The client page opens with an activation-code card already visible (HZ-XXXX-XXXX) for a branch named 'Main branch'; the Branches table lists exactly 1 branch",
+    "verify": "playwright",
+    "how": "page.getByRole('button',{name:'+ New client'}).click(); fill labels; click 'Add client'; expect(page.locator('.code')).toHaveText(/^HZ-[A-Z0-9]{4}-[A-Z0-9]{4}$/); expect(page.locator('table tbody tr')).toHaveCount(1) in the Branches card; API cross-check GET /api/owners → the new owner has branches.length === 1 and branches[0].name === 'Main branch'"
+  },
+  {
+    "id": "A-02", "area": "admin", "title": "Copy message for the client contains link, code and first-PIN line",
+    "given": "The activation-code card is visible (A-01)",
+    "when": "Press the button data-testid='copy-install-message'",
+    "then": "The clipboard text contains the installer URL (INSTALLER_URL or the default releases/latest link), the exact code shown, the words 'activation code', and a line about the first PIN",
+    "verify": "playwright",
+    "how": "context.grantPermissions(['clipboard-read','clipboard-write']); click [data-testid=copy-install-message]; const t = await page.evaluate(() => navigator.clipboard.readText()); expect(t).toContain(await page.locator('.code').innerText()); expect(t).toMatch(/https:\\/\\/github\\.com\\/hassaanaiservices-lgtm\\/-HazelPOS-releases\\/releases\\/latest|INSTALLER_URL value/); expect(t.toLowerCase()).toContain('pin')"
+  },
+  {
+    "id": "A-03", "area": "admin", "title": "GET /api/me returns installer_url",
+    "given": "Admin server running, logged in",
+    "when": "GET http://localhost:4400/api/me with the hz_admin cookie",
+    "then": "200, body has ok:true, user, cloud and installer_url (string starting with https://). With INSTALLER_URL set, it equals that value",
+    "verify": "api",
+    "how": "curl -b cookie.txt http://localhost:4400/api/me → 200; jq '.installer_url' non-empty; restart with INSTALLER_URL=https://example.test/setup.exe → installer_url === 'https://example.test/setup.exe'"
+  },
+  {
+    "id": "A-04", "area": "admin", "title": "New client form shows 4 fields; the rest under More",
+    "given": "Clients page",
+    "when": "Open '+ New client'",
+    "then": "Visible inputs: Restaurant name, Owner phone, Monthly fee, Installation fee. Email, dashboard password, plan, paid until, notes and installation-paid are hidden until 'More' is opened; submitting with only name + phone still works",
+    "verify": "playwright",
+    "how": "expect(modal.getByLabel(/Owner email/)).toBeHidden(); click modal.getByRole('button',{name:/More/}); expect(modal.getByLabel(/Owner email/)).toBeVisible(); create with name+phone only → toast 'Client added'"
+  },
+  {
+    "id": "A-05", "area": "admin", "title": "Branch page shows numbered steps and a checklist strip",
+    "given": "A branch exists",
+    "when": "Open #/branch/<id>",
+    "then": "Tabs in this order: '1 Details', '2 Menu', '3 Tables & delivery', '4 Staff & PINs', '5 Install', 'WhatsApp', 'Health'. No 'Overview' tab. [data-testid=branch-steps] is visible above the tabs and each item switches to its tab when clicked",
+    "verify": "playwright",
+    "how": "const tabs = await page.getByRole('tab').allInnerTexts(); expect(tabs.map(s=>s.trim())).toEqual(['1 Details','2 Menu','3 Tables & delivery','4 Staff & PINs','5 Install','WhatsApp','Health']); click branch-steps item containing 'Menu items' → tab '2 Menu' has aria-selected=true"
+  },
+  {
+    "id": "A-06", "area": "admin", "title": "'New activation code' is only in the Install step",
+    "given": "An activated branch (code_used_at set)",
+    "when": "Open the branch page on each tab",
+    "then": "No 'New activation code' button in the page header or on any tab except '5 Install'; pressing it there shows the confirm 'When it is used, the PC that is activated now stops working' before making a code",
+    "verify": "playwright",
+    "how": "for each tab except '5 Install': expect(page.getByRole('button',{name:/New activation code/})).toHaveCount(0); on '5 Install': click it → dialog text matches /stops working/; Cancel → no POST /api/branches/<id>/code request was sent (page.on('request'))"
+  },
+  {
+    "id": "A-07", "area": "admin", "title": "Tables and delivery areas share one tab and still save",
+    "given": "Branch page, tab '3 Tables & delivery'",
+    "when": "Add floor 'Ground', generate 4 tables, type one delivery area line 'Gulberg, 150, 800, 3000, 35', press both save buttons",
+    "then": "GET /api/branches/<id>/setup → setup.tables has 4 rows on floor 'Ground'; setup.zones[0] = {name:'Gulberg', fee:150, min_order:800, free_above:3000, eta_min:35}",
+    "verify": "playwright",
+    "how": "UI steps, then page.request.get('/api/branches/<id>/setup') and assert the JSON"
+  },
+  {
+    "id": "A-08", "area": "admin", "title": "Before activation: one Logins & PINs list with auto-filled first PINs",
+    "given": "A branch not activated yet, tab '4 Staff & PINs'",
+    "when": "Open the tab",
+    "then": "Exactly one card about PINs. Rows Owner / Cashier / Kitchen with PIN boxes pre-filled with 6-character letters/numbers, all different; help text says each person chooses their own PIN at first login. The synced 'Show / Set PIN' table is not shown",
+    "verify": "playwright",
+    "how": "expect(page.locator('.card h3', {hasText:/PIN/})).toHaveCount(1); const pins = await page.getByLabel('PIN').evaluateAll(els => els.map(e => e.value)); every pin matches /^[a-z0-9]{4,12}$/i and new Set(pins).size === pins.length; expect(page.getByRole('button',{name:'Show'})).toHaveCount(0)"
+  },
+  {
+    "id": "A-09", "area": "admin", "title": "After activation: only the synced PIN table; first-PIN editor behind a disclosure",
+    "given": "The branch was activated by a POS (A-20) and the POS has reported its users",
+    "when": "Open '4 Staff & PINs'",
+    "then": "The table with Show / Set PIN is visible; the first-PIN editor is hidden until 'Send first PINs again (for a new PC)' is opened",
+    "verify": "playwright",
+    "how": "expect(page.getByRole('button',{name:'Set PIN'}).first()).toBeVisible(); expect(page.getByLabel('PIN')).toHaveCount(0); click 'Send first PINs again' → PIN inputs appear"
+  },
+  {
+    "id": "A-10", "area": "admin", "title": "Role names read Owner / Cashier / Kitchen / Rider",
+    "given": "Branch Staff step (before and after activation)",
+    "when": "Read the role labels and the role select options",
+    "then": "No visible text 'Admin (owner)' or 'Owner (admin)'; options are Owner, Cashier, Kitchen, Rider; the value sent for Owner is still 'admin'",
+    "verify": "playwright",
+    "how": "expect(page.getByText(/Admin \\(owner\\)|Owner \\(admin\\)/)).toHaveCount(0); intercept POST /api/branches/<id>/setup and assert body.staff[0].role === 'admin'"
+  },
+  {
+    "id": "A-11", "area": "admin", "title": "Unpaid is a filter on Clients; old address still works",
+    "given": "One client with paid_until 10 days ago, one paid",
+    "when": "Open the sidebar, then open http://localhost:4400/#/unpaid",
+    "then": "Sidebar has no 'Unpaid' item. #/unpaid shows the Clients page with the 'Unpaid' chip selected and only the unpaid client; its row has 'Paid: +1 month', '+7 days' and 'Pause'",
+    "verify": "playwright",
+    "how": "expect(page.locator('nav[aria-label=Main] a', {hasText:'Unpaid'})).toHaveCount(0); goto '#/unpaid'; expect(page.getByRole('tab',{name:/Unpaid/})).toHaveAttribute('aria-selected','true'); rows count 1; buttons visible"
+  },
+  {
+    "id": "A-12", "area": "admin", "title": "Membership card: one main button; rare actions under More",
+    "given": "A client page",
+    "when": "Look at the Membership card",
+    "then": "Visible: one sentence with paid-until and the stop dates, 'Paid: +1 month', 'Pause' (or 'Resume'). '+3 months', 'Set date', the days editor and 'End membership' appear only after opening 'More'",
+    "verify": "playwright",
+    "how": "card = page.locator('.card',{hasText:'Membership'}); expect(card.getByRole('button',{name:'+3 months'})).toBeHidden(); click card 'More' → visible"
+  },
+  {
+    "id": "A-13", "area": "admin", "title": "Paid: +1 month still extends from the later of today and paid-until",
+    "given": "Client A paid_until = today+10, client B paid_until = today-5",
+    "when": "Press 'Paid: +1 month' on each",
+    "then": "A becomes (today+10)+1 month; B becomes today+1 month. Same as POST /api/vendor/owners/:id/extend {months:1}",
+    "verify": "api",
+    "how": "POST http://localhost:4400/api/owners/<A>/extend {months:1} (cookie + X-Hazel-Admin:1) → 200, paid_until === addMonths(A.paid_until,1); same for B → addMonths(today,1)"
+  },
+  {
+    "id": "A-14", "area": "admin", "title": "One word per idea: Pause / Paused / End membership",
+    "given": "Admin app and a suspended client",
+    "when": "Read the client pill, the buttons and the confirm dialog",
+    "then": "Pill text 'Paused'; buttons 'Pause' / 'Resume'; no visible 'Stop now', 'Stopped' or 'Suspend' anywhere in the admin app. API still sends {suspended:true}",
+    "verify": "playwright",
+    "how": "visit #/clients, #/client/<id>: expect(page.getByText(/Stop now|Stopped|Suspend/)).toHaveCount(0); intercept POST /api/owners/<id> and assert body.suspended === true"
+  },
+  {
+    "id": "A-15", "area": "admin", "title": "Clients page shows 3 numbers",
+    "given": "Clients page with data",
+    "when": "Count the KPI boxes",
+    "then": "Exactly 3: Clients, Need attention, Unpaid",
+    "verify": "playwright",
+    "how": "expect(page.locator('.kpi')).toHaveCount(3); texts contain 'Clients','Need attention','Unpaid'"
+  },
+  {
+    "id": "A-16", "area": "admin", "title": "Staff team role still cannot manage the team (regression SA2)",
+    "given": "Cloud with VENDOR_API_KEY",
+    "when": "GET and POST /api/vendor/team and /api/vendor/TEAM with X-Vendor-Role: staff",
+    "then": "403 'Only an owner can manage the team' for /api/vendor/team; /api/vendor/TEAM is 404 (case-sensitive routing), never 200",
+    "verify": "api",
+    "how": "curl -H 'Authorization: Bearer $VK' -H 'X-Vendor-Role: staff' http://localhost:4200/api/vendor/team → 403; POST same with body {email,password,role:'owner'} → 403; /api/vendor/TEAM → status !== 200"
+  },
+  {
+    "id": "A-17", "area": "admin", "title": "PIN reveal stays owner-only and logged (regression P1)",
+    "given": "An activated branch whose POS pushed its PINs",
+    "when": "POST /api/vendor/branches/<id>/pins/<uid>/reveal with X-Vendor-Role: staff, then with owner",
+    "then": "staff → 403 'Only an owner can see PINs'; owner → 200 {pin}; GET /api/vendor/audit shows the reveal by the owner and no PIN value in any detail",
+    "verify": "api",
+    "how": "curl both; then GET /api/vendor/audit?limit=20 and assert no detail contains the revealed pin"
+  },
+  {
+    "id": "A-18", "area": "installer", "title": "Activate screen asks only for the code when a cloud is built in",
+    "given": "POS started with HAZEL_LICENCE=1 HAZEL_CLOUD_URL=http://localhost:4200, fresh POS_DB",
+    "when": "Open http://localhost:4000",
+    "then": "Heading 'Activate HazelPOS', one input (activation code), no 'Use a different cloud address' button, no cloud address input",
+    "verify": "playwright",
+    "how": "expect(page.getByRole('heading',{name:'Activate HazelPOS'})).toBeVisible(); expect(page.getByRole('button',{name:/different cloud address/})).toHaveCount(0); expect(page.getByLabel('Cloud address')).toHaveCount(0)"
+  },
+  {
+    "id": "A-19", "area": "installer", "title": "Activate screen still shows the address field without a built-in cloud",
+    "given": "POS started with HAZEL_LICENCE=1 and no HAZEL_CLOUD_URL",
+    "when": "Open http://localhost:4000",
+    "then": "A 'Cloud address' input is shown (hand-run POS case)",
+    "verify": "playwright",
+    "how": "expect(page.getByLabel('Cloud address')).toBeVisible()"
+  },
+  {
+    "id": "A-20", "area": "installer", "title": "Activation with a prepared setup applies it and says which PIN to use",
+    "given": "Branch with setup: details name 'Test Karahi', a menu of 3 items, 2 tables, staff Owner/Cashier with first PINs; fresh POS",
+    "when": "Type the code (lowercase with spaces, e.g. 'hz abcd efgh') and press Activate",
+    "then": "POST /api/licence/activate → 200 with setup_applied_at set and first_login === 'setup_pins'; the login screen shows [data-testid=first-login-hint] mentioning 'the PIN HazelPOS gave you'; GET /api/settings name === 'Test Karahi'; admin Branch shows 'Setup on their PC' ticked",
+    "verify": "playwright",
+    "how": "fill code input with lower-case/spaced code; click 'Activate'; wait for response of /api/licence/activate; assert JSON; expect(page.getByTestId('first-login-hint')).toContainText(/gave you/i)"
+  },
+  {
+    "id": "A-21", "area": "installer", "title": "Activation without a setup clears the demo and hints the starting PIN",
+    "given": "Branch with no setup; fresh POS (demo data present)",
+    "when": "Activate with its code",
+    "then": "Response demo_cleared === true and first_login === 'starting_pin'; GET /api/settings name === 'My Restaurant'; menu empty; hint says the owner uses 1234 once",
+    "verify": "api",
+    "how": "POST http://localhost:4000/api/licence/activate {url:'',code} → 200; GET /api/settings; GET /api/menu?all=1 → products length 0"
+  },
+  {
+    "id": "A-22", "area": "installer", "title": "First-login hint disappears after the first successful login",
+    "given": "A-20 or A-21 done",
+    "when": "Log in successfully once, log out, reload",
+    "then": "[data-testid=first-login-hint] is not shown any more",
+    "verify": "playwright",
+    "how": "login → logout → reload → expect(page.getByTestId('first-login-hint')).toHaveCount(0)"
+  },
+  {
+    "id": "A-23", "area": "installer", "title": "Regression: activation code rules (one use, wrong, expired, unpaid)",
+    "given": "Cloud in vendor mode",
+    "when": "POST http://localhost:4200/api/activate with (a) a wrong code, (b) a valid code, (c) the same code again, (d) a code whose code_created_at is 15 days old (edit cloud.db in the temp DATA_DIR), (e) a valid code of a suspended client",
+    "then": "(a) 400, (b) 200 {key:'hz_…', branch}, (c) 400, (d) 410 'expired', (e) 402. 10 wrong codes from one address → 429",
+    "verify": "api",
+    "how": "curl -X POST -H 'Content-Type: application/json' -d '{\"code\":\"HZ-XXXX-XXXX\"}' http://localhost:4200/api/activate for each case; loop 10 wrong → last status 429"
+  },
+  {
+    "id": "A-24", "area": "installer", "title": "Regression: installed POS refuses another cloud address (SA4)",
+    "given": "POS with HAZEL_CLOUD_URL=http://localhost:4200, not activated",
+    "when": "POST /api/licence/activate {url:'http://evil.test', code:'HZ-AAAA-BBBB'}; after activation POST /api/cloud/connect {url:'http://evil.test', key:'x'} as owner",
+    "then": "activate → 502 'Could not activate: This HazelPOS can only be activated on HazelPOS Cloud'; cloud/connect → 400 'This HazelPOS connects to HazelPOS Cloud only'",
+    "verify": "api",
+    "how": "curl both; assert status and error text"
+  },
+  {
+    "id": "A-25", "area": "installer", "title": "Regression: nobody logs in before activation",
+    "given": "Fresh POS with HAZEL_LICENCE=1",
+    "when": "POST /api/login {pin:'1234'}",
+    "then": "403 {error:'Activate HazelPOS first'}; GET /api/licence → state 'activate'",
+    "verify": "api",
+    "how": "curl -X POST -d '{\"pin\":\"1234\"}' http://localhost:4000/api/login → 403"
+  },
+  {
+    "id": "A-26", "area": "pos", "title": "Regression: starting PINs and own-PIN rules",
+    "given": "An activated POS with no setup staff (A-21)",
+    "when": "(1) login {pin:'1111'} (cashier starting PIN); (2) login {pin:'1234'}; (3) with that token GET /api/orders; (4) POST /api/me/pin {pin:'2222'}; (5) POST /api/me/pin {pin:'ali2026'}; (6) GET /api/orders",
+    "then": "(1) 403 'This is a starting PIN…'; (2) 200 with user.must_change_pin true; (3) 403 code 'change_pin'; (4) 400 (weak PIN); (5) 200; (6) 200",
+    "verify": "api",
+    "how": "curl sequence with Authorization: Bearer <token>; assert statuses and codes"
+  },
+  {
+    "id": "A-27", "area": "pos", "title": "Regression: setup staff must choose their own PIN; PIN format",
+    "given": "Activated with setup staff (A-20)",
+    "when": "Log in with the cashier's first PIN; then try PIN 'ab' and 'abc!def' via POST /api/me/pin",
+    "then": "Login 200 with must_change_pin true; 'ab' and 'abc!def' sent straight to the API → 400 'PIN must be 4 to 12 letters or numbers'; 5 wrong logins from one device → 429",
+    "verify": "api",
+    "how": "curl /api/login with first PIN; POST /api/me/pin bad values; loop 5 wrong PINs → 6th is 429"
+  },
+  {
+    "id": "A-28", "area": "pos", "title": "Settings has 6 tabs in the new order",
+    "given": "Owner logged in to the POS (installed mode)",
+    "when": "Open Settings",
+    "then": "Tabs exactly: Restaurant, Staff & PINs, WhatsApp, Payments & tax, HazelPOS account, Activity log (ids #tab-<name>)",
+    "verify": "playwright",
+    "how": "expect(await page.locator('.tabs button').allInnerTexts()).toEqual(['Restaurant','Staff & PINs','WhatsApp','Payments & tax','HazelPOS account','Activity log'])"
+  },
+  {
+    "id": "A-29", "area": "pos", "title": "HazelPOS account tab shows membership, updates and backup",
+    "given": "Activated POS, membership paid until a known date",
+    "when": "Open Settings → HazelPOS account",
+    "then": "A Membership card shows 'Paid until <paid_until>' and the bot / new-order stop dates from GET /api/licence; the Updates card ('Check for updates') and cloud status ('Sync now', 'Backup now') are on the same tab; 'Restore from cloud backup' is inside a closed 'Danger zone' disclosure",
+    "verify": "playwright",
+    "how": "click #tab-HazelPOS\\ account; const lic = await (await page.request.get('/api/licence')).json(); expect(page.getByText(lic.paid_until)).toBeVisible(); expect(page.getByRole('button',{name:'Restore from cloud backup'})).toBeHidden(); open 'Danger zone' → visible"
+  },
+  {
+    "id": "A-30", "area": "pos", "title": "No dead Connect/Disconnect on an installed POS",
+    "given": "Activated POS (HAZEL_LICENCE=1)",
+    "when": "Open Settings → HazelPOS account",
+    "then": "No 'Disconnect' button, no 'Branch key' input, no 'Connect' form. Server still answers POST /api/cloud/disconnect with 400",
+    "verify": "playwright",
+    "how": "expect(page.getByRole('button',{name:'Disconnect'})).toHaveCount(0); expect(page.getByLabel('Branch key')).toHaveCount(0); API: POST /api/cloud/disconnect as owner → 400"
+  },
+  {
+    "id": "A-31", "area": "pos", "title": "Dev/hand-run POS keeps the Connect form",
+    "given": "POS without HAZEL_LICENCE, not connected to a cloud",
+    "when": "Open Settings → HazelPOS account",
+    "then": "The 'Connect to HazelPOS Cloud' form with 'Cloud address' and 'Branch key' is shown",
+    "verify": "playwright",
+    "how": "expect(page.getByLabel('Branch key')).toBeVisible()"
+  },
+  {
+    "id": "A-32", "area": "pos", "title": "WhatsApp settings tab holds bot behaviour, FAQ and owner alerts",
+    "given": "Owner in Settings",
+    "when": "Open the WhatsApp tab",
+    "then": "Cards 'How the bot writes', the questions-and-answers card and the low-stock alerts card are all on this tab; saving the alerts still calls POST /api/settings",
+    "verify": "playwright",
+    "how": "click #tab-WhatsApp; expect cards visible by heading text; change an alert field, save, wait for POST /api/settings 200"
+  },
+  {
+    "id": "A-33", "area": "pos", "title": "Sidebar 'Staff' renamed to 'Salaries'",
+    "given": "Owner logged in",
+    "when": "Read the sidebar",
+    "then": "An item 'Salaries' opens the payroll screen; no sidebar item is called 'Staff'; Settings tab 'Staff & PINs' unchanged",
+    "verify": "playwright",
+    "how": "expect(page.locator('nav').getByText('Salaries')).toBeVisible(); expect(page.locator('nav').getByText(/^Staff$/)).toHaveCount(0)"
+  },
+  {
+    "id": "A-34", "area": "pos", "title": "Connect a tablet from inside the POS",
+    "given": "Owner in Settings → Restaurant",
+    "when": "Press 'Connect a tablet or kitchen screen'",
+    "then": "A dialog shows at least one http://<LAN IP>:<port> address taken from GET /api/qr-info ips and the current port, with a QR image",
+    "verify": "playwright",
+    "how": "const info = await (await page.request.get('/api/qr-info')).json(); click button; for info.ips[0] expect(dialog).toContainText(`http://${info.ips[0]}:4000`); expect(dialog.locator('img, canvas')).toHaveCount(>=1). If the test machine has no LAN IP, expect the text 'not on a network'"
+  },
+  {
+    "id": "A-35", "area": "pos", "title": "Licence messages use the glossary words",
+    "given": "Activated POS whose client is suspended in the admin app",
+    "when": "POST /api/licence/check, then GET /api/licence",
+    "then": "state 'locked'; message contains 'paused' and 'membership' and not 'licence', 'suspended' or 'Stopped'; a cancelled client's message contains 'ended'",
+    "verify": "api",
+    "how": "suspend via admin API; curl -X POST http://localhost:4000/api/licence/check; GET /api/licence; regex checks on .message"
+  },
+  {
+    "id": "A-36", "area": "pos", "title": "Regression: offline billing and amounts",
+    "given": "Activated POS, owner logged in, then the cloud process stopped",
+    "when": "POST /api/orders {type:'takeaway', items:[{product_id:<id>, qty:2}]}, then POST /api/orders/<id>/pay {method:'cash', paid:<total>}",
+    "then": "Both 200; order total equals 2 × the product's price plus tax per the restaurant tax rate (same as before the change, compare with git stash build); GET /api/licence state unchanged (not 'locked'); GET /api/cloud/status shows the order pending upload",
+    "verify": "api",
+    "how": "kill cloud; curl the two calls; compare total to a run on the pre-change commit with the same POS_DB copy; restart cloud → pending_orders returns to 0 within 2 minutes"
+  },
+  {
+    "id": "A-37", "area": "pos", "title": "Regression: locked membership stops new orders only",
+    "given": "Client paid_until 8 days ago (default days), POS checked",
+    "when": "POST /api/orders (new), POST /api/orders/<open id>/pay, GET /api/reports…",
+    "then": "New order → 402 with the membership message; paying an existing open order → 200; reports → 200",
+    "verify": "api",
+    "how": "set paid_until via admin API, POST /api/licence/check on POS, then the three calls"
+  },
+  {
+    "id": "A-38", "area": "cloud", "title": "Regression: setup reaches the POS only before the first order",
+    "given": "Activated POS with 1 paid order",
+    "when": "Change the menu in the admin app (save setup), POST /api/licence/check on the POS",
+    "then": "POS menu unchanged; GET /api/vendor/branches/<id>/setup summary.error or applied_at unchanged; no products replaced",
+    "verify": "api",
+    "how": "count GET /api/menu?all=1 products before/after; assert equal"
+  },
+  {
+    "id": "A-39", "area": "cloud", "title": "Regression: staff PINs leave the cloud after the setup is applied",
+    "given": "A-20 done",
+    "when": "GET /api/vendor/branches/<id>/setup",
+    "then": "setup.staff rows have pin_applied:true and no 'pin' field",
+    "verify": "api",
+    "how": "curl with vendor key; jq '.setup.staff[] | has(\"pin\")' all false"
+  },
+  {
+    "id": "A-40", "area": "cloud", "title": "Regression: two branches are isolated",
+    "given": "Two clients, each activated on its own POS (ports 4000 and 4001) with the same PINs and order numbers",
+    "when": "With branch A's key call GET /api/setup, GET /api/sync/wa-mode, GET /api/sync/wa/chats, GET /api/sync/wa-orders; vendor GET /api/vendor/branches/<B>/setup",
+    "then": "Branch A only ever receives A's data (restaurant name A, A's chats); no route accepts a branch id from the caller for branch-key routes; the vendor view of B shows B's name",
+    "verify": "api",
+    "how": "curl -H 'Authorization: Bearer <keyA>' each route; assert names; repeat with keyB; cross-check no response for A contains B's restaurant name"
+  },
+  {
+    "id": "A-41", "area": "whatsapp", "title": "New branches get the cloud bot switched on",
+    "given": "Admin creates a client (A-01)",
+    "when": "GET /api/vendor/branches/<new id>/whatsapp",
+    "then": "200 with enabled:true and status not 'off' (e.g. 'disconnected'); no WhatsApp connection is attempted until a QR is requested",
+    "verify": "api",
+    "how": "curl with vendor key; assert enabled === true; cloud log shows no '[wa <id>]' connect attempt before /connect"
+  },
+  {
+    "id": "A-42", "area": "whatsapp", "title": "Existing branches keep their WhatsApp mode",
+    "given": "A cloud.db from before the change with branch X wa_cloud.enabled=0 and branch Y with no wa_cloud row",
+    "when": "Start the new cloud; GET /api/vendor/branches/<X>/whatsapp and <Y>",
+    "then": "Both enabled:false (no migration turns them on)",
+    "verify": "api",
+    "how": "copy a pre-change DATA_DIR, start, curl both"
+  },
+  {
+    "id": "A-43", "area": "whatsapp", "title": "Regression: cloud WhatsApp routes and quiet POS bot",
+    "given": "Branch with cloud bot on, its POS activated and online",
+    "when": "GET /api/sync/wa-mode (branch key); wait 2 minutes; GET /api/whatsapp/status on the POS",
+    "then": "wa-mode → 200 {cloud:true, knowledge_hash:<64 hex after the POS sent its menu>}; POS status cloud_bot:true; GET /api/vendor/branches/<id>/whatsapp menu_items > 0. With the bot switched off: GET /api/sync/wa/status → 409 'switched off' and the POS status cloud_bot:false within 2 minutes",
+    "verify": "api",
+    "how": "curl sequence; toggle via POST /api/vendor/branches/<id>/whatsapp/enable {enabled:false}"
+  },
+  {
+    "id": "A-44", "area": "whatsapp", "title": "Bot replies are on by default once the cloud bot is on",
+    "given": "A new branch (cloud bot on by default)",
+    "when": "GET /api/vendor/branches/<id>/whatsapp after enable (the store exists even before linking)",
+    "then": "assistant:true unless someone set it off; after POST .../whatsapp/assistant {enabled:false} it stays false across a cloud restart",
+    "verify": "api",
+    "how": "curl; restart cloud; curl again"
+  },
+  {
+    "id": "A-45", "area": "whatsapp", "title": "Regression: unpaid stops the cloud bot",
+    "given": "Cloud bot on, menu received, client paid_until 4 days ago (default 3 bot days)",
+    "when": "Feed one incoming message through the test hook (require('cloud/wa-host').live.get(id).assistant.quietReason(chatId))",
+    "then": "quietReason returns 'HazelPOS membership not paid: assistant paused'",
+    "verify": "api",
+    "how": "Node script against the running cloud module (as in desktop/dist/shots e2e suites) or a unit script using the exported live map"
+  },
+  {
+    "id": "A-46", "area": "whatsapp", "title": "One link text for the client; advanced switch in the admin app",
+    "given": "POS WhatsApp screen, not linked, cloud bot on; admin Branch → WhatsApp",
+    "when": "Read both screens",
+    "then": "POS link screen says customers get answers even when this computer is off and shows 'Link WhatsApp'. Admin tab shows one status sentence and one main button; the on/off switch sits under 'Advanced' and its confirm says the restaurant must scan the QR again",
+    "verify": "playwright",
+    "how": "POS: expect(page.locator('#wa-link-btn')).toBeVisible(); expect(page.getByText(/computer is off/)).toBeVisible(). Admin: expect(page.getByRole('button',{name:/Switch (on|off)/})).toBeHidden() until 'Advanced' is opened; clicking it shows dialog /scan.*again/i"
+  },
+  {
+    "id": "A-47", "area": "whatsapp", "title": "POS header says 'Bot replies: on/off'",
+    "given": "Linked WhatsApp inbox (local mode with a test connection, or cloud mode)",
+    "when": "Read #wa-assistant",
+    "then": "Text is 'Bot replies: on' or 'Bot replies: off'; clicking calls POST /api/whatsapp/assistant",
+    "verify": "playwright",
+    "how": "expect(page.locator('#wa-assistant')).toHaveText(/^Bot replies: (on|off)$/)"
+  },
+  {
+    "id": "A-48", "area": "docs", "title": "Vendor doc and client guide exist and agree with the product",
+    "given": "Repository",
+    "when": "Open docs/HOW-IT-WORKS.md and docs/CLIENT-GUIDE.md",
+    "then": "HOW-IT-WORKS has the pieces table, the diagram and the 'what still works when' table; CLIENT-GUIDE has the English and Roman Urdu text; both say bot stops after 3 days and new orders after 7 by default, codes work once for 14 days, PINs are 4 to 12 letters or numbers",
+    "verify": "manual",
+    "how": "grep -c '3 days' and '7 days' and '14 days' in both files ≥ 1; read for jargon (no 'licence', 'branch key', 'Baileys' in CLIENT-GUIDE)"
+  },
+  {
+    "id": "A-49", "area": "docs", "title": "READMEs point to the single doc",
+    "given": "Repository",
+    "when": "Open admin/README.md and cloud/README.md",
+    "then": "admin/README 'Onboarding a restaurant' links to docs/HOW-IT-WORKS.md; cloud/README 'Connect a branch' says it is only for a self-run cloud without the admin app",
+    "verify": "manual",
+    "how": "grep 'HOW-IT-WORKS' admin/README.md; grep -i 'self-run' cloud/README.md"
+  },
+  {
+    "id": "A-50", "area": "pos", "title": "Lint and builds stay green",
+    "given": "All changes applied",
+    "when": "npm --prefix client run lint; npm --prefix client run build; npm --prefix admin run build; node rag/scripts/test-guard.js; node rag/scripts/test-address.js",
+    "then": "All exit 0",
+    "verify": "manual",
+    "how": "Run each (with ELECTRON_RUN_AS_NODE=1 desktop/node_modules/electron/dist/electron for node scripts if node is not on PATH); exit codes 0"
+  }
+]

@@ -30,7 +30,7 @@ function withinHours(hours, d = new Date()) {
 
 // cleanup(text): voice-note cleanup against the menu (the cloud passes one that uses the restaurant's pushed menu)
 // stt (optional): speech-to-text for voice notes ({ transcribe(file) }); sttCfg: config.stt
-// allowed: the membership allows the bot (server/licence.js aiAllowed); unpaid past the grace days = quiet
+// allowed: the restaurant's plan and status allow the bot (suspended or cancelled = quiet)
 // "Where is my order / how long / is the rider coming?" in English, Roman Urdu or Urdu. Only acted on when this chat has a
 // delivery order today (deliveryStatus returns text), so an ordinary "where are you located?" still goes to the AI.
 const WHERE_RE = /\b(where|kahan|kaha+n?|kidhar|kidar|kitni der|kitna time|kab tak|kab (?:aa|pohnch|pahunch)|track|location|rider|late|der ho|status|pohncha|pahuncha)\b|کہاں|کدھر|کتنی دیر|کب|رائیڈر|لوکیشن/i;

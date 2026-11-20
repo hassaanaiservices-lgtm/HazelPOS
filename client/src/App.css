@@ -52,7 +52,7 @@
   --pop: 3px 3px 0 var(--outline);
   --pop-lg: 5px 5px 0 var(--outline);
   --tint: 16%;
-  --control: 40px; --control-sm: 32px;
+  --control: 40px; --control-sm: 32px; --touch: 44px;
   --sidebar: 232px;
   --dur: 160ms;
   --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
@@ -217,7 +217,7 @@ main > section { flex: 1; min-height: 0; }
 .tabs { display: flex; gap: 4px; padding: 4px; background: var(--surface); border: var(--bw) solid var(--outline); border-radius: var(--r-md);
   overflow-x: auto; max-width: 100%; scrollbar-width: none; }
 .tabs::-webkit-scrollbar { display: none; }
-.tabs button { flex: none; min-height: 34px; padding: 0 16px; border-radius: var(--r-sm); color: var(--text-2); font-weight: 600; font-size: var(--fs-sm); text-transform: capitalize; white-space: nowrap; }
+.tabs button { flex: none; min-height: var(--touch); padding: 0 16px; border-radius: var(--r-sm); color: var(--text-2); font-weight: 600; font-size: var(--fs-sm); white-space: nowrap; }
 .tabs button:hover { color: var(--text); background: var(--surface-2); }
 .tabs button.active { background: var(--surface-3); color: var(--text); box-shadow: inset 0 -2px 0 var(--accent); }
 .card { background: var(--surface); border: var(--bw) solid var(--outline); border-radius: var(--r-md); padding: 16px 20px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
@@ -837,7 +837,11 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px
 }
 
 /* ---------- Print ---------- */
+#print-bill { display: none; } /* the bill printed by the browser's print dialog (Bill.jsx printOrder): only on paper */
 @media print {
+  body:has(#print-bill) > *:not(#print-bill) { display: none !important; }
+  #print-bill { display: block; position: static; width: 80mm; margin: 0; }
+  #print-bill, #print-bill * { visibility: visible; }
   body * { visibility: hidden; }
   #receipt, #receipt * { visibility: visible; }
   #receipt { position: absolute; left: 0; top: 0; width: 80mm; }
@@ -965,3 +969,29 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px
 .k-wait-to { font-size: var(--fs-sm); color: var(--ok); font-weight: 600; }
 .k-wait .link { align-self: flex-start; min-height: 32px; padding: 0; font-size: var(--fs-sm); background: none; border: 0; box-shadow: none; }
 @media (max-width: 900px) { .kitchen.kitchen-2 { grid-template-columns: 1fr; height: auto; } }
+
+/* ---------- Sign-in, till lock screen, devices ---------- */
+.staff-list { display: flex; flex-direction: column; gap: 8px; width: 100%; }
+.staff-btn { min-height: 52px; display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; }
+.login-form label { display: flex; flex-direction: column; gap: 4px; text-align: left; }
+.device-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; justify-content: space-between; padding: 8px 0; border-top: 1px solid var(--line); }
+.login-card .link { min-height: 44px; }
+/* every button on the sign-in, till lock and PIN screens is a touch target */
+.login-card button, .login-card button.ghost, .login-card button.primary, .login-card .pin-field button.sm { min-height: var(--touch, 44px); }
+.side-nav button { min-height: var(--touch); }
+.theme-switch button, .side-foot .ghost.sm, .side-foot button { min-height: var(--touch); }
+#logout, .tour-help { min-height: var(--touch); }
+/* every button is a touch target, including the .sm variants */
+button, .primary, .ghost, .danger-btn, button.sm, .primary.sm, .ghost.sm, .admin-row > button { min-height: var(--touch); }
+
+/* Owner sidebar: 11 links plus the footer fit a 1280×800 screen without shrinking any 44px target */
+.sidebar { padding: 12px; gap: 2px; }
+.sidebar .brand { padding: 2px 8px 8px; }
+.side-nav { gap: 2px; }
+.side-foot { padding-top: 8px; gap: 8px; }
+.theme-switch { padding: 2px; }
+/* chips and labels next to names are not buttons: never a touch-sized round blob */
+.pill, .count, .cod-tag, .ok-tag, .low-pill { min-height: 0; }
+.staff-row .staff-who { flex: 1; min-width: 160px; }
+.staff-form { display: flex; flex-direction: column; gap: 12px; padding: 12px 16px; background: var(--surface-2); border-radius: var(--r-sm); }
+.billing-banner { margin: 0; }

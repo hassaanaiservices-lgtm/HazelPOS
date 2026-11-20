@@ -1,3 +1,5 @@
+Deprecated: replaced by the online server (docs/online/PLAN.md). Kept for reference until launch.
+
 # HazelPOS Cloud
 
 The owner's view of every branch. Each branch keeps running the normal POS on its own PC and LAN (billing works with no internet). When the branch is online, it pushes data here every minute and uploads a database backup once a day.
@@ -54,14 +56,14 @@ Customers, menus and settings stay on the branch. Re-sending is safe because the
 With `VENDOR_API_KEY` set, this cloud enforces memberships and runs the AI proxy. You manage clients from the separate
 **HazelPOS Admin** app (`admin/`, see [admin/README.md](../admin/README.md)), which talks to this cloud with that key.
 The installed POS checks its membership every 3 hours and remembers the last answer, so a dropped internet connection
-doesn't stop billing. The rules (offline days, grace days) are in `server/licence.js` and listed in `RISKS.md` (L1–L3).
+doesn't stop billing. The rules (offline days, grace days) are in `server/licence.js` and listed in [`docs/RISKS.md`](../docs/RISKS.md) (L1–L3).
 
 ## Deploy on Railway (your vendor cloud)
 
 1. In the Railway project: **New → GitHub repo → HazelPOS**, as a new service next to the demo. Leave the root directory as the repo root (the menu upload uses `server/menu-import.js`). Build command `npm --prefix cloud ci && npm --prefix server ci --omit=dev` (the second part is for the WhatsApp bot hosted on the cloud, `cloud/wa-host.js`; without it the cloud runs fine and the cloud bot is simply not available), start command `node cloud/index.js`.
-2. **Add a volume** to this service, mounted at `/data`. Do this before adding any restaurant: without it, every redeploy wipes `cloud.db` (memberships, keys, backups). See RISKS.md A3.
+2. **Add a volume** to this service, mounted at `/data`. Do this before adding any restaurant: without it, every redeploy wipes `cloud.db` (memberships, keys, backups). See docs/RISKS.md A3.
 3. Variables: `DATA_DIR=/data`, `VENDOR_API_KEY=<openssl rand -hex 32>`, `DEEPSEEK_API_KEY=…`, `GROQ_API_KEY=…`. Railway sets `PORT` itself.
-4. Settings → Networking → **Generate domain** (HTTPS comes with it). Pick a region close to Pakistan (RISKS.md A1).
+4. Settings → Networking → **Generate domain** (HTTPS comes with it). Pick a region close to Pakistan (docs/RISKS.md A1).
 5. Deploy the admin app as a second service (admin/README.md) with the same `VENDOR_API_KEY`.
 6. Put the domain and the licence public key in `desktop/package.json` → `"hazel": { "cloudUrl": "https://<domain>", "licencePublicKey": "<the text from https://<domain>/api/licence/public-key>" }` and build the installers. Restaurants then only type their activation code, and the POS checks every licence answer is really from your cloud. The private key is in `DATA_DIR/licence-key.pem` (or set `LICENCE_PRIVATE_KEY`): keep it on the volume, never share it.
 
@@ -78,4 +80,4 @@ The POS pushes its riders and today's delivery board to `POST /api/sync/riders` 
 | `/r/<token>` | a rider's phone | Accept ready orders, navigate, call, mark delivered, share location while "On duty". The token is the secret the owner gets from Riders → Phone link in the POS. |
 | `/track/<token>` | the customer | The order's status and, while on the way, the rider on a map. Sent by WhatsApp when the order leaves. Expires with the next day's board. |
 
-Rider positions and the day's trail live in `c_riders` / `rider_trail` (24 h). No customer phone numbers reach these pages: the rider sees the phone of an order only after accepting it; the tracking page never shows one. Map tiles come from OpenStreetMap (RISKS R2).
+Rider positions and the day's trail live in `c_riders` / `rider_trail` (24 h). No customer phone numbers reach these pages: the rider sees the phone of an order only after accepting it; the tracking page never shows one. Map tiles come from OpenStreetMap (docs/RISKS.md R2).

@@ -37,3 +37,11 @@ server/whatsapp/media/
 # Python caches (tools/)
 __pycache__/
 graphify-out/
+
+# Online: every restaurant's database (server/tenancy.js)
+server/data/
+
+# Online server data (control.db, every restaurant) and the demo seed output
+server/data/
+demo/template/
+demo/run-data/

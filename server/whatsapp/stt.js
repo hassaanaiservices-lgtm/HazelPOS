@@ -7,7 +7,7 @@ const path = require('path');
 const ENV = path.join(__dirname, '..', '..', '.env');
 if (!process.env.GROQ_API_KEY && fs.existsSync(ENV)) process.loadEnvFile(ENV);
 const { cloudLink, viaCloud } = require('../../rag/src/generation/ai-route');
-const NO_KEY = 'No Groq key: set GROQ_API_KEY in .env, or connect HazelPOS Cloud (Settings → Cloud)';
+const NO_KEY = 'No Groq key: set GROQ_API_KEY in .env, or connect HazelPOS Cloud (Settings → HazelPOS account)';
 const haveKey = () => !!(process.env.GROQ_API_KEY || cloudLink());
 
 const URL = 'https://api.groq.com/openai/v1/audio/transcriptions';

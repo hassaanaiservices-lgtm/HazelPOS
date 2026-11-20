@@ -111,7 +111,7 @@ module.exports = function waConnection(store, hooks = {}) {
   }
 
   async function connect() {
-    if (OFF) throw new Error('WhatsApp is turned off on this server (WHATSAPP=off).');
+    if (OFF && !hooks.allowWhenOff) throw new Error('WhatsApp is turned off on this server (WHATSAPP=off).');
     wanted = true;
     if (sock) return;
     clearTimeout(retryTimer);
@@ -198,7 +198,7 @@ module.exports = function waConnection(store, hooks = {}) {
 
   // Close the connection but stay linked (the cloud stops a restaurant's bot; the login is kept for later)
   function stop() {
-    wanted = false; clearTimeout(retryTimer);
+    clearInterval(cleaner); wanted = false; clearTimeout(retryTimer);
     const s = sock; sock = null; goOffline(); status = 'disconnected'; qr = null;
     try { s?.end(undefined); } catch { /* already closed */ }
   }

@@ -1,7 +1,7 @@
 // Where the AI calls go. With DEEPSEEK_API_KEY / GROQ_API_KEY in .env (your own PC) they go straight to DeepSeek and
 // Groq. Without them (the installed app at a restaurant) they go through HazelPOS Cloud with this branch's key, so the
 // AI keys stay on your server and each restaurant's usage is counted there.
-// server/cloud-sync.js calls setCloudLink() at start, on connect and on disconnect.
+// setCloudLink() is kept for the old installed app; nothing calls it in the online version.
 let link = { url: '', key: '' };
 
 const setCloudLink = (url, key) => { link = { url: String(url || '').replace(/\/+$/, ''), key: String(key || '') }; };

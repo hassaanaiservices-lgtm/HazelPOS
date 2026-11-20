@@ -1,462 +1,29 @@
 // HazelPOS backend: Express + Node's built-in SQLite (Node 22.5+)
+// Many restaurants on one server: `db` is the CURRENT restaurant's database (server/tenancy.js decides per request, from the
+// X-Device or X-Tenant header). The schema, migrations and seed data live in tenant-init.js and run when a database is opened.
 const express = require('express');
 const path = require('path');
-const { DatabaseSync } = require('node:sqlite');
-
-// The last errors, so the health report to your admin app can show what went wrong at a restaurant (server/licence.js)
-const recentErrors = [];
-const logError = console.error;
-console.error = (...a) => {
-  if (/ExperimentalWarning|--trace-warnings/.test(String(a[0]))) return logError(...a); // Node's own notices, not problems
-  recentErrors.push({ at: new Date().toISOString(), text: a.map(x => x instanceof Error ? x.stack || x.message : typeof x === 'string' ? x : JSON.stringify(x)).join(' ').slice(0, 1000) });
-  if (recentErrors.length > 30) recentErrors.shift();
-  logError(...a);
-};
-
-const db = new DatabaseSync(process.env.POS_DB || path.join(__dirname, 'pos.db')); // POS_DB: run against another database (testing)
-db.exec('PRAGMA busy_timeout = 5000');
-// DEMO=1: the free demo. The login screen offers the three roles without PINs (see client/src/Login.jsx).
-const DEMO = process.env.DEMO === '1'; // another writer (backup, a script) briefly holds the file: wait instead of crashing
-db.exec(`
-CREATE TABLE IF NOT EXISTS categories (id INTEGER PRIMARY KEY, name TEXT, color TEXT);
-CREATE TABLE IF NOT EXISTS products (id INTEGER PRIMARY KEY, name TEXT, price REAL, category_id INTEGER, emoji TEXT, active INTEGER DEFAULT 1);
-CREATE TABLE IF NOT EXISTS tables_ (id INTEGER PRIMARY KEY, name TEXT, seats INTEGER);
-CREATE TABLE IF NOT EXISTS orders (
-  id INTEGER PRIMARY KEY, type TEXT, table_id INTEGER, customer TEXT, phone TEXT, address TEXT,
-  status TEXT DEFAULT 'open', subtotal REAL, discount REAL, tax REAL, total REAL,
-  payment_method TEXT, paid REAL, change_ REAL, created_at TEXT, paid_at TEXT,
-  kitchen_status TEXT, kitchen_at TEXT, user_name TEXT);
-CREATE TABLE IF NOT EXISTS order_items (id INTEGER PRIMARY KEY, order_id INTEGER, product_id INTEGER, name TEXT, price REAL, qty INTEGER, note TEXT, sent INTEGER DEFAULT 0);
-CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT);
--- What the WhatsApp assistant may answer about the restaurant (Settings → WhatsApp bot → Questions and answers)
-CREATE TABLE IF NOT EXISTS faq (id INTEGER PRIMARY KEY, question TEXT NOT NULL, answer TEXT DEFAULT '', sort INTEGER DEFAULT 0);
-CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, name TEXT, pin TEXT UNIQUE, role TEXT);
-
-CREATE TABLE IF NOT EXISTS expenses (
-  id INTEGER PRIMARY KEY, title TEXT, category TEXT, amount REAL, payment_method TEXT, date TEXT, user_name TEXT);
-CREATE TABLE IF NOT EXISTS register_sessions (
-  id INTEGER PRIMARY KEY, opened_at TEXT, closed_at TEXT, opened_by TEXT, closed_by TEXT,
-  opening_cash REAL DEFAULT 0, closing_cash REAL DEFAULT 0, expected_cash REAL DEFAULT 0,
-  difference REAL DEFAULT 0, status TEXT DEFAULT 'open', notes TEXT);
-CREATE TABLE IF NOT EXISTS cash_moves (
-  id INTEGER PRIMARY KEY, session_id INTEGER, type TEXT, amount REAL, reason TEXT, user_name TEXT, created_at TEXT);
-CREATE TABLE IF NOT EXISTS floors (
-  id INTEGER PRIMARY KEY, name TEXT UNIQUE, icon TEXT DEFAULT '🍽️', color TEXT DEFAULT '#ff9f43');
-CREATE TABLE IF NOT EXISTS qr_requests (
-  id INTEGER PRIMARY KEY, table_id INTEGER, items TEXT, customer TEXT, note TEXT,
-  status TEXT DEFAULT 'pending', created_at TEXT, handled_at TEXT, handled_by TEXT, order_id INTEGER);
-CREATE TABLE IF NOT EXISTS ingredients (id INTEGER PRIMARY KEY, name TEXT, unit TEXT DEFAULT 'kg', stock REAL DEFAULT 0, low_level REAL DEFAULT 0, cost REAL DEFAULT 0);
-CREATE TABLE IF NOT EXISTS recipes (id INTEGER PRIMARY KEY, product_id INTEGER, size TEXT DEFAULT '', ingredient_id INTEGER, qty REAL);
-CREATE TABLE IF NOT EXISTS stock_moves (id INTEGER PRIMARY KEY, ingredient_id INTEGER, qty REAL, reason TEXT, ref TEXT, note TEXT, user_name TEXT, at TEXT);
-CREATE TABLE IF NOT EXISTS suppliers (id INTEGER PRIMARY KEY, name TEXT, phone TEXT, note TEXT);
-CREATE TABLE IF NOT EXISTS supplier_ledger (id INTEGER PRIMARY KEY, supplier_id INTEGER, date TEXT, type TEXT, amount REAL, note TEXT, user_name TEXT, at TEXT);
-CREATE TABLE IF NOT EXISTS employees (id INTEGER PRIMARY KEY, name TEXT, phone TEXT, job TEXT, salary REAL DEFAULT 0, active INTEGER DEFAULT 1, joined TEXT);
-CREATE TABLE IF NOT EXISTS payroll (id INTEGER PRIMARY KEY, employee_id INTEGER, month TEXT, date TEXT, type TEXT, amount REAL, note TEXT, user_name TEXT, at TEXT);
-CREATE TABLE IF NOT EXISTS customers (id INTEGER PRIMARY KEY, name TEXT, phone TEXT UNIQUE, address TEXT, points INTEGER DEFAULT 0, created_at TEXT);
-CREATE TABLE IF NOT EXISTS promos (id INTEGER PRIMARY KEY, code TEXT UNIQUE, type TEXT DEFAULT 'percent', value REAL, min_order REAL DEFAULT 0,
-  max_discount REAL DEFAULT 0, uses_limit INTEGER DEFAULT 0, used INTEGER DEFAULT 0, expires TEXT, active INTEGER DEFAULT 1);
-CREATE TABLE IF NOT EXISTS delivery_zones (id INTEGER PRIMARY KEY, name TEXT, fee REAL DEFAULT 0, min_order REAL DEFAULT 0, free_above REAL DEFAULT 0, eta_min INTEGER DEFAULT 45, active INTEGER DEFAULT 1);
-CREATE TABLE IF NOT EXISTS secrets (key TEXT PRIMARY KEY, value TEXT); -- API tokens: never returned by /api/settings
-CREATE TABLE IF NOT EXISTS sessions (token TEXT PRIMARY KEY, user_id INTEGER, created_at TEXT, last_seen TEXT);
-CREATE TABLE IF NOT EXISTS audit_log (
-  id INTEGER PRIMARY KEY, at TEXT, user_id INTEGER, user_name TEXT, role TEXT, ip TEXT, action TEXT, status INTEGER, detail TEXT);
-`);
-
-// Migrations for columns
-for (const sql of [
-  'ALTER TABLE products ADD COLUMN active INTEGER DEFAULT 1',
-  'ALTER TABLE products ADD COLUMN subtitle TEXT',
-  'ALTER TABLE products ADD COLUMN description TEXT',
-  'ALTER TABLE products ADD COLUMN ingredients TEXT',
-  'ALTER TABLE products ADD COLUMN sizes TEXT',
-  'ALTER TABLE orders ADD COLUMN kitchen_status TEXT',
-  'ALTER TABLE orders ADD COLUMN kitchen_at TEXT',
-  'ALTER TABLE orders ADD COLUMN user_name TEXT',
-  'ALTER TABLE order_items ADD COLUMN sent INTEGER DEFAULT 0',
-  "ALTER TABLE tables_ ADD COLUMN floor TEXT DEFAULT 'Main Dining'",
-  "ALTER TABLE tables_ ADD COLUMN shape TEXT DEFAULT 'square'",
-  'ALTER TABLE tables_ ADD COLUMN qr_token TEXT',
-  'ALTER TABLE products ADD COLUMN modifiers TEXT',
-  // Deals and combos: deal_items = [{product_id, size, qty}] — the items inside, for one price. combo_for = the item this
-  // deal is offered with ("Zinger Combo" on Zinger Burger); empty = a stand-alone deal (Deals tab only).
-  'ALTER TABLE products ADD COLUMN deal_items TEXT',
-  'ALTER TABLE products ADD COLUMN combo_for INTEGER',
-  'ALTER TABLE order_items ADD COLUMN size TEXT',
-  'ALTER TABLE order_items ADD COLUMN mods TEXT',
-  'ALTER TABLE orders ADD COLUMN customer_id INTEGER',
-  'ALTER TABLE orders ADD COLUMN promo_code TEXT',
-  'ALTER TABLE orders ADD COLUMN promo_amount REAL DEFAULT 0',
-  'ALTER TABLE orders ADD COLUMN points_used INTEGER DEFAULT 0',
-  'ALTER TABLE orders ADD COLUMN points_amount REAL DEFAULT 0',
-  'ALTER TABLE orders ADD COLUMN points_earned INTEGER DEFAULT 0',
-  'ALTER TABLE expenses ADD COLUMN ref TEXT', // set when a supplier payment or salary created the expense
-  'ALTER TABLE orders ADD COLUMN zone_id INTEGER',
-  'ALTER TABLE orders ADD COLUMN delivery_fee REAL DEFAULT 0',
-  'ALTER TABLE orders ADD COLUMN rider_id INTEGER',
-  "ALTER TABLE orders ADD COLUMN delivery_status TEXT", // null | 'out' | 'delivered'
-  'ALTER TABLE orders ADD COLUMN dispatched_at TEXT',
-  'ALTER TABLE orders ADD COLUMN delivered_at TEXT',
-  'ALTER TABLE orders ADD COLUMN refunded_at TEXT',
-  'ALTER TABLE orders ADD COLUMN refunded_by TEXT',
-  'ALTER TABLE orders ADD COLUMN refund_reason TEXT',
-  // Riders (Riders section): fee per delivery, the secret in the rider's phone link; per order the fee at the time,
-  // the customer's tracking link secret, and whether the rider took it on their phone
-  'ALTER TABLE employees ADD COLUMN delivery_fee REAL DEFAULT 0',
-  'ALTER TABLE users ADD COLUMN employee_id INTEGER', // a rider's login (role rider) points at their staff record
-  'ALTER TABLE users ADD COLUMN pin_changed_at TEXT', // when this login's PIN last changed (the PIN list in the admin app compares it)
-  'ALTER TABLE users ADD COLUMN must_change_pin INTEGER DEFAULT 0', // logged in with a starting PIN (1234…): must choose their own first
-  'ALTER TABLE employees ADD COLUMN rider_token TEXT',
-  'ALTER TABLE orders ADD COLUMN rider_fee REAL DEFAULT 0',
-  'ALTER TABLE orders ADD COLUMN track_token TEXT',
-  'ALTER TABLE orders ADD COLUMN accepted_by_rider INTEGER DEFAULT 0',
-  'ALTER TABLE orders ADD COLUMN ready_at TEXT', // when the kitchen pressed Mark ready (the counter sees how long food has been waiting)
-]) { try { db.exec(sql); } catch { /* column exists */ } }
-// Every time a PIN is set or changed (any route), note the time
-db.exec(`CREATE TRIGGER IF NOT EXISTS users_pin_ts AFTER UPDATE OF pin ON users BEGIN UPDATE users SET pin_changed_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = NEW.id; END;
-  CREATE TRIGGER IF NOT EXISTS users_pin_ts_new AFTER INSERT ON users BEGIN UPDATE users SET pin_changed_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = NEW.id; END;`);
-
-// Product details & sizes
-const PRODUCT_DETAILS = {
-  'Margherita': {
-    subtitle: 'Pizza · Serves 1–3 depending on size',
-    description: 'Classic hand-stretched pizza with slow-cooked tomato sauce, fresh mozzarella and basil, baked in a stone oven.',
-    sizes: JSON.stringify([
-      { name: 'Small', detail: '8 inch', price: 800 },
-      { name: 'Medium', detail: '10 inch', price: 1200 },
-      { name: 'Large', detail: '12 inch', price: 1600 }
-    ]),
-    ingredients: JSON.stringify(['Mozzarella', 'Tomato sauce', 'Fresh basil', 'Olive oil'])
-  },
-  'Pepperoni': {
-    subtitle: 'Pizza · Serves 1–3 depending on size',
-    description: 'Rich marinara, melted mozzarella cheese, and crispy beef pepperoni slices with Italian herb seasoning.',
-    sizes: JSON.stringify([
-      { name: 'Small', detail: '8 inch', price: 1000 },
-      { name: 'Medium', detail: '10 inch', price: 1500 },
-      { name: 'Large', detail: '12 inch', price: 1950 }
-    ]),
-    ingredients: JSON.stringify(['Beef Pepperoni', 'Mozzarella', 'Marinara', 'Oregano'])
-  },
-  'Chicken Tikka': {
-    subtitle: 'Pizza · Serves 1–3 depending on size',
-    description: 'Spiced char-grilled chicken tikka chunks, red onions, bell peppers, mozzarella, and special herbs.',
-    sizes: JSON.stringify([
-      { name: 'Small', detail: '8 inch', price: 1100 },
-      { name: 'Medium', detail: '10 inch', price: 1600 },
-      { name: 'Large', detail: '12 inch', price: 2100 }
-    ]),
-    ingredients: JSON.stringify(['Tikka Chicken', 'Mozzarella', 'Onions', 'Bell Peppers'])
-  },
-  'Fajita': {
-    subtitle: 'Pizza · Serves 1–3 depending on size',
-    description: 'Mexican-style fajita chicken, sautéed bell peppers, sweet corn, melted mozzarella, and spicy jalapeños.',
-    sizes: JSON.stringify([
-      { name: 'Small', detail: '8 inch', price: 1050 },
-      { name: 'Medium', detail: '10 inch', price: 1550 },
-      { name: 'Large', detail: '12 inch', price: 2050 }
-    ]),
-    ingredients: JSON.stringify(['Fajita Chicken', 'Mozzarella', 'Jalapeños', 'Capsicum'])
-  },
-  'Veggie Supreme': {
-    subtitle: 'Pizza · Serves 1–3 depending on size',
-    description: 'Loaded with black olives, button mushrooms, bell peppers, sweet corn, onions, and premium mozzarella.',
-    sizes: JSON.stringify([
-      { name: 'Small', detail: '8 inch', price: 900 },
-      { name: 'Medium', detail: '10 inch', price: 1350 },
-      { name: 'Large', detail: '12 inch', price: 1800 }
-    ]),
-    ingredients: JSON.stringify(['Mushrooms', 'Black Olives', 'Sweet Corn', 'Mozzarella'])
-  },
-  'Zinger Burger': {
-    subtitle: 'Burgers · Crispy & Juicy',
-    description: 'Golden fried crispy chicken fillet topped with spicy mayo and shredded lettuce on a toasted sesame bun.',
-    sizes: JSON.stringify([
-      { name: 'Single', detail: 'Regular patty', price: 650 },
-      { name: 'Double', detail: 'Double crispy patty', price: 950 },
-      { name: 'Combo', detail: 'With fries & drink', price: 1100 }
-    ]),
-    ingredients: JSON.stringify(['Crispy Fillet', 'Spicy Mayo', 'Iceberg Lettuce', 'Brioche Bun'])
-  },
-  'Beef Burger': {
-    subtitle: 'Burgers · 100% Prime Beef',
-    description: 'Flame-grilled seasoned beef patty with melted cheddar cheese, caramelized onions, pickles, and secret sauce.',
-    sizes: JSON.stringify([
-      { name: 'Single', detail: '150g patty', price: 800 },
-      { name: 'Double', detail: '300g patties', price: 1150 },
-      { name: 'Combo', detail: 'With fries & drink', price: 1300 }
-    ]),
-    ingredients: JSON.stringify(['Beef Patty', 'Cheddar Cheese', 'Pickles', 'Caramelized Onions'])
-  },
-  'Double Patty': {
-    subtitle: 'Burgers · Extra Large',
-    description: 'Two smashed prime beef patties, double cheddar cheese slices, smokey BBQ mayo, and crisp lettuce.',
-    sizes: JSON.stringify([
-      { name: 'Regular', detail: 'Two patties', price: 1100 },
-      { name: 'Monster', detail: 'Triple patties', price: 1450 },
-      { name: 'Combo', detail: 'With fries & drink', price: 1600 }
-    ]),
-    ingredients: JSON.stringify(['Double Beef', 'Double Cheddar', 'BBQ Sauce', 'Sesame Bun'])
-  },
-  'Fries': {
-    subtitle: 'Sides · Crispy Golden',
-    description: 'Freshly cut skin-on potatoes deep fried to golden crispiness and dusted with special salt seasoning.',
-    sizes: JSON.stringify([
-      { name: 'Regular', detail: 'Single portion', price: 300 },
-      { name: 'Large', detail: 'Sharing portion', price: 450 },
-      { name: 'Jumbo', detail: 'Family bucket', price: 600 }
-    ]),
-    ingredients: JSON.stringify(['Potato', 'Sea Salt', 'Vegetable Oil'])
-  },
-  'Loaded Fries': {
-    subtitle: 'Sides · Cheesy & Saucy',
-    description: 'Golden fries smothered in warm cheddar cheese sauce, crispy jalapeno bites, and chipotle garlic drizzle.',
-    sizes: JSON.stringify([
-      { name: 'Regular', detail: 'Single bowl', price: 550 },
-      { name: 'Large', detail: 'Party platter', price: 800 }
-    ]),
-    ingredients: JSON.stringify(['Fries', 'Cheddar Sauce', 'Jalapeños', 'Chipotle Mayo'])
-  },
-  'Garlic Bread': {
-    subtitle: 'Sides · Warm & Buttery',
-    description: 'Crispy baguette slices toasted with roasted garlic herb butter and fresh Italian parsley.',
-    sizes: JSON.stringify([
-      { name: 'Plain', detail: '4 slices', price: 400 },
-      { name: 'Cheesy', detail: '4 slices with mozzarella', price: 550 }
-    ]),
-    ingredients: JSON.stringify(['French Baguette', 'Garlic Butter', 'Parsley', 'Oregano'])
-  },
-  'Nuggets (6)': {
-    subtitle: 'Sides · Tender Bites',
-    description: 'Bite-sized tender all-white chicken breast nuggets battered and fried golden brown with dipping sauce.',
-    sizes: JSON.stringify([
-      { name: '6 Pcs', detail: 'Single box', price: 450 },
-      { name: '12 Pcs', detail: 'Sharing box', price: 800 }
-    ]),
-    ingredients: JSON.stringify(['Chicken Breast', 'Crispy Breading', 'Dip Sauce'])
-  },
-  'Coke 500ml': {
-    subtitle: 'Drinks · Chilled Refreshment',
-    description: 'Classic Coca-Cola served ice cold.',
-    sizes: JSON.stringify([
-      { name: '500ml', detail: 'Bottle', price: 150 },
-      { name: '1.5L', detail: 'Large bottle', price: 280 }
-    ]),
-    ingredients: JSON.stringify(['Carbonated Water', 'Cola Syrup', 'Caramel Color'])
-  },
-  'Mineral Water': {
-    subtitle: 'Drinks · Pure Hydration',
-    description: 'Pure natural mineral drinking water, chilled.',
-    sizes: JSON.stringify([
-      { name: 'Small', detail: '500ml', price: 80 },
-      { name: 'Large', detail: '1.5L', price: 140 }
-    ]),
-    ingredients: JSON.stringify(['Natural Mineral Water'])
-  },
-  'Mint Margarita': {
-    subtitle: 'Drinks · Freshly Blended',
-    description: 'Refreshing mocktail blended with fresh mint leaves, lemon juice, ice, and fizzy soda.',
-    sizes: JSON.stringify([
-      { name: 'Regular', detail: '350ml glass', price: 350 },
-      { name: 'Pitcher', detail: '1 Litre sharing', price: 850 }
-    ]),
-    ingredients: JSON.stringify(['Fresh Mint', 'Lemon Juice', 'Soda', 'Black Salt'])
-  },
-  'Lava Cake': {
-    subtitle: 'Desserts · Warm & Decadent',
-    description: 'Warm dark chocolate sponge cake with a rich molten Belgian chocolate center, dusted with icing sugar.',
-    sizes: JSON.stringify([
-      { name: 'Standard', detail: 'Warm cake', price: 450 },
-      { name: 'With Ice Cream', detail: 'With vanilla scoop', price: 600 }
-    ]),
-    ingredients: JSON.stringify(['Dark Chocolate', 'Belgian Cocoa', 'Butter', 'Eggs'])
-  },
-  'Ice Cream': {
-    subtitle: 'Desserts · Creamy Scoops',
-    description: 'Artisanal creamy ice cream served chilled in your choice of flavors with chocolate drizzle.',
-    sizes: JSON.stringify([
-      { name: 'Single Scoop', detail: '1 scoop cup', price: 250 },
-      { name: 'Double Scoop', detail: '2 scoops cup', price: 420 },
-      { name: 'Sundae Bowl', detail: 'With nuts & syrup', price: 550 }
-    ]),
-    ingredients: JSON.stringify(['Fresh Cream', 'Milk', 'Natural Flavors', 'Chocolate Sauce'])
-  }
-};
-
-// Seed demo data on first run
-if (db.prepare('SELECT COUNT(*) c FROM categories').get().c === 0) {
-  const ci = db.prepare('INSERT INTO categories (name,color) VALUES (?,?)');
-  [['Pizza', '#ff6b35'], ['Burgers', '#f7b32b'], ['Sides', '#2ec4b6'], ['Drinks', '#4d96ff'], ['Desserts', '#e056fd']].forEach(c => ci.run(...c));
-  const pi = db.prepare('INSERT INTO products (name,price,category_id,emoji,subtitle,description,ingredients,sizes) VALUES (?,?,?,?,?,?,?,?)');
-  [
-    ['Margherita', 1200, 1, '🍕'], ['Pepperoni', 1500, 1, '🍕'], ['Chicken Tikka', 1600, 1, '🍕'], ['Fajita', 1550, 1, '🍕'], ['Veggie Supreme', 1350, 1, '🍕'],
-    ['Zinger Burger', 650, 2, '🍔'], ['Beef Burger', 800, 2, '🍔'], ['Double Patty', 1100, 2, '🍔'],
-    ['Fries', 300, 3, '🍟'], ['Loaded Fries', 550, 3, '🍟'], ['Garlic Bread', 400, 3, '🥖'], ['Nuggets (6)', 450, 3, '🍗'],
-    ['Coke 500ml', 150, 4, '🥤'], ['Mineral Water', 80, 4, '💧'], ['Mint Margarita', 350, 4, '🍹'],
-    ['Lava Cake', 450, 5, '🍫'], ['Ice Cream', 250, 5, '🍨'],
-  ].forEach(([name, price, category_id, emoji]) => {
-    const det = PRODUCT_DETAILS[name] || {};
-    pi.run(name, price, category_id, emoji, det.subtitle || null, det.description || null, det.ingredients || null, det.sizes || null);
-  });
-}
-
-// Update existing items in database if sizes or description are not populated
-const updateDetails = db.prepare("UPDATE products SET subtitle=?, description=?, ingredients=?, sizes=? WHERE name=? AND (sizes IS NULL OR sizes='')");
-for (const [name, det] of Object.entries(PRODUCT_DETAILS)) {
-  try {
-    updateDetails.run(det.subtitle, det.description, det.ingredients, det.sizes, name);
-  } catch {}
-}
-
-// Seed or update tables with floors and shapes
-const initialTables = [
-  // Main Dining
-  ['T1', 4, 'Main Dining', 'square'],
-  ['T2', 4, 'Main Dining', 'square'],
-  ['T3', 6, 'Main Dining', 'rect'],
-  ['T4', 4, 'Main Dining', 'square'],
-  ['T5', 2, 'Main Dining', 'round'],
-  ['T6', 8, 'Main Dining', 'rect'],
-  // Family Section
-  ['F1', 6, 'Family Section', 'rect'],
-  ['F2', 6, 'Family Section', 'rect'],
-  ['F3', 8, 'Family Section', 'rect'],
-  ['F4', 10, 'Family Section', 'rect'],
-  // Patio & Outdoor
-  ['P1', 2, 'Patio & Outdoor', 'round'],
-  ['P2', 4, 'Patio & Outdoor', 'square'],
-  ['P3', 4, 'Patio & Outdoor', 'square'],
-  ['P4', 6, 'Patio & Outdoor', 'rect'],
-  // Rooftop Terrace
-  ['R1', 4, 'Rooftop Terrace', 'square'],
-  ['R2', 4, 'Rooftop Terrace', 'square'],
-  ['R3', 6, 'Rooftop Terrace', 'round'],
-  ['R4', 8, 'Rooftop Terrace', 'rect'],
-];
-
-if (db.prepare('SELECT COUNT(*) c FROM tables_').get().c === 0) {
-  const ti = db.prepare('INSERT INTO tables_ (name,seats,floor,shape) VALUES (?,?,?,?)');
-  initialTables.forEach(t => ti.run(...t));
-}
-
-if (db.prepare('SELECT COUNT(*) c FROM floors').get().c === 0) {
-  const fi = db.prepare('INSERT OR IGNORE INTO floors (name, icon, color) VALUES (?, ?, ?)');
-  [
-    ['Main Dining', '🍽️', '#ff9f43'],
-    ['Family Section', '👨‍👩‍👧‍👦', '#a55eea'],
-    ['Patio & Outdoor', '🌿', '#26de81'],
-    ['Rooftop Terrace', '✨', '#4bcffa']
-  ].forEach(f => fi.run(...f));
-}
-
-const DEFAULT_SETTINGS = {
-  name: 'Pizza Venu',
-  address: 'Commercial Market, Block B, Main Boulevard',
-  phone: '+92 300 1234567',
-  tax_rate: '16',
-  footer: 'Thank you! Visit again 🙏',
-  logo: '🍕',
-  logo_image: '', // data URL of the restaurant's logo picture; shown instead of the emoji when set
-  // End-of-day WhatsApp to the owner when ingredients are really low (server/stock-alert.js)
-  low_stock_alert: '0', low_stock_alert_to: '', low_stock_alert_time: '22:00', low_stock_alert_percent: '50', low_stock_alert_min_items: '1', low_stock_alert_last: '',
-  ntn: 'NTN-8934521-7',
-  bank_name: 'Meezan Bank Ltd',
-  bank_account: 'PK36MEZN0001000123456789',
-  bank_title: 'Pizza Venu Foods Private Limited',
-  strn: '',
-  pos_id: '',
-  receipt_printer: '', // "192.168.1.50:9100" or "/dev/usb/lp0"; empty = browser print
-  kitchen_printer: '',
-  paper_width: '80',
-  open_drawer: '1', // kick the cash drawer when a cash receipt prints
-  cashier_discount_limit: '10', // % of subtotal a cashier may give without an admin PIN
-  closed_drawer_cash: 'auto_open', // cash taken while no shift is open: 'auto_open' (start a shift with Rs 0 float) | 'refuse'
-  loyalty_earn: '1', // points earned per Rs 100 spent (0 = loyalty off)
-  loyalty_value: '1', // Rs off per point redeemed
-  payment_qr: '', // data URL of the bank / Raast QR shown on the payment screen
-  payment_qr_label: '',
-  fiscal_mode: 'off', // 'off' | 'pra' | 'fbr'
-  fiscal_url: '',
-  fiscal_pos_id: '',
-  fiscal_pct_code: '',
-  // How the WhatsApp assistant writes (tone, length, what to ask). Facts and rules stay fixed in rag/prompts/system.md
-  bot_behaviour: "- Keep every reply to 1 or 2 short lines. No long paragraphs, no lists unless the customer asks for the menu.\n- When an order is missing something (delivery or takeaway, the address, a size), ask only for that one thing, directly.\n- Don't repeat what the customer just said and don't explain what you are about to do.\n- Reply in Roman Urdu unless the customer writes in English or Urdu script.\n- Friendly and casual, like a helpful person at the counter. At most one emoji per message.\n- Greet only at the start of a conversation, not in every message.",
-};
-for (const [k, v] of Object.entries(DEFAULT_SETTINGS)) db.prepare('INSERT OR IGNORE INTO settings (key,value) VALUES (?,?)').run(k, v);
-
-if (db.prepare('SELECT COUNT(*) c FROM users').get().c === 0) {
-  const ui = db.prepare('INSERT INTO users (name,pin,role) VALUES (?,?,?)');
-  ui.run('Owner', '1234', 'admin'); ui.run('Cashier', '1111', 'cashier'); ui.run('Kitchen', '2222', 'kitchen');
-}
-
-// PINs are stored as salted scrypt hashes ("s1$salt$hash"); plain PINs from older databases are hashed on startup
 const crypto = require('crypto');
-// A PIN is 4 to 12 letters or numbers. Capital and small letters count as the same (easier on a touch keyboard).
-const normPin = pin => String(pin ?? '').trim().toLowerCase();
-const PIN_OK = pin => /^[a-z0-9]{4,12}$/.test(normPin(pin));
-const PIN_RULE = 'PIN must be 4 to 12 letters or numbers';
-// The starting PINs of a new install. On a real install (the desktop app) nobody keeps them: the owner must choose their
-// own PIN at the first login, and no PIN set later may be one of these. Off in the demo and in the dev server.
-const DEFAULT_PINS = ['1234', '1111', '2222', '3333'];
-const WEAK_PINS = [...DEFAULT_PINS, '0000', '4321'];
-const FORCE_PIN = !DEMO && (process.env.HAZEL_LICENCE === '1' || process.env.FORCE_PIN_CHANGE === '1');
-const PIN_WEAK = pin => FORCE_PIN && WEAK_PINS.includes(normPin(pin));
-// The PIN list in your admin app: a PIN set or changed here is sent to HazelPOS Cloud (encrypted there), so you can see it and
-// help someone who forgot it. A PIN changed in the admin app comes here (PIN reset, below). Offline: kept in memory and sent
-// as soon as the internet is back. The POS itself only stores the scrambled PIN.
-const pinOutbox = new Map(); // login id -> the PIN just set, until the cloud has it
-let pinPushing = false;
-async function pushPins() {
-  if (pinPushing || !cloud?.status().connected || cloud.isHeld()) return;
-  pinPushing = true;
-  try {
-    const users = db.prepare('SELECT id, name, role, pin_changed_at changed_at FROM users ORDER BY id').all().map(u => ({ ...u, pin: pinOutbox.get(u.id) }));
-    await cloud.call('/api/sync/pins', { users });
-    for (const u of users) if (u.pin !== undefined && pinOutbox.get(u.id) === u.pin) pinOutbox.delete(u.id);
-  } catch { /* offline or an older cloud: the next minute */ } finally { pinPushing = false; }
-}
-const vaultPin = (id, pin) => { if (id && pin) pinOutbox.set(+id, String(pin)); setTimeout(pushPins, 400).unref?.(); };
-setInterval(() => { if (pinOutbox.size) pushPins(); }, 60_000).unref();
-setInterval(pushPins, 10 * 60_000).unref(); // also keeps the list of logins (names, roles) up to date
-setTimeout(pushPins, 25_000).unref();
+require('./boot-checks').check(); // production: refuse unsafe settings before anything is opened
+const tenancy = require('./tenancy');
+const { hashPin, ensureQrTokens: ensureTokens, DEFAULT_SETTINGS } = require('./tenant-init');
+const { normPin, PIN_OK, PIN_RULE, DEFAULT_PINS, isWeakPin } = require('./pin-rules');
+
+const db = tenancy.db;
+// DEMO=1: the free demo. The login screen offers the three roles without PINs (see client/src/Login.jsx).
+const DEMO = process.env.DEMO === '1';
+// A starting PIN (1234…) may only be used to choose one's own PIN, when FORCE_PIN_CHANGE=1.
+const FORCE_PIN = !DEMO && process.env.FORCE_PIN_CHANGE === '1';
+const PIN_WEAK = pin => FORCE_PIN && isWeakPin(pin);
 const PIN_WEAK_MSG = 'That PIN is too easy to guess. Choose another (letters and numbers, for example your name and a number).';
-const hashPin = pin => {
-  const salt = crypto.randomBytes(16).toString('hex');
-  return `s1$${salt}$${crypto.scryptSync(normPin(pin), salt, 32, { N: 4096 }).toString('hex')}`;
-};
 const pinMatches = (pin, stored) => {
   const [v, salt, hash] = String(stored).split('$');
   if (v !== 's1' || !hash) return false;
   return crypto.timingSafeEqual(crypto.scryptSync(normPin(pin), salt, 32, { N: 4096 }), Buffer.from(hash, 'hex'));
 };
 const userByPin = pin => db.prepare('SELECT id,name,role,pin,must_change_pin FROM users').all().find(u => pinMatches(pin, u.pin));
-for (const u of db.prepare("SELECT id,pin FROM users WHERE pin NOT LIKE 's1$%'").all())
-  db.prepare('UPDATE users SET pin=? WHERE id=?').run(hashPin(u.pin), u.id);
+const vaultPin = () => {}; // (the PIN list in the old admin app is gone: PINs are only stored hashed)
 
-// Seed demo expenses if empty
-if (db.prepare('SELECT COUNT(*) c FROM expenses').get().c === 0) {
-  const today = new Date().toISOString().slice(0, 10);
-  const ei = db.prepare('INSERT INTO expenses (title,category,amount,payment_method,date,user_name) VALUES (?,?,?,?,?,?)');
-  [
-    ['Cheese & Dough Supplies', 'Ingredients', 4500, 'cash', today, 'Owner'],
-    ['Chicken Breast (10kg)', 'Ingredients', 7200, 'cash', today, 'Owner'],
-    ['Pizza Boxes & Bags (100 pcs)', 'Packaging', 2800, 'card', today, 'Cashier'],
-    ['Commercial Gas Refill', 'Utilities', 3500, 'cash', today, 'Owner']
-  ].forEach(e => ei.run(...e));
-}
-
-// Auto open register if never opened
-if (db.prepare('SELECT COUNT(*) c FROM register_sessions').get().c === 0) {
-  db.prepare(`INSERT INTO register_sessions (opened_at, opened_by, opening_cash, status) VALUES (?,?,?,?)`)
-    .run(new Date().toISOString(), 'Owner', 5000, 'open');
-}
-
-// Demo: the role picker has a Rider; make sure a rider login exists (PIN 3333, the first rider on the staff list)
-if (DEMO && !db.prepare("SELECT 1 FROM users WHERE role='rider'").get()) {
-  let e = db.prepare("SELECT id, name FROM employees WHERE active=1 AND lower(job) LIKE '%rider%' ORDER BY id").get();
-  if (!e) e = { id: db.prepare("INSERT INTO employees (name,phone,job,salary,active,joined) VALUES ('Sample Rider','03000000107','Rider',0,1,date('now'))").run().lastInsertRowid, name: 'Sample Rider' };
-  db.prepare("UPDATE employees SET delivery_fee=COALESCE(NULLIF(delivery_fee,0),100) WHERE id=?").run(e.id);
-  db.prepare('INSERT INTO users (name,pin,role,employee_id) VALUES (?,?,?,?)').run(e.name, hashPin('3333'), 'rider', e.id);
-}
 const getSettings = () => Object.fromEntries(db.prepare('SELECT key,value FROM settings').all().map(r => [r.key, r.value]));
 const taxRate = () => (+getSettings().tax_rate || 0) / 100;
 
@@ -464,6 +31,7 @@ const app = express();
 // No CORS: every screen (POS window, kitchen tablet, customer QR page) is served by this server itself. A website the cashier
 // visits in another tab must not be able to call the POS (or lock the PIN screen by guessing PINs from the cashier's PC).
 app.disable('x-powered-by');
+app.set('trust proxy', Math.max(0, parseInt(process.env.TRUST_PROXY) || 0)); // hops of reverse proxy in front (Railway: TRUST_PROXY=1); 0 = X-Forwarded-For is ignored
 const CSP = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; " +
   "img-src 'self' data: blob: https://tile.openstreetmap.org; media-src 'self' blob: data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'";
 app.use((req, res, next) => {
@@ -495,19 +63,73 @@ if (DEMO) {
 }
 const now = () => new Date().toISOString();
 
+// ---------- Which restaurant is this request for? ----------
+app.get('/api/health', (req, res) => res.json({ ok: true, demo: DEMO }));
+app.use('/api/auth', require('./auth').router); // owner sign-in: needs no restaurant
+const vendor = require('./vendor');
+app.use('/api/vendor', vendor.router); // HazelPOS's own back office (admin app): the vendor key, no restaurant
+vendor.startLifecycle();
+// Pairing the printer helper with a 6-digit code (shown in Settings -> Printers, 10 minutes, once). Needs no restaurant header.
+const pairTries = new Map(); // ip -> times; 10 tries per IP per 15 minutes, right or wrong
+app.post('/api/bridge/pair', (req, res) => {
+  const t = Date.now(), recent = (pairTries.get(req.ip) || []).filter(x => t - x < 15 * 60_000);
+  if (recent.length >= 10) return res.status(429).json({ error: 'Too many tries. Wait a few minutes and try again.' });
+  pairTries.set(req.ip, [...recent, t]);
+  if (pairTries.size > 5000) for (const [k, v] of pairTries) if (!v.some(x => t - x < 15 * 60_000)) pairTries.delete(k);
+  const bad = () => res.status(400).json({ error: 'That code is wrong or has expired. Get a new one in HazelPOS, Settings, Printers.' });
+  const code = String(req.body?.code || '').replace(/\s/g, ''), name = String(req.body?.name || '').trim().slice(0, 60) || 'Printer helper';
+  if (!/^\d{6}$/.test(code)) return bad();
+  const hash = tenancy.sha256(code);
+  const claimed = tenancy.control.prepare('UPDATE bridge_pairings SET used_at=? WHERE code_hash=? AND used_at IS NULL AND expires_at > ?').run(now(), hash, now()).changes;
+  if (!claimed) return bad();
+  const tenant = tenancy.tenantRow(tenancy.control.prepare('SELECT tenant_id FROM bridge_pairings WHERE code_hash=?').get(hash).tenant_id);
+  if (!tenant || tenant.status === 'cancelled') return bad();
+  const key = crypto.randomBytes(24).toString('hex'), dh = tenancy.sha256(key);
+  tenancy.run(tenant.id, () => db.prepare("INSERT INTO devices (name, key_hash, kind, created_at) VALUES (?,?,'bridge',?)").run(name, dh, now()));
+  tenancy.control.prepare('INSERT INTO device_index (hash, tenant_id) VALUES (?,?)').run(dh, tenant.id);
+  res.json({ device_key: key, restaurant: { slug: tenant.slug, name: tenant.name } });
+});
+let waInvalidate = () => {}; // set when the WhatsApp manager is created (below)
+const SUSPENDED_MSG = "This restaurant's HazelPOS account is suspended. Please contact HazelPOS.";
+// X-Device (a till's key) names its restaurant; otherwise X-Tenant (the slug). A token from restaurant A is looked up in
+// A's database only, so it means nothing on B. Everything below runs inside that restaurant's context (server/tenancy.js).
+app.use('/api', (req, res, next) => {
+  const key = req.get('x-device'), slug = req.get('x-tenant');
+  let tenant, device;
+  if (key) {
+    const hash = tenancy.sha256(key);
+    const ix = tenancy.control.prepare('SELECT tenant_id FROM device_index WHERE hash=?').get(hash);
+    tenant = ix && tenancy.tenantRow(ix.tenant_id);
+    device = tenant && tenancy.run(tenant.id, () => db.prepare('SELECT id, name, kind, revoked_at, last_seen FROM devices WHERE key_hash=?').get(hash));
+    if (!device || device.revoked_at || tenant.status === 'cancelled') return res.status(401).json({ error: 'This device is no longer set up as a till. Ask the owner to set it up again.', code: 'device_revoked' });
+  } else if (slug) {
+    tenant = tenancy.bySlug(slug);
+    if (!tenant || tenant.status === 'cancelled') return res.status(404).json({ error: 'Restaurant not found' });
+  } else if (DEMO) tenant = tenancy.bySlug('demo');
+  else return res.status(400).json({ error: 'Choose a restaurant first', code: 'no_tenant' });
+  // A printer helper's key works on /api/bridge/* only, and a till's key never does
+  if (device && (device.kind === 'bridge') !== req.path.startsWith('/bridge/')) return res.status(403).json({ error: 'This key cannot be used here', code: 'wrong_device_kind' });
+  req.tenant = tenant; req.device = device;
+  tenancy.run(tenant.id, () => {
+    if (device && Date.now() - Date.parse(device.last_seen || 0) > 60_000) db.prepare('UPDATE devices SET last_seen=? WHERE id=?').run(now(), device.id);
+    next();
+  });
+});
+
 // ---------- Auth (PIN + session token) ----------
 const SESSION_IDLE_MS = 12 * 60 * 60 * 1000;
 const ALL = ['admin', 'cashier', 'kitchen'], STAFF = ['admin', 'cashier'], ADMIN = ['admin'], RIDER = ['rider'];
-const ROLES = [...ALL, 'rider']; // riders log in too (their own screen); they get only the /rider routes
+const ROLES = require('./pin-rules').ROLES; // riders log in too (their own screen); they get only the /rider routes
 // First match wins; anything not listed is admin-only. null = public.
 const ACCESS = [
   [/^POST \/login$/, null],
   [/^GET \/settings$/, null], // logged-out callers only get name + logo
   [/^(GET|POST) \/qr\//, null], // customer table ordering, guarded by the table's QR token
-  [/^GET \/licence$/, null], // the activation screen shows before anyone can log in
-  [/^(GET|POST) \/internal\//, null], // the desktop app itself, guarded by its own secret (App updates, below)
+  [/^(GET|POST) \/r\/[0-9a-f]{32}(\/|$)/, null], // a rider's phone page: the secret in the link, checked in the routes (only that rider's actions)
+  [/^GET \/track\/[0-9a-f]{32}$/, null], // a customer's tracking page: one order, status and rider position only
+  [/^(GET|POST) \/bridge\//, null], // the printer helper: guarded by its device key (kind 'bridge'), checked in the routes
+  [/^GET \/till$/, null], // the till's lock screen: staff names, for a device with a valid X-Device
   [/^GET \/menu-images(\/\d+\/image)?$/, null], // menu card pictures: public like the menu itself (QR page)
-  [/^POST \/licence\/(activate|check)$/, null], // activate: only until activated, then admin (checked in the route)
   [/^POST \/logout$/, ROLES],
   [/^POST \/me\/pin$/, ROLES], // choosing one's own PIN (first login with a starting PIN)
   [/^(GET|POST) \/rider(\/|$)/, RIDER], // the rider's own screen (client/src/RiderHome.jsx)
@@ -524,6 +146,8 @@ const ACCESS = [
   [/^POST \/riders\/\d+\/(link|send-link|pay)$/, ADMIN],
   [/^(GET \/riders\/accounts|POST \/riders\/sync)$/, ADMIN],
   [/^(GET|POST) \/(deliveries|riders)(\/|$)/, STAFF],
+  [/^GET \/print\/status$/, STAFF],
+  [/^POST \/print\/jobs\/\d+\/retry$/, STAFF],
   [/^(GET|POST) \/whatsapp\//, STAFF],
 ];
 
@@ -548,47 +172,59 @@ app.use('/api', (req, res, next) => {
   if (req.user?.must_change_pin && !/^(POST \/me\/pin|POST \/logout|GET \/settings)$/.test(`${req.method} ${req.path}`))
     return res.status(403).json({ error: 'Choose your own PIN first', code: 'change_pin' });
 
-  // Record every change made by staff
+  // Record every change made by staff (and let the WhatsApp assistant re-read the menu: it caches it for 60 s)
   if (req.method !== 'GET' && req.user) res.on('finish', () => {
+    if (!/^\/(orders|whatsapp)\b/.test(req.path)) waInvalidate(req.tenant.id);
     const { pin, approve_pin, key, secret, ...body } = req.body || {}; // never log PINs, keys or API tokens
-    audit(req, `${req.method} ${req.path}`, res.statusCode, JSON.stringify(body));
+    tenancy.run(req.tenant.id, () => audit(req, `${req.method} ${req.path}`, res.statusCode, JSON.stringify(body))); // 'finish' runs outside the request's context
   });
   next();
 });
 
-// Membership locked (server/licence.js): no NEW orders from any channel. Paying open bills, reports and data keep working.
+// Restaurant suspended (control.db): no NEW orders from any channel. Paying open bills, reports and data keep working.
 const NEW_ORDER = /^POST \/(qr\/[^/]+\/order|qr-requests\/\d+\/accept|whatsapp\/orders\/\d+\/accept)$/;
 app.use('/api', (req, res, next) => {
   const isNew = (req.method === 'POST' && req.path === '/orders' && !req.body?.id) || NEW_ORDER.test(`${req.method} ${req.path}`);
-  if (!isNew || !lic.locked()) return next();
+  if (!isNew || req.tenant.status !== 'suspended') return next();
   if (req.path.startsWith('/qr/')) return res.status(402).json({ error: 'Ordering from the table is not available right now. Please ask the staff.' });
-  res.status(402).json({ error: lic.state().message });
+  res.status(402).json({ error: SUSPENDED_MSG });
 });
 
-// 5 wrong PINs from one device locks it out for 5 minutes
-const loginFails = new Map();
+// past_due: the owner sees a banner (client App.jsx); everything keeps working
+app.get('/api/billing', (req, res) => res.json({ status: req.tenant.status, pay_by: req.tenant.status === 'past_due' ? vendor.payBy(req.tenant) : null }));
+
+// 5 wrong PINs from one till locks it out for 5 minutes. Keyed by restaurant AND device, never by IP alone.
+const loginFails = new Map(); // `${tenant}:${deviceId}` -> { n, until }
+app.get('/api/till', (req, res) => {
+  if (!req.device) return res.status(403).json({ error: 'This device is not set up as a till', code: 'no_device' });
+  res.json({ restaurant: { slug: req.tenant.slug, name: req.tenant.name }, device: { name: req.device.name },
+    staff: db.prepare("SELECT id, name, role FROM users WHERE role IN ('admin','cashier','kitchen') ORDER BY id").all() });
+});
 app.post('/api/login', (req, res) => {
-  const f = loginFails.get(req.ip) || { n: 0, until: 0 };
+  // PINs only work on a till of this restaurant, so nobody on the internet can try them. The demo keeps its role picker (PIN only).
+  if (!req.device && !DEMO) return res.status(403).json({ error: 'This device is not set up as a till', code: 'no_device' });
+  const fkey = `${req.tenant.id}:${req.device?.id ?? req.ip}`;
+  const f = loginFails.get(fkey) || { n: 0, until: 0 };
   if (f.until > Date.now()) return res.status(429).json({ error: `Too many wrong PINs. Try again in ${Math.ceil((f.until - Date.now()) / 60000)} min` });
-  // A new install that is not activated yet has the starting PINs: nobody can log in until it is activated (the screen shows Activate)
-  if (lic.state().state === 'activate') return res.status(403).json({ error: 'Activate HazelPOS first' });
-  const u = userByPin(String(req.body.pin || ''));
+  const pin = String(req.body.pin || '');
+  const u = req.body.user_id
+    ? (x => x && pinMatches(pin, x.pin) ? x : undefined)(db.prepare('SELECT id,name,role,pin,must_change_pin FROM users WHERE id=?').get(+req.body.user_id))
+    : DEMO ? userByPin(pin) : undefined;
   if (!u) {
     f.n++; if (f.n >= 5) { f.n = 0; f.until = Date.now() + 5 * 60 * 1000; }
-    loginFails.set(req.ip, f);
+    loginFails.set(fkey, f);
     audit(req, 'LOGIN FAILED', 401);
     return res.status(401).json({ error: 'Wrong PIN' });
   }
-  // A starting PIN (1234, 1111…) on a real install: only the owner may use it, and only to choose their own PIN.
-  // The others (cashier, kitchen, rider) wait until the owner gives them a PIN, so nobody can grab their login first.
-  if (FORCE_PIN && DEFAULT_PINS.includes(normPin(req.body.pin))) {
+  // A starting PIN (1234, 1111…) with FORCE_PIN_CHANGE=1: only the owner may use it, and only to choose their own PIN.
+  if (FORCE_PIN && DEFAULT_PINS.includes(normPin(pin))) {
     if (u.role !== 'admin') {
       audit(req, 'LOGIN REFUSED (starting PIN)', 403);
       return res.status(403).json({ error: 'This is a starting PIN. Ask the owner to give you a new PIN (Settings → Staff & PINs).' });
     }
     db.prepare('UPDATE users SET must_change_pin=1 WHERE id=?').run(u.id); u.must_change_pin = 1;
   }
-  loginFails.delete(req.ip);
+  loginFails.delete(fkey);
   const token = crypto.randomBytes(32).toString('hex');
   db.prepare('INSERT INTO sessions (token,user_id,created_at,last_seen) VALUES (?,?,?,?)').run(token, u.id, now(), now());
   req.user = u; audit(req, 'LOGIN', 200);
@@ -602,8 +238,7 @@ app.post('/api/logout', (req, res) => {
 // ---------- Settings ----------
 app.get('/api/settings', (req, res) => {
   const s = getSettings();
-  const licence = lic.state();
-  res.json(req.user ? { ...s, bot_behaviour_default: DEFAULT_SETTINGS.bot_behaviour, demo: DEMO, licence } : { name: s.name, logo: s.logo, logo_image: s.logo_image, demo: DEMO, licence });
+  res.json(req.user ? { ...s, bot_behaviour_default: DEFAULT_SETTINGS.bot_behaviour, demo: DEMO, printing: printingOn(), restaurant: { slug: req.tenant.slug, name: req.tenant.name } } : { name: s.name, logo: s.logo, logo_image: s.logo_image, demo: DEMO });
 });
 app.post('/api/settings', (req, res) => {
   const up = db.prepare('INSERT INTO settings (key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value');
@@ -666,7 +301,6 @@ app.post('/api/menu/import', (req, res) => { // body limit 2 MB (base64), so fil
 // ---------- Menu pictures (photos of the menu card) ----------
 // Kept in the database, so they're in the daily cloud backup. The WhatsApp assistant sends them when a customer
 // asks to see the menu (rag/prompts/system.md rule 10).
-db.exec('CREATE TABLE IF NOT EXISTS menu_images (id INTEGER PRIMARY KEY, caption TEXT, mime TEXT, data BLOB, sort INTEGER, created_at TEXT)');
 const MAX_MENU_IMAGES = 6;
 app.get('/api/menu-images', (req, res) => res.json(db.prepare('SELECT id, caption, sort, length(data) size FROM menu_images ORDER BY sort, id').all()));
 app.get('/api/menu-images/:id/image', (req, res) => {
@@ -701,21 +335,24 @@ crud('expenses', 'expenses', ['title', 'category', 'amount', 'payment_method', '
 
 // ---------- Staff (PINs are never sent back) ----------
 const adminCount = () => db.prepare("SELECT COUNT(*) c FROM users WHERE role='admin'").get().c;
-app.get('/api/users', (req, res) => res.json(db.prepare("SELECT id,name,role FROM users ORDER BY role='rider', id").all()));
+app.get('/api/users', (req, res) => res.json(db.prepare(`SELECT id,name,role,
+  (SELECT MAX(at) FROM audit_log a WHERE a.user_id=users.id AND a.action IN ('LOGIN','OWNER SIGN-IN')) last_login FROM users ORDER BY role='rider', id`).all()));
 app.post('/api/users', (req, res) => {
   const { id, name, pin, role } = req.body;
   if (!String(name || '').trim()) return res.status(400).json({ error: 'Name is required' });
   if (!ROLES.includes(role)) return res.status(400).json({ error: 'Invalid role' });
-  if (!id) return res.status(400).json({ error: 'There are three fixed logins (admin, cashier, kitchen); change their PINs instead' });
+  if (!id && !pin) return res.status(400).json({ error: 'Choose a PIN for the new login' });
   if (pin) {
     if (!PIN_OK(pin)) return res.status(400).json({ error: PIN_RULE });
     if (PIN_WEAK(pin)) return res.status(400).json({ error: PIN_WEAK_MSG });
     const taken = userByPin(pin);
-    if (taken && taken.id !== +id) return res.status(400).json({ error: 'That PIN is already used' });
+    if (taken && taken.id !== +id) return res.status(400).json({ error: 'Someone here already uses that PIN' });
   }
   if (id) {
     const cur = db.prepare('SELECT role FROM users WHERE id=?').get(id);
     if (!cur) return res.status(404).json({ error: 'Not found' });
+    if (tenancy.control.prepare('SELECT 1 FROM owner_tenants WHERE tenant_id=? AND user_id=?').get(req.tenant.id, +id)
+      && (+id !== req.user.id || role !== cur.role)) return res.status(400).json({ error: "The owner's login can only be changed by the owner" });
     if (cur.role === 'admin' && role !== 'admin' && adminCount() === 1) return res.status(400).json({ error: 'Keep at least one admin' });
     db.prepare('UPDATE users SET name=?, role=? WHERE id=?').run(name.trim(), role, id);
     if (pin) {
@@ -738,9 +375,20 @@ app.post('/api/me/pin', (req, res) => {
   db.prepare('DELETE FROM sessions WHERE user_id=? AND token != ?').run(req.user.id, req.token); // other devices signed in with the old PIN are out
   res.json({ ok: true });
 });
-app.post('/api/users/:id/delete', (req, res) => res.status(400).json({ error: 'The admin, cashier and kitchen logins cannot be deleted' }));
+// Removing a login signs that person out everywhere. Not your own, not an owner's (their account is linked in control.db), not the last admin.
+app.post('/api/users/:id/delete', (req, res) => {
+  const u = db.prepare('SELECT id,role FROM users WHERE id=?').get(+req.params.id);
+  if (!u) return res.status(404).json({ error: 'Not found' });
+  if (u.role === 'rider') return res.status(400).json({ error: 'Remove riders from the Riders screen' });
+  if (u.id === req.user.id) return res.status(400).json({ error: "You can't remove your own login" });
+  if (tenancy.control.prepare('SELECT 1 FROM owner_tenants WHERE tenant_id=? AND user_id=?').get(req.tenant.id, u.id)) return res.status(400).json({ error: "The owner's login can only be changed by the owner" });
+  if (u.role === 'admin' && adminCount() <= 1) return res.status(400).json({ error: 'Keep at least one admin' });
+  db.prepare('DELETE FROM sessions WHERE user_id=?').run(u.id);
+  db.prepare('DELETE FROM users WHERE id=?').run(u.id);
+  res.json({ ok: true });
+});
 
-// ---------- What the WhatsApp assistant may answer (Settings → WhatsApp bot) ----------
+// ---------- What the WhatsApp assistant may answer (Settings → WhatsApp) ----------
 // Owner-written answers (opening hours, delivery, halal, parking…). Read live by the assistant: rag/src/loaders/pos-db.js.
 // Every answer goes into every WhatsApp prompt, so the total is capped (cost and speed).
 const FAQ_STARTER = ['Opening hours / Timings', 'Do you deliver? Delivery time', 'Payment methods', 'Is the food halal?', 'Dine-in, takeaway, parking',
@@ -996,9 +644,8 @@ const insertItem = (orderId, i) => db.prepare('INSERT INTO order_items (order_id
 
 // Prints the lines the kitchen hasn't seen. Returns a short status for the UI; never throws.
 async function printKitchen(orderId, items, addOn) {
-  const s = getSettings();
-  if (!s.kitchen_printer || !items.length) return undefined;
-  try { await printer.send(s.kitchen_printer, printer.kitchenTicket(getOrder(orderId), items, { addOn, s })); return 'ok'; }
+  if (!items.length || !printingOn()) return undefined;
+  try { queuePrint('kitchen', printer.kitchenTicket(getOrder(orderId), items, { addOn, s: getSettings() }), `Order #${orderId} kitchen`); return 'ok'; }
   catch (e) { return e.message; }
 }
 
@@ -1129,8 +776,8 @@ app.post('/api/orders/:id/pay', async (req, res) => {
   if (fisc.enabled()) await fisc.submit(o.id).catch(() => {}); // fiscal number goes on the receipt; if offline it is retried later
   const done = getOrder(o.id), s = getSettings();
   let receipt_print;
-  if (s.receipt_printer) {
-    try { await printer.send(s.receipt_printer, printer.receipt(done, s, { openDrawer: method === 'cash' && s.open_drawer === '1' })); receipt_print = 'ok'; }
+  if (printingOn()) {
+    try { queuePrint('receipt', printer.receipt(done, s, { openDrawer: method === 'cash' && s.open_drawer === '1' }), `Order #${done.id} receipt`); receipt_print = 'ok'; }
     catch (e) { receipt_print = e.message; }
   }
   res.json({ ...done, receipt_print });
@@ -1153,7 +800,6 @@ app.post('/api/orders/:id/refund', userErrors((req, res) => {
         .run(sid, o.total, `Refund #${o.id}: ${reason}`, req.user.name, now());
     }
     db.prepare("UPDATE orders SET status='refunded', refunded_at=?, refunded_by=?, refund_reason=? WHERE id=?").run(now(), req.user.name, reason, o.id);
-    db.prepare("DELETE FROM sync_log WHERE tbl='orders' AND local_id=?").run(o.id); // cloud gets the new status on the next sync
   });
   res.json(getOrder(o.id));
 }));
@@ -1217,23 +863,28 @@ app.get('/api/delivery-zones', (req, res) => res.json(db.prepare('SELECT * FROM 
 crud('delivery-zones', 'delivery_zones', ['name', 'fee', 'min_order', 'free_above', 'eta_min', 'active']);
 
 // Riders are staff whose job contains "rider" (the Riders section adds them with a per-delivery fee). cash_due = unpaid
-// (COD) orders they have delivered: still on the way does not count. A rider's phone screen lives on the cloud
-// (rider-sync.js); its link holds a secret, so only the admin gets the link.
+// (COD) orders they have delivered: still on the way does not count. A rider's phone page is /r/<restaurant>/<token>
+// (server/public/rider.js); its link holds a secret, so only the admin gets the link.
 const { onTheWayMessage, statusMessage, readyPickupMessage } = require('./whatsapp/messages');
 const newToken = () => crypto.randomBytes(16).toString('hex');
-const cloudBase = () => cloud.status().connected ? cloud.status().url.replace(/\/+$/, '') : null;
-const riderLink = e => e.rider_token && cloudBase() ? `${cloudBase()}/r/${e.rider_token}` : null;
-const trackUrl = o => o.track_token && cloudBase() ? `${cloudBase()}/track/${o.track_token}` : null;
+const siteLink = (kind, token) => `${require('./auth').BASE_URL()}/${kind}/${tenancy.current().tenant.slug}/${token}`;
+const riderLink = e => e.rider_token ? siteLink('r', e.rider_token) : null;
+const trackUrl = o => o.track_token ? siteLink('track', o.track_token) : null;
+// Where each rider is (from their phone page or their own POS login). Memory only: restaurant id + rider id -> position.
+const riderSpots = new Map();
+const riderPos = {
+  get(id) { const p = riderSpots.get(`${tenancy.current().tenant.id}:${id}`); return p && Date.now() - Date.parse(p.at) < 12 * 3600e3 ? p : undefined; },
+  set(id, p) { riderSpots.set(`${tenancy.current().tenant.id}:${id}`, { ...p, at: now() }); },
+};
 const RIDER_COLS = `e.id, e.name, e.phone, e.active, COALESCE(e.delivery_fee,0) delivery_fee, e.rider_token,
       (SELECT COUNT(*) FROM orders o WHERE o.rider_id=e.id AND o.delivery_status='out') on_road,
       (SELECT COALESCE(SUM(total),0) FROM orders o WHERE o.rider_id=e.id AND o.status='open' AND o.delivery_status='delivered') cash_due,
       (SELECT COUNT(*) FROM orders o WHERE o.rider_id=e.id AND o.status='open' AND o.delivery_status='delivered') cod_orders,
       (SELECT COUNT(*) FROM orders o WHERE o.rider_id=e.id AND o.delivery_status='delivered' AND date(o.delivered_at,'localtime')=date('now','localtime')) delivered_today`;
 const riderRows = (where, admin) => {
-  const pos = riderSync.positions();
   return db.prepare(`SELECT ${RIDER_COLS}, (SELECT COUNT(*) FROM users u WHERE u.employee_id=e.id AND u.role='rider') has_login
       FROM employees e WHERE lower(e.job) LIKE '%rider%' AND ${where} ORDER BY e.active DESC, e.name`).all()
-    .map(e => ({ ...e, has_login: !!e.has_login, link: admin ? riderLink(e) : undefined, rider_token: undefined, ...(pos[e.id] || {}) }));
+    .map(e => ({ ...e, has_login: !!e.has_login, link: admin ? riderLink(e) : undefined, rider_token: undefined, ...(riderPos.get(e.id) || {}) }));
 };
 // A rider's own login (role rider): made or changed from the Riders section; gone when they stop working here
 function setRiderLogin(employeeId, name, pin, active) {
@@ -1253,9 +904,8 @@ function setRiderLogin(employeeId, name, pin, active) {
 app.get('/api/riders', (req, res) => res.json(riderRows(req.query.all ? '1' : 'e.active=1', req.user.role === 'admin')));
 // Where every rider is (from their phones, through the cloud), for the map
 app.get('/api/riders/positions', (req, res) => {
-  res.json({ cloud: !!cloudBase(), ...riderSync.status(), riders: riderRows('e.active=1', false).map(r => ({ id: r.id, name: r.name, on_road: r.on_road, lat: r.lat, lng: r.lng, acc: r.acc, at: r.at, on_duty: r.on_duty })) });
+  res.json({ cloud: true, riders: riderRows('e.active=1', false).map(r => ({ id: r.id, name: r.name, on_road: r.on_road, lat: r.lat, lng: r.lng, acc: r.acc, at: r.at, on_duty: r.on_duty })) });
 });
-app.post('/api/riders/sync', async (req, res) => res.json(await riderSync.tick()));
 // Add or edit a rider (admin). The first save makes the secret for their phone link.
 app.post('/api/riders', userErrors((req, res) => {
   const { id, name, phone, delivery_fee, active } = req.body;
@@ -1272,29 +922,26 @@ app.post('/api/riders', userErrors((req, res) => {
     }
     setRiderLogin(+rid, name.trim(), req.body.pin, on);
   });
-  riderSync.poke();
   res.json(riderRows('e.id=' + (Math.trunc(+rid) || 0), true)[0]);
 }));
-// A new link for this rider's phone; the old one stops working at the next sync
+// A new link for this rider's phone; the old one stops working at once
 app.post('/api/riders/:id/link', userErrors((req, res) => {
   if (!db.prepare("SELECT 1 FROM employees WHERE id=? AND lower(job) LIKE '%rider%'").get(req.params.id)) throw new UserError('Rider not found');
   db.prepare('UPDATE employees SET rider_token=? WHERE id=?').run(newToken(), req.params.id);
-  riderSync.poke();
   res.json(riderRows('e.id=' + (Math.trunc(+req.params.id) || 0), true)[0]);
 }));
 // Send the rider their link from the restaurant's WhatsApp
 app.post('/api/riders/:id/send-link', userErrors(async (req, res) => {
   const r = riderRows('e.id=' + (Math.trunc(+req.params.id) || 0), true)[0];
   if (!r) throw new UserError('Rider not found');
-  if (!r.link) throw new UserError('Connect the cloud first (Settings → Cloud): the rider screen runs there');
   const jid = lowStock.toJid(r.phone);
   if (!jid) throw new UserError("Add the rider's WhatsApp number first");
-  if (!waOut.isConnected()) throw new UserError('WhatsApp is not connected (Settings → WhatsApp bot)');
+  if (!waOut.isConnected()) throw new UserError('WhatsApp is not connected (Settings → WhatsApp)');
   await waOut.send(jid, `Salam ${r.name}! ${getSettings().name} ka rider screen: ${r.link}\n\nIsay phone par kholein aur browser ke menu se "Add to Home screen" karein. Delivery ke waqt yeh screen khuli rakhein.`, 'Rider link', 'system');
   res.json({ ok: true });
 }));
 // ---------- The rider's own screen (role rider, client/src/RiderHome.jsx) ----------
-// Same actions as the rider page on the cloud (rider-sync.js), for a rider logged in to the POS itself.
+// Same actions as the rider's phone page (/api/r/<token>, below), for a rider logged in to the POS itself.
 const riderMe = req => {
   const e = req.user.employee_id && db.prepare("SELECT * FROM employees WHERE id=? AND active=1 AND lower(job) LIKE '%rider%'").get(req.user.employee_id);
   if (!e) throw new UserError('This login is not linked to a rider. Ask the owner (Riders section)');
@@ -1313,14 +960,14 @@ app.get('/api/rider/board', userErrors((req, res) => {
   const M = "rider_id=? AND delivery_status='delivered' AND strftime('%Y-%m', delivered_at, 'localtime')=?";
   const m = db.prepare(`SELECT COUNT(*) deliveries, COALESCE(SUM(rider_fee),0) earned FROM orders WHERE ${M}`).get(e.id, month);
   const paid = db.prepare("SELECT COALESCE(SUM(amount),0) s FROM payroll WHERE employee_id=? AND month=? AND type='delivery'").get(e.id, month).s;
-  const pos = riderSync.positions()[e.id] || {};
+  const pos = riderPos.get(e.id) || {};
   res.json({
     me: { id: e.id, name: e.name, fee: e.delivery_fee || 0, on_duty: !!pos.on_duty, at: pos.at || null },
     mine, ready, others_out: orders.filter(o => o.delivery_status === 'out' && o.rider_id !== e.id).length,
     today: { delivered: doneToday.length, earned: doneToday.reduce((s, o) => s + (o.rider_fee || 0), 0) },
     cash_with_me: db.prepare("SELECT COALESCE(SUM(total),0) s FROM orders WHERE rider_id=? AND status='open' AND delivery_status='delivered'").get(e.id).s,
     month: { ...m, paid, owed: m.earned - paid },
-    phone_link: riderLink(e), // their own cloud page: shares location when this screen is opened over plain http (no GPS there)
+    phone_link: riderLink(e), // their own phone page: shares location (GPS needs https)
   });
 }));
 app.post('/api/rider/accept', userErrors((req, res) => res.json(riderOrder(dispatchOrder(+req.body.order, riderMe(req).id, { byRider: true }), true))));
@@ -1328,13 +975,71 @@ app.post('/api/rider/delivered', userErrors((req, res) => res.json(riderOrder(de
 app.post('/api/rider/location', userErrors((req, res) => {
   const lat = +req.body.lat, lng = +req.body.lng;
   if (!(Math.abs(lat) <= 90 && Math.abs(lng) <= 180)) throw new UserError('Bad position');
-  riderSync.setLocal(riderMe(req).id, { lat, lng, acc: Math.min(9999, Math.max(0, +req.body.acc || 0)), on_duty: true });
+  riderPos.set(riderMe(req).id, { lat, lng, acc: Math.min(9999, Math.max(0, +req.body.acc || 0)), on_duty: true });
   res.json({ ok: true });
 }));
 app.post('/api/rider/duty', userErrors((req, res) => {
-  const e = riderMe(req), cur = riderSync.positions()[e.id] || {};
-  riderSync.setLocal(e.id, { lat: cur.lat ?? null, lng: cur.lng ?? null, acc: cur.acc ?? null, on_duty: !!req.body.on });
+  const e = riderMe(req), cur = riderPos.get(e.id) || {};
+  riderPos.set(e.id, { lat: cur.lat ?? null, lng: cur.lng ?? null, acc: cur.acc ?? null, on_duty: !!req.body.on });
   res.json({ ok: true, on_duty: !!req.body.on });
+}));
+
+// ---------- A rider's phone page (/r/<restaurant>/<token>) and the customer's tracking page ----------
+// The link's secret is the rider's `rider_token`, looked up in the restaurant named by X-Tenant, so it means nothing in another
+// restaurant. It opens this rider's actions only. Money is never done here: Accept is dispatchOrder, Delivered is deliverOrder.
+const badLinks = new Map(); // ip -> { n, since }: wrong secrets are slowed down (the links are 128-bit, so this is only noise)
+const badLink = (req, msg) => {
+  const b = badLinks.get(req.ip), fresh = b && Date.now() - b.since < 600_000 ? b : { n: 0, since: Date.now() };
+  fresh.n++; badLinks.set(req.ip, fresh);
+  if (badLinks.size > 5000) badLinks.clear();
+  throw new UserError(fresh.n > 30 ? 'Too many tries. Please wait a few minutes.' : msg, { status: fresh.n > 30 ? 429 : 404 });
+};
+const linkRoute = fn => (req, res) => {
+  try { fn(req, res); }
+  catch (e) { if (e instanceof UserError) res.status(e.status || 400).json({ error: e.message }); else throw e; }
+};
+const phoneRider = req => {
+  const e = db.prepare("SELECT * FROM employees WHERE rider_token=? AND active=1 AND lower(job) LIKE '%rider%'").get(req.params.token);
+  return e || badLink(req, 'This link is not valid any more. Ask the restaurant for a new one.');
+};
+const phoneOrder = (o, mine) => ({ local_id: o.id, status: o.delivery_status || (['ready', 'done'].includes(o.kitchen_status) ? 'ready' : 'cooking'), customer: o.customer, address: o.address,
+  zone: o.zone, total: o.total, cod: o.status !== 'paid', items: o.items.map(i => `${i.qty}× ${i.name}`).join(', ').slice(0, 300), created_at: o.created_at,
+  dispatched_at: o.dispatched_at, phone: mine ? o.phone : undefined });
+app.get('/api/r/:token', linkRoute((req, res) => {
+  const e = phoneRider(req);
+  const orders = db.prepare(`SELECT id FROM orders WHERE type='delivery' AND status NOT IN ('cancelled','merged')
+    AND (status='open' OR delivery_status='out' OR date(COALESCE(delivered_at, paid_at, created_at),'localtime') = date('now','localtime')) ORDER BY id`).all().map(r => getOrder(r.id));
+  const pos = riderPos.get(e.id) || {};
+  res.json({
+    restaurant: getSettings().name || req.tenant.name, rider: { name: e.name, on_duty: !!pos.on_duty, at: pos.at || null },
+    mine: orders.filter(o => o.rider_id === e.id && o.delivery_status === 'out').map(o => phoneOrder(o, true)),
+    ready: orders.filter(o => !o.delivery_status).map(o => phoneOrder(o, false)),
+    others_out: orders.filter(o => o.delivery_status === 'out' && o.rider_id !== e.id).length,
+    today: { delivered: orders.filter(o => o.rider_id === e.id && o.delivery_status === 'delivered').length,
+      cash: db.prepare("SELECT COALESCE(SUM(total),0) s FROM orders WHERE rider_id=? AND status='open' AND delivery_status='delivered'").get(e.id).s },
+  });
+}));
+app.post('/api/r/:token/accept', linkRoute((req, res) => { dispatchOrder(+req.body.order, phoneRider(req).id, { byRider: true }); res.json({ ok: true }); }));
+app.post('/api/r/:token/delivered', linkRoute((req, res) => { deliverOrder(+req.body.order, { riderId: phoneRider(req).id }); res.json({ ok: true }); }));
+app.post('/api/r/:token/location', linkRoute((req, res) => {
+  const e = phoneRider(req), lat = +req.body.lat, lng = +req.body.lng;
+  if (!(Math.abs(lat) <= 90 && Math.abs(lng) <= 180)) throw new UserError('Bad position');
+  riderPos.set(e.id, { lat, lng, acc: Math.min(9999, Math.max(0, +req.body.acc || 0)), on_duty: true });
+  res.json({ ok: true });
+}));
+app.post('/api/r/:token/duty', linkRoute((req, res) => {
+  const e = phoneRider(req), cur = riderPos.get(e.id) || {};
+  riderPos.set(e.id, { lat: cur.lat ?? null, lng: cur.lng ?? null, acc: cur.acc ?? null, on_duty: !!req.body.on });
+  res.json({ ok: true });
+}));
+// The customer's page: this one order's status, the rider's name and last position. No phone, address, items or other orders.
+app.get('/api/track/:token', linkRoute((req, res) => {
+  const o = db.prepare("SELECT id, status, delivery_status, kitchen_status, rider_id, dispatched_at, delivered_at FROM orders WHERE track_token=? AND type='delivery'").get(req.params.token);
+  if (!o) badLink(req, 'This tracking link is not valid.');
+  const status = o.status === 'cancelled' ? 'cancelled' : o.delivery_status || (['ready', 'done'].includes(o.kitchen_status) ? 'ready' : 'cooking');
+  const r = o.rider_id && status === 'out' ? db.prepare('SELECT name FROM employees WHERE id=?').get(o.rider_id) : null, p = r && riderPos.get(o.rider_id);
+  res.json({ order: o.id, restaurant: getSettings().name || req.tenant.name, status, dispatched_at: o.dispatched_at, delivered_at: o.delivered_at,
+    rider: r ? { name: r.name, lat: p?.lat ?? null, lng: p?.lng ?? null, at: p?.at ?? null } : null });
 }));
 
 // Board: everything not yet delivered, plus today's delivered orders
@@ -1343,7 +1048,7 @@ app.get('/api/deliveries', (req, res) => {
       AND (status='open' OR delivery_status='out' OR date(COALESCE(delivered_at, paid_at, created_at),'localtime') = date('now','localtime'))
     ORDER BY id`).all().map(r => getOrder(r.id)));
 });
-// Out with a rider: from the Delivery board, or the rider pressed Accept on their phone (byRider, via rider-sync.js)
+// Out with a rider: from the Delivery board, or the rider pressed Accept on their phone (byRider)
 function dispatchOrder(orderId, riderId, { byRider = false } = {}) {
   const o = getOrder(orderId);
   if (!o || o.type !== 'delivery' || !['open', 'paid'].includes(o.status)) throw new UserError('Delivery order not found');
@@ -1355,7 +1060,6 @@ function dispatchOrder(orderId, riderId, { byRider = false } = {}) {
   // Food was ready: the ticket leaves the kitchen board. Sent early (still cooking): it stays, so the kitchen still makes it.
   db.prepare(`UPDATE orders SET rider_id=?, rider_fee=?, delivery_status='out', dispatched_at=?, accepted_by_rider=?, track_token=COALESCE(track_token, ?),
     kitchen_status = CASE WHEN kitchen_status='ready' THEN 'done' ELSE kitchen_status END WHERE id=?`).run(r.id, r.delivery_fee, now(), byRider ? 1 : 0, newToken(), o.id);
-  riderSync.poke();
   notifyOnTheWay(o.id, r.name);
   return getOrder(o.id);
 }
@@ -1364,14 +1068,12 @@ function deliverOrder(orderId, { riderId = null } = {}) {
   if (!o) throw new UserError('This order is not out for delivery');
   if (riderId && o.rider_id !== +riderId) throw new UserError('This order is with another rider');
   db.prepare("UPDATE orders SET delivery_status='delivered', delivered_at=? WHERE id=?").run(now(), o.id);
-  riderSync.poke();
   return getOrder(o.id);
 }
 // A WhatsApp takeaway customer hears their order is ready to collect
 // An order the cloud WhatsApp bot took: its chat is on the cloud, so the message goes out from there
 function waNotify(w, text, what) {
-  const sent = w.cloud_id ? cloud.call('/api/sync/wa-send', { chat_id: w.chat_id, text })
-    : waModule.wa.isConnected() ? waModule.wa.send(w.chat_id, text, 'Order update', 'system') : null;
+  const sent = waModule.wa.isConnected() ? waModule.wa.send(w.chat_id, text, 'Order update', 'system') : null;
   sent?.catch(e => console.error(`${what} message:`, e.message));
 }
 function notifyReadyForPickup(orderId) {
@@ -1409,7 +1111,6 @@ app.post('/api/riders/:id/settle', userErrors((req, res) => {
     payOrder(o, 'cash', o.total, req.user.name);
     total += o.total;
   }
-  riderSync.poke();
   res.json({ ok: true, orders: orders.length, total });
 }));
 // Rider accounts for a month (admin): deliveries, what they earned (fee per delivery, as it was at the time), what was
@@ -1447,21 +1148,89 @@ app.post('/api/riders/:id/pay', userErrors((req, res) => {
 }));
 
 // ---------- Printing ----------
-app.post('/api/print/receipt/:id', async (req, res) => {
-  const o = getOrder(req.params.id), s = getSettings();
+// The server never prints and never connects to a printer: it builds the bytes and queues them. HazelPOS Bridge (bridge/), a
+// small program in the shop, fetches the jobs and prints them, so a restaurant can never make the server reach any address.
+const PRINT_ACK_MS = +process.env.PRINT_ACK_MS || 60_000, PRINT_STALE_MS = 30 * 60_000, PRINT_MAX_TRIES = 3;
+const queuePrint = (kind, bytes, label) => Number(db.prepare("INSERT INTO print_jobs (kind,label,data,status,created_at,tries) VALUES (?,?,?,'queued',?,0)")
+  .run(kind, label, Buffer.from(bytes).toString('base64'), now()).lastInsertRowid);
+const printingOn = () => !!db.prepare("SELECT 1 FROM devices WHERE kind='bridge' AND revoked_at IS NULL").get(); // no printer helper: the browser print button stays
+// Unconfirmed jobs go back to the queue (3 tries); old tickets are not printed any more
+function maintainJobs() {
+  const t = Date.now();
+  db.prepare("UPDATE print_jobs SET status='failed', error='Too old: not printed (reprint if needed)', done_at=? WHERE status='queued' AND created_at < ?").run(now(), new Date(t - PRINT_STALE_MS).toISOString());
+  const lost = new Date(t - PRINT_ACK_MS).toISOString();
+  db.prepare("UPDATE print_jobs SET status='failed', error='Printer helper did not confirm', done_at=? WHERE status='sent' AND sent_at < ? AND tries >= ?").run(now(), lost, PRINT_MAX_TRIES);
+  db.prepare("UPDATE print_jobs SET status='queued' WHERE status='sent' AND sent_at < ?").run(lost);
+}
+setInterval(() => tenancy.forEach(maintainJobs), 30_000).unref();
+const needBridge = (req, res, next) => printingOn() ? next() : res.status(409).json({ error: 'Set up the printer helper in Settings → Printers', code: 'no_bridge' });
+app.post('/api/print/receipt/:id', needBridge, (req, res) => {
+  const o = getOrder(req.params.id);
   if (!o) return res.status(404).json({ error: 'Not found' });
-  try { await printer.send(s.receipt_printer, printer.receipt(o, s)); res.json({ ok: true }); }
-  catch (e) { res.status(502).json({ error: e.message }); }
+  queuePrint('receipt', printer.receipt(o, getSettings()), `Order #${o.id} receipt`);
+  res.json({ ok: true, queued: true });
 });
-app.post('/api/print/kitchen/:id', async (req, res) => {
-  const o = getOrder(req.params.id), s = getSettings();
+app.post('/api/print/kitchen/:id', needBridge, (req, res) => {
+  const o = getOrder(req.params.id);
   if (!o) return res.status(404).json({ error: 'Not found' });
-  try { await printer.send(s.kitchen_printer, printer.kitchenTicket(o, o.items, { s })); res.json({ ok: true }); }
-  catch (e) { res.status(502).json({ error: e.message }); }
+  queuePrint('kitchen', printer.kitchenTicket(o, o.items, { s: getSettings() }), `Order #${o.id} kitchen`);
+  res.json({ ok: true, queued: true });
 });
-app.post('/api/print/test', async (req, res) => {
-  try { await printer.send(req.body.target, printer.testPage(getSettings())); res.json({ ok: true }); }
-  catch (e) { res.status(502).json({ error: e.message }); }
+app.post('/api/print/test', needBridge, (req, res) => { queuePrint('test', printer.testPage(getSettings()), 'Test page'); res.json({ ok: true, queued: true }); });
+app.post('/api/print/pairing', (req, res) => { // admin only (not in ACCESS): a fresh 6-digit code replaces the unused ones of this restaurant
+  tenancy.control.prepare('DELETE FROM bridge_pairings WHERE tenant_id=? AND used_at IS NULL').run(req.tenant.id);
+  tenancy.control.prepare('DELETE FROM bridge_pairings WHERE expires_at < ?').run(new Date(Date.now() - 864e5).toISOString());
+  for (;;) {
+    const code = String(crypto.randomInt(0, 1_000_000)).padStart(6, '0'), hash = tenancy.sha256(code);
+    if (tenancy.control.prepare('SELECT 1 FROM bridge_pairings WHERE code_hash=?').get(hash)) continue;
+    const expires_at = new Date(Date.now() + 10 * 60_000).toISOString();
+    tenancy.control.prepare('INSERT INTO bridge_pairings (code_hash, tenant_id, created_by, expires_at) VALUES (?,?,?,?)').run(hash, req.tenant.id, req.user?.name || '', expires_at);
+    return res.json({ code, expires_at });
+  }
+});
+app.get('/api/print/status', (req, res) => {
+  maintainJobs();
+  res.json({
+    bridge_online: !!db.prepare("SELECT 1 FROM devices WHERE kind='bridge' AND revoked_at IS NULL AND last_seen > ?").get(new Date(Date.now() - 60_000).toISOString()),
+    bridge_set_up: printingOn(),
+    waiting: db.prepare("SELECT COUNT(*) c FROM print_jobs WHERE status='queued'").get().c,
+    failed_today: db.prepare("SELECT id, label, error, created_at FROM print_jobs WHERE status='failed' AND retried=0 AND COALESCE(done_at, created_at) > ? ORDER BY id DESC LIMIT 50").all(new Date(Date.now() - 864e5).toISOString()),
+  });
+});
+app.post('/api/print/jobs/:id/retry', (req, res) => {
+  const j = db.prepare("SELECT * FROM print_jobs WHERE id=? AND status='failed'").get(req.params.id);
+  if (!j) return res.status(404).json({ error: 'That ticket is not waiting to be reprinted' });
+  if (!db.prepare("UPDATE print_jobs SET retried=1 WHERE id=? AND status='failed' AND retried=0").run(j.id).changes) return res.status(409).json({ error: 'Already reprinted' });
+  const id = Number(db.prepare("INSERT INTO print_jobs (kind,label,data,status,created_at,tries) VALUES (?,?,?,'queued',?,0)").run(j.kind, j.label, j.data, now()).lastInsertRowid);
+  res.json({ ok: true, id });
+});
+
+// ---------- HazelPOS Bridge (device kind 'bridge'): fetches print jobs, long poll ----------
+const bridgeOnly = (req, res, next) => req.device?.kind === 'bridge' ? next() : res.status(403).json({ error: 'This route is for the printer helper', code: 'not_bridge' });
+app.get('/api/bridge/ping', bridgeOnly, (req, res) => res.json({ ok: true, name: req.device.name, restaurant: req.tenant.name }));
+app.get('/api/bridge/jobs', bridgeOnly, async (req, res) => {
+  const deadline = Date.now() + Math.min(30, Math.max(0, +req.query.wait || 0)) * 1000;
+  let closed = false; res.on('close', () => { closed = true; });
+  let seen = 0; // last_seen only moves while this poll is really open, so an abandoned poll does not keep the helper "online"
+  for (;;) {
+    if (closed) return; // gone: claim nothing, or a ticket would be handed to nobody
+    maintainJobs();
+    if (Date.now() - seen > 10_000) { db.prepare('UPDATE devices SET last_seen=? WHERE id=?').run(now(), req.device.id); seen = Date.now(); }
+    const jobs = db.prepare("SELECT id, kind, label, data FROM print_jobs WHERE status='queued' ORDER BY id LIMIT 10").all();
+    if (jobs.length) {
+      const up = db.prepare("UPDATE print_jobs SET status='sent', sent_at=?, tries=tries+1 WHERE id=?");
+      for (const j of jobs) up.run(now(), j.id);
+      return res.json(jobs);
+    }
+    if (Date.now() >= deadline) return res.json([]);
+    await new Promise(r => setTimeout(r, 400));
+  }
+});
+app.post('/api/bridge/jobs/:id/done', bridgeOnly, (req, res) => {
+  const ok = req.body.ok === true;
+  db.prepare("UPDATE print_jobs SET status=?, error=?, done_at=? WHERE id=? AND status IN ('sent','queued')")
+    .run(ok ? 'done' : 'failed', ok ? null : String(req.body.error || 'Could not print').slice(0, 300), now(), req.params.id);
+  res.json({ ok: true });
 });
 
 // ---------- Kitchen display ----------
@@ -1473,7 +1242,7 @@ app.get('/api/kitchen', (req, res) => {
 // After Ready, each order type goes its own way:
 //   dine-in  -> the counter is told "Table 5: food ready"; whoever serves presses Served (done)
 //   takeaway -> the counter is told; a WhatsApp customer gets "ready to pick up"; Picked up or paying clears it
-//   delivery -> riders are told (rider-sync); it leaves the kitchen when a rider takes it (dispatchOrder)
+//   delivery -> riders see it on their phone page; it leaves the kitchen when a rider takes it (dispatchOrder)
 app.post('/api/kitchen/:id', (req, res) => {
   const s = req.body.status;
   if (!['new', 'preparing', 'ready', 'done'].includes(s)) return res.status(400).json({ error: 'bad status' });
@@ -1481,7 +1250,6 @@ app.post('/api/kitchen/:id', (req, res) => {
   if (!before) return res.status(404).json({ error: 'Order not found' });
   db.prepare("UPDATE orders SET kitchen_status=?, ready_at=CASE WHEN ?='ready' THEN ? ELSE ready_at END WHERE id=?").run(s, s, now(), before.id);
   if (s === 'ready' && before.kitchen_status !== 'ready') {
-    if (before.type === 'delivery') riderSync.poke(); // riders' phones beep within seconds
     if (before.type === 'takeaway') notifyReadyForPickup(before.id);
   }
   res.json({ ok: true });
@@ -1804,190 +1572,9 @@ app.post('/api/promos', (req, res, next) => {
 });
 crud('promos', 'promos', ['code', 'type', 'value', 'min_order', 'max_discount', 'uses_limit', 'expires', 'active']);
 
-// ---------- Cloud sync (admin) ----------
-// The branch key lives in its own table so it never appears in /api/settings
-const cloud = require('./cloud-sync')(db);
-const riderSync = require('./rider-sync')(db, cloud, { getOrder, dispatchOrder, deliverOrder });
-// WhatsApp bot on HazelPOS Cloud (cloud/wa-host.js): the cloud answers customers even when this PC is off. Every 2
-// minutes the POS checks whether that is switched on and sends its menu, zones, FAQ and menu photos when they changed.
-// While the cloud bot is on, this POS's own bot stays quiet, so a customer never gets two answers.
-let waCloudMode = false;
-const waKnowledge = () => {
-  const { readPosDb } = require('../rag/src/loaders/pos-db');
-  const { config: ragConfig } = require('../rag/src/config');
-  const pos = readPosDb(db, ragConfig.data);
-  const pictures = db.prepare('SELECT id, caption, mime, data FROM menu_images ORDER BY sort, id').all()
-    .map(p => ({ id: p.id, caption: p.caption || '', mime: p.mime, data: Buffer.from(p.data).toString('base64') }));
-  const hash = crypto.createHash('sha256').update(JSON.stringify({ pos, pictures })).digest('hex');
-  return { pos, pictures, hash };
-};
-const cloudReady = () => { try { return cloud.status().connected && !cloud.isHeld(); } catch { return false; } };
-// on: true/false = the owner pressed "Link WhatsApp" / "Move to cloud" on this POS; undefined = just ask the cloud
-const syncWaCloud = async on => {
-  if (!cloudReady()) { if (on !== undefined) throw new Error('This PC is not connected to HazelPOS Cloud (internet?)'); return; }
-  try {
-    const mode = on === undefined ? await cloud.call('/api/sync/wa-mode') : await cloud.call('/api/sync/wa-mode', { enabled: !!on });
-    const was = waCloudMode;
-    waCloudMode = !!mode?.cloud;
-    // Switched to the cloud: this POS lets go of WhatsApp (stays linked, so switching back needs no new QR).
-    // Switched back: it connects again by itself.
-    waModule?.store.meta.set('cloud_mode', waCloudMode ? '1' : '0');
-    if (waCloudMode && (!was || waModule?.wa.isConnected())) waModule?.wa.stop();
-    if (!waCloudMode && was) waModule?.wa.connect().catch(() => {});
-    if (!waCloudMode) return;
-    const k = waKnowledge();
-    if (k.hash !== mode.knowledge_hash) await cloud.call('/api/sync/wa-knowledge', k);
-  } catch (e) { if (on !== undefined) throw e; if (!/not reachable|too long/i.test(e.message)) console.error('Cloud WhatsApp:', e.message); }
-};
-setTimeout(() => syncWaCloud(), 15_000).unref(); setInterval(() => syncWaCloud(), 120_000).unref();
-// "Where is my order?" on the cloud bot: today's delivery status of its chats, in the three languages (sent when changed)
-let lastWaStatus = '', lastWaStatusAt = 0;
-const pushWaStatus = async () => {
-  const chats = {};
-  for (const r of db.prepare("SELECT DISTINCT chat_id FROM wa_orders WHERE cloud_id IS NOT NULL AND status='accepted' AND handled_at >= ?").all(new Date(Date.now() - 864e5).toISOString())) {
-    const t = Object.fromEntries(['en', 'roman_ur', 'ur'].map(l => [l, deliveryStatus(r.chat_id, l)]));
-    if (t.en) chats[r.chat_id] = t;
-  }
-  const j = JSON.stringify(chats);
-  if (j === lastWaStatus && Date.now() - lastWaStatusAt < 600_000) return; // again every 10 min: the cloud keeps it in memory only
-  await cloud.call('/api/sync/wa-status', { chats });
-  lastWaStatus = j; lastWaStatusAt = Date.now();
-};
-// Orders customers confirmed with the cloud bot: shown to the cashier within 20 s, like orders taken here
-setInterval(async () => {
-  if (!waCloudMode || !waModule || !cloud.status().connected || cloud.isHeld()) return;
-  try {
-    await pushWaStatus();
-    const list = await cloud.call('/api/sync/wa-orders');
-    if (!Array.isArray(list) || !list.length) return;
-    for (const o of list) waModule.store.importCloudOrder(o);
-    await cloud.call('/api/sync/wa-orders/ack', { ids: list.map(o => o.id) });
-  } catch (e) { if (!/not reachable|too long/i.test(e.message)) console.error('Cloud WhatsApp orders:', e.message); }
-}, 20_000).unref();
-// A PIN you reset from the admin app (someone forgot theirs): picked up within a minute. The person logs in with the
-// temporary PIN and must choose a new one straight away; their other open sessions are signed out.
-setInterval(async () => {
-  if (!cloud.status().connected || cloud.isHeld()) return;
-  try {
-    const list = await cloud.call('/api/sync/pin-resets');
-    if (!Array.isArray(list) || !list.length) return;
-    const results = list.map(r => {
-      const u = db.prepare('SELECT id, name FROM users WHERE id=?').get(r.user_id);
-      if (!u) return { id: r.id, result: 'That login no longer exists on the POS' };
-      const taken = userByPin(String(r.pin || ''));
-      if (!PIN_OK(r.pin)) return { id: r.id, result: 'Not a valid PIN' };
-      if (taken && taken.id !== u.id) return { id: r.id, result: 'Someone else on this POS already uses that PIN: choose another' };
-      db.prepare('UPDATE users SET pin=?, must_change_pin=? WHERE id=?').run(hashPin(String(r.pin)), r.force_change ? 1 : 0, u.id); vaultPin(u.id, r.pin);
-      db.prepare('DELETE FROM sessions WHERE user_id=?').run(u.id);
-      db.prepare('INSERT INTO audit_log (at,user_id,user_name,role,ip,action,status,detail) VALUES (?,?,?,?,?,?,?,?)').run(now(), null, 'HazelPOS (remote)', '', '', 'PIN RESET', 200, `PIN of ${u.name} reset from HazelPOS Admin`);
-      return { id: r.id, result: 'ok' };
-    });
-    await cloud.call('/api/sync/pin-resets/ack', { results });
-  } catch { /* offline: next minute */ }
-}, 60_000).unref();
-app.get('/api/cloud/status', (req, res) => res.json(cloud.status()));
-app.post('/api/cloud/connect', async (req, res) => {
-  const url = String(req.body.url || '').trim().replace(/\/+$/, ''); let key = String(req.body.key || '').trim();
-  if (!/^https?:\/\//.test(url) || !key) return res.status(400).json({ error: 'Enter the cloud address and the branch key or activation code' });
-  // An installed app talks to the HazelPOS Cloud that came with it, and to no other: otherwise its orders and backups could be sent anywhere
-  const fixedCloud = String(process.env.HAZEL_CLOUD_URL || '').trim().replace(/\/+$/, '');
-  if (lic.required && fixedCloud && url !== fixedCloud) return res.status(400).json({ error: 'This HazelPOS connects to HazelPOS Cloud only' });
-  // An activation code (HZ-…) from the admin app works here too, for a POS run by hand (no installer): swap it for the branch key
-  if (/^hz-/i.test(key)) {
-    try {
-      const r = await fetch(url + '/api/activate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: key }), signal: AbortSignal.timeout(20000) });
-      const d = await r.json().catch(() => ({}));
-      if (!r.ok) return res.status(400).json({ error: d.error || 'That activation code did not work' });
-      key = d.key;
-    } catch (e) { return res.status(502).json({ error: `Could not reach the cloud: ${e.message}` }); }
-  }
-  try { const hello = await cloud.connect(url, key); res.json({ ...cloud.status(), branch: hello.branch }); }
-  catch (e) { res.status(502).json({ error: `Could not connect: ${e.message}` }); }
-});
-app.post('/api/cloud/sync', async (req, res) => {
-  const r = await cloud.syncNow();
-  r.error ? res.status(502).json({ error: r.error }) : res.json({ ...cloud.status(), result: r });
-});
-app.post('/api/cloud/backup', async (req, res) => {
-  try { await cloud.backupNow(); res.json(cloud.status()); } catch (e) { res.status(502).json({ error: e.message }); }
-});
-app.post('/api/cloud/disconnect', (req, res) => {
-  if (lic.required) return res.status(400).json({ error: 'This POS is activated with HazelPOS Cloud, so it stays connected' });
-  cloud.disconnect(); res.json(cloud.status());
-});
-
-// ---------- Membership (installed app only: HAZEL_LICENCE=1, see server/licence.js) ----------
-const setupApplier = require('./setup')(db, { hashPin, onPin: vaultPin });
-// What your admin app sees about this POS. Never customer data: counts, statuses and error messages only.
-const health = () => {
-  const w = waModule?.wa.status() || {};
-  return {
-    users: db.prepare('SELECT id, name, role, pin_changed_at FROM users ORDER BY id').all().map(u => ({ ...u })), // names and roles only: your admin app's "Reset PIN"
-    version: process.env.HAZEL_VERSION || require('./package.json').version, platform: `${process.platform} ${process.arch}`, node: process.versions.node,
-    uptime_min: Math.round(process.uptime() / 60),
-    whatsapp: { status: w.status, connected_at: w.connected_at, error: w.error || '', assistant: waModule?.assistant.enabled() ?? null },
-    orders_today: db.prepare("SELECT COUNT(*) c FROM orders WHERE date(created_at,'localtime') = date('now','localtime')").get().c,
-    cloud_sync: (({ last_sync, last_backup, last_error, pending_orders }) => ({ last_sync, last_backup, last_error, pending_orders }))(cloud.status()),
-    errors: recentErrors.slice(-20),
-    update: { state: appUpdate.state, version: appUpdate.version || null }, // appUpdate: App updates below
-  };
-};
-const restorer = require('./restore')(db, cloud);
-const lic = require('./licence')(db, cloud, { setup: setupApplier, health, restore: restorer });
-// ---------- App updates (with the desktop app: desktop/main.js) ----------
-// The desktop app downloads updates in the background and reports here; the owner sees it in Settings → Updates and
-// can install now. Otherwise it installs at night with no open orders. Before installing: a cloud backup (prepare-update)
-// and a copy of the database on this PC (done by the desktop app).
-const INTERNAL = process.env.HAZEL_INTERNAL_TOKEN || '';
-const internalOnly = (req, res, next) => INTERNAL && req.get('x-hazel-internal') === INTERNAL ? next() : res.status(403).json({ error: 'Not allowed' });
-let appUpdate = { state: INTERNAL ? 'idle' : 'unavailable' }, updateAsk = { install: false, check: false }, vendorAskSeen = '';
-const openOrders = () => db.prepare("SELECT COUNT(*) c FROM orders WHERE status='open'").get().c;
-// Updates to a few clients first (admin app → Updates): a test client installs any version; the others only up to the
-// version you released to everyone. No release set yet = everyone (nothing held back).
-const newer = (a, b) => { const x = String(a).split('.').map(Number), y = String(b).split('.').map(Number); for (let i = 0; i < 3; i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0); return false; };
-const updateAllowed = version => {
-  const p = lic.state().update_policy;
-  return !version || !p || p.early || !p.release_version || !newer(version, p.release_version);
-};
-app.post('/api/internal/update-state', internalOnly, (req, res) => { appUpdate = { ...req.body }; res.json({ ok: true }); });
-app.get('/api/internal/update-request', internalOnly, (req, res) => {
-  const vendorAsk = lic.state().update_requested_at || ''; // you pressed "Ask all clients to update" in the admin app
-  if (vendorAsk && vendorAsk !== vendorAskSeen) { vendorAskSeen = vendorAsk; updateAsk.check = true; }
-  res.json({ ...updateAsk, open_orders: openOrders(), allowed: updateAllowed(appUpdate.version) });
-  updateAsk = { install: false, check: false };
-});
-app.post('/api/internal/prepare-update', internalOnly, async (req, res) => {
-  try { await cloud.backupNow(); res.json({ ok: true, cloud_backup: true }); } catch (e) { res.json({ ok: true, cloud_backup: false, error: e.message }); }
-});
-app.get('/api/update', (req, res) => res.json({ ...appUpdate, allowed: updateAllowed(appUpdate.version), current: process.env.HAZEL_VERSION || require('./package.json').version,
-  desktop: !!INTERNAL, open_orders: openOrders(), vendor_requested_at: lic.state().update_requested_at || null }));
-app.post('/api/update/check', (req, res) => { if (!INTERNAL) return res.status(400).json({ error: 'Updates come with the installed HazelPOS app' }); updateAsk.check = true; res.json({ ok: true }); });
-app.post('/api/update/install', (req, res) => {
-  if (appUpdate.state !== 'ready') return res.status(400).json({ error: 'No update is ready to install yet' });
-  if (!updateAllowed(appUpdate.version)) return res.status(400).json({ error: 'HazelPOS is testing this version with a few restaurants first. It installs as soon as it is released to everyone' });
-  updateAsk.install = true; res.json({ ok: true });
-});
-
-// Owner: replace everything on this PC with the cloud's newest backup of this branch
-app.post('/api/cloud/restore', async (req, res) => {
-  if (req.body.confirm !== 'RESTORE') return res.status(400).json({ error: 'Type RESTORE to confirm' });
-  try { res.json(await restorer.fromCloud()); } catch (e) { res.status(400).json({ error: `Could not restore: ${e.message}` }); }
-});
-app.get('/api/licence', (req, res) => res.json(lic.state()));
-app.post('/api/licence/check', async (req, res) => res.json(await lic.check()));
-app.post('/api/licence/activate', async (req, res) => {
-  if (!lic.required) return res.status(400).json({ error: 'This POS does not need activating' });
-  // Before activation nobody can log in yet, so the screen is open; afterwards only the owner can re-point it
-  if (lic.state().state !== 'activate' && req.user?.role !== 'admin') return res.status(403).json({ error: 'Already activated. Ask the owner' });
-  const url = String(req.body.url || '').trim(), code = String(req.body.code || req.body.key || '').trim();
-  if (!code) return res.status(400).json({ error: 'Enter the activation code' });
-  try { res.json(await lic.activate(url, code)); }
-  catch (e) { res.status(502).json({ error: `Could not activate: ${e.message}` }); }
-});
-
 // ---------- Fiscal invoicing (PRA / FBR) ----------
 const secret = k => db.prepare('SELECT value FROM secrets WHERE key=?').get(k)?.value || '';
-const fisc = require('./fiscal')(db, { getSettings, secret, getOrder });
+const fisc = require('./fiscal')(db, { getSettings, secret, getOrder }); // db is the proxy: nothing touches it until a request or timer runs inside a restaurant
 afterPaidHooks.push(id => fisc.onPaid(id));
 
 app.get('/api/secrets', (req, res) => res.json({ fiscal_token: !!secret('fiscal_token') }));
@@ -2001,11 +1588,6 @@ app.post('/api/fiscal/retry', async (req, res) => {
   let ok = 0;
   for (const p of fisc.pending()) { try { await fisc.submit(p.id); ok++; } catch (e) { return res.status(502).json({ error: e.message, sent: ok }); } }
   res.json({ ok: true, sent: ok });
-});
-// Shows exactly what would be sent to PRA/FBR for an order, to check against the authority's sandbox
-app.get('/api/fiscal/preview/:id', (req, res) => {
-  const o = getOrder(req.params.id);
-  o ? res.json(fisc.payload(o, getSettings())) : res.status(404).json({ error: 'Not found' });
 });
 
 // ---------- WhatsApp (linked by QR; chats + assistant in the Cashier screen) ----------
@@ -2031,13 +1613,21 @@ function createOrder({ type, zone_id, customer, phone, address, items, userName,
     return orderId;
   });
 }
-const waModule = require('./whatsapp')(app, db, { createOrder, getOrder, printKitchen, getSettings, aiAllowed: () => lic.aiAllowed() && !waCloudMode, cloudBot: () => waCloudMode, cloudReady, setCloudBot: on => syncWaCloud(!!on), cloudCall: (p, b) => cloud.call(p, b), cloudRaw: p => cloud.fetchRaw(p), deliveryStatus });
-// Messages the restaurant sends to a number (rider link, low-stock alert): from the cloud while the bot runs there
-const waOut = {
-  isConnected: () => waCloudMode || waModule.wa.isConnected(),
-  send: (jid, text, label, sender) => waCloudMode ? cloud.call('/api/sync/wa-send-phone', { jid, text, label }) : waModule.wa.send(jid, text, label, sender),
+// WhatsApp: one bot per restaurant (server/whatsapp/index.js). waModule / waOut answer for the restaurant of the current request.
+const waMgr = require('./whatsapp')({ tenancy, pos: { createOrder, getOrder, printKitchen, getSettings, deliveryStatus } });
+waInvalidate = id => waMgr.invalidate(id);
+const waModule = {
+  wa: {
+    isConnected: () => !!waMgr.current()?.wa.isConnected(),
+    send: (...a) => { const h = waMgr.current(); return h ? h.wa.send(...a) : Promise.reject(new Error('WhatsApp is not connected (Settings → WhatsApp)')); },
+  },
+  store: { chatForOrder: id => waMgr.current()?.store.chatForOrder(id) ?? null, ordersFor: id => waMgr.current()?.store.ordersFor(id) ?? [] },
 };
+const waOut = waModule.wa;
 const lowStock = require('./stock-alert')(db, { getSettings, wa: waOut });
+// Timers run once per restaurant, each inside its own context
+setInterval(() => tenancy.forEach(() => fisc.tick()), 2 * 60 * 1000).unref();
+setInterval(() => tenancy.forEach(() => lowStock.tick()), 60 * 1000).unref();
 // Settings → Alerts: what would be sent now, and a test send
 app.get('/api/low-stock-alert/preview', (req, res) => { const r = lowStock.report(); res.json({ low: r.low, text: r.text, enough: r.enough }); });
 app.post('/api/low-stock-alert/test', async (req, res) => {
@@ -2068,13 +1658,7 @@ app.get('/api/export/expenses', (req, res) => {
 });
 
 // ---------- QR Table Ordering ----------
-// Give every table a unique, unguessable QR token
-function ensureQrTokens() {
-  const missing = db.prepare("SELECT id FROM tables_ WHERE qr_token IS NULL OR qr_token=''").all();
-  const up = db.prepare('UPDATE tables_ SET qr_token=? WHERE id=?');
-  for (const t of missing) up.run(require('crypto').randomBytes(8).toString('hex'), t.id);
-}
-ensureQrTokens();
+const ensureQrTokens = () => ensureTokens(db); // (also done when a restaurant's database opens)
 const tableByToken = token => db.prepare('SELECT id, name, floor FROM tables_ WHERE qr_token=?').get(String(token));
 
 // LAN address so phones on the same WiFi can open the QR link
@@ -2082,7 +1666,7 @@ app.get('/api/qr-info', (req, res) => {
   ensureQrTokens();
   const ips = Object.values(require('os').networkInterfaces()).flat()
     .filter(i => i && i.family === 'IPv4' && !i.internal).map(i => i.address);
-  res.json({ ips, tables: db.prepare('SELECT id, name, floor, qr_token FROM tables_ ORDER BY id').all() });
+  res.json({ ips, slug: req.tenant.slug, tables: db.prepare('SELECT id, name, floor, qr_token FROM tables_ ORDER BY id').all() });
 });
 
 // Public: customer menu for a table
@@ -2100,15 +1684,16 @@ app.get('/api/qr/:token', (req, res) => {
 });
 
 // Public: customer places an order -> goes to staff for approval
-const qrHits = new Map(); // ip -> recent order times
+const qrHits = new Map(); // `${restaurant}:${ip}` -> recent order times
 app.post('/api/qr/:token/order', (req, res) => {
   const table = tableByToken(req.params.token);
   if (!table) return res.status(404).json({ error: 'Invalid table QR code' });
   // Anyone with the QR code can send orders: a few per table and per phone, so nobody can flood the cashier's screen
-  const recent = (qrHits.get(req.ip) || []).filter(t => Date.now() - t < 5 * 60e3);
+  const hitKey = `${req.tenant.id}:${req.ip}`;
+  const recent = (qrHits.get(hitKey) || []).filter(t => Date.now() - t < 5 * 60e3);
   if (recent.length >= 8 || db.prepare("SELECT COUNT(*) c FROM qr_requests WHERE table_id=? AND status='pending'").get(table.id).c >= 5)
     return res.status(429).json({ error: 'Please wait: the staff are still looking at your earlier orders' });
-  qrHits.set(req.ip, [...recent, Date.now()]);
+  qrHits.set(hitKey, [...recent, Date.now()]);
   if (qrHits.size > 2000) for (const [ip, ts] of qrHits) if (!ts.some(t => Date.now() - t < 5 * 60e3)) qrHits.delete(ip);
   let items;
   try {
@@ -2158,6 +1743,24 @@ app.post('/api/qr-requests/:id/reject', (req, res) => {
   res.json({ ok: true });
 });
 
+// ---------- Tills: "Use this device as a till" (owner) ----------
+// The key is shown once; only its sha256 is stored (here and in control.db, so a request can find its restaurant).
+app.get('/api/devices', (req, res) => res.json(db.prepare('SELECT id, name, kind, created_at, last_seen, revoked_at FROM devices ORDER BY id').all()));
+app.post('/api/devices', (req, res) => {
+  const name = String(req.body.name || '').trim().slice(0, 60);
+  if (!name) return res.status(400).json({ error: 'Give this till a name, for example Till 1' });
+  const kind = req.body.kind === 'bridge' ? 'bridge' : 'till';
+  const key = crypto.randomBytes(24).toString('hex'), hash = tenancy.sha256(key);
+  const id = db.prepare('INSERT INTO devices (name, key_hash, kind, created_at) VALUES (?,?,?,?)').run(name, hash, kind, now()).lastInsertRowid;
+  tenancy.control.prepare('INSERT INTO device_index (hash, tenant_id) VALUES (?,?)').run(hash, req.tenant.id);
+  res.json({ id: Number(id), name, kind, device_key: key });
+});
+app.post('/api/devices/:id/revoke', (req, res) => {
+  db.prepare('UPDATE devices SET revoked_at=? WHERE id=? AND revoked_at IS NULL').run(now(), req.params.id);
+  res.json({ ok: true });
+});
+app.use('/api/whatsapp', waMgr.router); // {state:'off'} status with no bot; 409 'Connect WhatsApp first' for the rest
+
 // Unknown API address: JSON, so the screen shows a message instead of "Unexpected token '<'"
 app.use('/api', (req, res) => res.status(404).json({ error: `Unknown address: ${req.method} ${req.originalUrl}` }));
 
@@ -2171,7 +1774,12 @@ if (DEMO) {
   app.use(express.static(path.join(__dirname, '../site')));
 }
 app.use(express.static(path.join(__dirname, '../client/dist'), { setHeaders: (res, file) => { if (file.endsWith('.html')) res.set('Content-Security-Policy', CSP); } }));
-app.get('/t/:token', (req, res) => res.set('Content-Security-Policy', CSP).sendFile(path.join(__dirname, '../client/dist/index.html')));
+app.get(['/welcome/:token', '/reset/:token'], (req, res) => res.set('Content-Security-Policy', CSP).sendFile(path.join(__dirname, '../client/dist/index.html')));
+app.get('/t/:slug/:token', (req, res) => res.set('Content-Security-Policy', CSP).sendFile(path.join(__dirname, '../client/dist/index.html')));
+// Rider and tracking pages: plain files in server/public (no build), opened from a link sent by WhatsApp
+app.get('/r/:slug/:token', (req, res) => res.set({ 'Content-Security-Policy': CSP, 'Cache-Control': 'no-store' }).sendFile(path.join(__dirname, 'public/rider.html')));
+app.get('/track/:slug/:token', (req, res) => res.set({ 'Content-Security-Policy': CSP, 'Cache-Control': 'no-store' }).sendFile(path.join(__dirname, 'public/track.html')));
+app.use('/p', express.static(path.join(__dirname, 'public'), { maxAge: '1h' }));
 
 // Any error not handled above is answered as JSON (never Express's HTML error page)
 app.use((err, req, res, next) => { // eslint-disable-line no-unused-vars
@@ -2183,5 +1791,13 @@ app.use((err, req, res, next) => { // eslint-disable-line no-unused-vars
 });
 
 const PORT = process.env.PORT || 4000;
-if (DEMO) console.log('Demo mode: the login screen offers Owner, Cashier, Kitchen and Rider without PINs');
-app.listen(PORT, '0.0.0.0', () => console.log(`HazelPOS server running on http://localhost:${PORT}`));
+if (DEMO) {
+  if (!tenancy.bySlug('demo')) tenancy.createTenant({ slug: 'demo', name: 'Demo restaurant' });
+  console.log('Demo mode: the login screen offers Owner, Cashier, Kitchen and Rider without PINs');
+}
+if (!DEMO && !tenancy.control.prepare('SELECT 1 FROM tenants').get() && process.env.NODE_ENV !== 'production')
+  console.log('No restaurants yet. Create the first one:\n  DATA_DIR=' + tenancy.DATA_DIR + ' node server/tenant-cli.js create --slug my-restaurant --name "My Restaurant" --owner-phone 03001234567 --owner-name Ali --password <password>');
+tenancy.hooks.waStop = id => waMgr.stop(id); tenancy.hooks.waStart = id => waMgr.start(id); // used by a restore
+require('./backup').start(); // hourly backups (server/backup.js)
+waMgr.startAll(); // restaurants with a saved WhatsApp login, 2 s apart (not with WHATSAPP=off)
+app.listen(PORT, '0.0.0.0', () => console.log(`HazelPOS server running on http://localhost:${PORT} (data: ${tenancy.DATA_DIR})`));

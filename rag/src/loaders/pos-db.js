@@ -5,7 +5,10 @@ const { DatabaseSync } = require('node:sqlite');
 
 const json = (v, fallback) => { try { return v ? JSON.parse(v) : fallback; } catch { return fallback; } };
 
+// In the online server (TENANCY=1, set by server/tenancy.js) there is no single POS database: callers must pass `pos`
+// built from the restaurant's own database (readPosDb), so this throws instead of opening a shared file.
 function readPos(dbPath, dataConfig) {
+  if (process.env.TENANCY === '1') throw new Error('readPos() was called without pos in server mode: pass pos built with readPosDb(<the restaurant database>)');
   if (!fs.existsSync(dbPath)) throw new Error(`POS database not found: ${dbPath}`);
   const db = new DatabaseSync(dbPath, { readOnly: true });
   try {

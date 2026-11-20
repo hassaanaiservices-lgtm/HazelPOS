@@ -1,0 +1,468 @@
+[
+  {
+    "id": "SETUP-0",
+    "claim": "(harness) A local cloud + two POS branches can be run on Linux without touching real data",
+    "why_it_matters": "Every 'auto' task below needs a clean, repeatable rig. Never use server/pos.db or the production cloud.",
+    "mode": "auto",
+    "steps": [
+      "Read cloud/README.md, desktop/README.md and the cloud-connection part of server/cloud-sync.js to learn how a POS is pointed at a cloud (URL + branch key) and how the vendor key is set.",
+      "Start the cloud: DATA_DIR=<scratch>/cloud VENDOR_API_KEY=test-vendor PORT=4200 node cloud/index.js (adjust var names to what cloud/index.js reads).",
+      "Through /api/vendor/* create client A with branch A1 and client B with branch B1; create activation codes for both.",
+      "Start POS A: POS_DB=<scratch>/a.db PORT=4001 HAZEL_LICENCE=1 WHATSAPP=off (WHATSAPP=off only for tasks that do not need the local socket) plus the cloud URL env; activate with A1's code. Same for POS B on :4002 with B1.",
+      "Write the exact commands that worked into docs/verify/RIG.md so the human can repeat them."
+    ],
+    "pass_if": "Both POS servers show cloud connected (GET /api/cloud/status or equivalent) and appear as branches in GET /api/vendor/branches.",
+    "evidence_to_collect": "RIG.md, startup logs, the vendor branches JSON."
+  },
+  {
+    "id": "WA-ROOT-1",
+    "claim": "ROOT CAUSE: 'the bot keeps answering when the PC is off' is only true when the cloud bot is switched ON for that branch in HazelPOS Admin; linking on the POS screen while it is OFF is PC mode",
+    "why_it_matters": "This is the incident. The real restaurant linked WhatsApp on the POS (PC mode) and the bot died with the PC. Prove which mode each branch is in and that nothing told the owner.",
+    "mode": "auto",
+    "steps": [
+      "On cloud, for the incident branch (ask the human for its id if production access is not available; otherwise use A1 in the rig): GET /api/vendor/branches/:id/whatsapp and record enabled/status/me/menu_at.",
+      "On POS A with cloud bot OFF: GET /api/whatsapp/status, confirm cloud_bot=false.",
+      "Open the POS WhatsApp screen (client/src/WhatsApp.jsx LinkScreen) with cloud_bot=false and screenshot it. Record whether ANY text warns that answers stop when the PC is off (lines 45-50 only show a note when cloud_bot is true).",
+      "Grep admin/src and client/src for any place that shows the owner/vendor which mode a branch is in (PC vs cloud) outside the admin WhatsApp bot tab."
+    ],
+    "pass_if": "Report states the mode of the incident branch as a fact from the cloud API, and lists every screen that does / does not tell the user the mode. FAIL (as a finding) if the POS link screen in PC mode gives no warning.",
+    "evidence_to_collect": "JSON of /whatsapp for the branch, screenshot of the POS link screen in both modes, grep results."
+  },
+  {
+    "id": "WA-ROOT-2",
+    "claim": "The cloud bot stays quiet until the POS has pushed its menu, and the POS only pushes the menu while the cloud bot is ON",
+    "why_it_matters": "Switching on in Admin is not enough: the POS must be online with version >= 1.0.7 once after switch-on, or the cloud bot never answers. Hidden precondition for the human steps.",
+    "mode": "auto",
+    "steps": [
+      "Read syncWaCloud in server/index.js (~line 1820): it returns before waKnowledge() when waCloudMode is false; first run is 15 s after start, then every 120 s.",
+      "Rig: switch cloud bot ON for A1 via POST /api/vendor/branches/A1/whatsapp/enable {enabled:true} with POS A stopped. Check GET .../whatsapp: menu_at must be empty.",
+      "Start POS A, wait up to 2.5 min, check again: menu_at, menu_items, menu_pictures set and matching POS A's menu count.",
+      "Send a fake inbound message to the cloud bot for A1 before the menu arrives (use the fake socket hook if wa-host.js has one; otherwise call the assistant entry point directly) and confirm it does not answer."
+    ],
+    "pass_if": "No menu on the cloud while POS is off or bot OFF; menu appears within 135 s of POS start with bot ON; bot silent without a menu.",
+    "evidence_to_collect": "Timestamps of switch-on, POS start, menu_at; the /whatsapp JSON before/after."
+  },
+  {
+    "id": "WA-REAL-1",
+    "claim": "The WhatsApp bot keeps answering customers when the restaurant's PC is off (cloud mode, real phone)",
+    "why_it_matters": "The headline promise that failed in the field. Only a real WhatsApp number proves it.",
+    "mode": "real",
+    "steps": [
+      "Use a TEST restaurant phone number (not a live restaurant) and a second phone as the 'customer'.",
+      "On the POS PC: make sure the POS is version 1.0.7 or newer (Settings → Updates shows the version) and the internet is on.",
+      "Open HazelPOS Admin → Clients → the test client → its branch → 'WhatsApp bot' tab.",
+      "Click 'Switch on', then confirm the box.",
+      "Wait until the line under the status says 'Menu from the POS: N items, M photos, <time>' (up to 2 minutes). If it says 'No menu from the POS yet', the POS is offline or too old: fix that first.",
+      "Click 'Link WhatsApp'. On the restaurant phone: WhatsApp → Settings (or ⋮) → Linked devices → Link a device, scan the QR shown in Admin.",
+      "Wait for status 'Connected · <number>'. If 'Start the bot' is shown, click it.",
+      "Shut down the POS PC completely (Start → Power → Shut down). Wait 5 minutes.",
+      "From the customer phone send: 'menu bhejo'. Then 'what are your timings?'. Then 'mujhe 1 zinger burger chahiye'.",
+      "Watch the Admin tab's log table at the same time."
+    ],
+    "pass_if": "Each customer message gets a reply within 60 s while the PC is off; the Admin log table shows each message and the bot's action.",
+    "evidence_to_collect": "Screen recording or screenshots of the customer phone with timestamps; screenshot of the Admin log; time the PC was shut down."
+  },
+  {
+    "id": "WA-AUTO-1",
+    "claim": "The cloud bot answers from the menu the POS pushed (prices, items, zones, FAQ, photos)",
+    "why_it_matters": "A cloud bot answering with a stale or empty menu quotes wrong prices.",
+    "mode": "auto",
+    "steps": [
+      "Rig with bot ON for A1 and menu pushed (WA-ROOT-2).",
+      "Fake socket allowed: drive cloud/wa-host.js for A1 with a fake inbound 'zinger burger kitna ka hai?'. DEEPSEEK_API_KEY needed for the real model; if absent, inspect the built prompt/context instead.",
+      "Change the zinger price on POS A, wait <= 2.5 min, ask again.",
+      "Check GET /api/vendor/branches/A1/whatsapp menu_items equals the POS item count."
+    ],
+    "pass_if": "Reply (or prompt context) quotes POS A's current price, and the new price after the change within 2.5 min.",
+    "evidence_to_collect": "Prompt context dump / replies before and after the price change, with timestamps."
+  },
+  {
+    "id": "WA-AUTO-2",
+    "claim": "Confirmed orders from the cloud bot reach the POS cashier within 20 s",
+    "why_it_matters": "If orders do not arrive, the customer thinks they ordered and nobody cooks.",
+    "mode": "auto",
+    "steps": [
+      "Fake socket allowed. Make the A1 cloud bot produce a confirmed order (drive the conversation, or insert the order the way wa-host.js does on confirmation).",
+      "Poll POS A GET /api/whatsapp/orders (or the route the WhatsApp orders screen uses) every 2 s.",
+      "Confirm wa_orders.cloud_id is set and GET /api/sync/wa-orders on the cloud is empty afterwards (acked).",
+      "Repeat with POS A offline for 2 min, then online: the order must arrive once, not twice."
+    ],
+    "pass_if": "Order visible on POS within 25 s (20 s poll + slack); no duplicate after offline/online.",
+    "evidence_to_collect": "Timestamps confirm→visible, wa_orders row, cloud queue before/after ack."
+  },
+  {
+    "id": "WA-REAL-2",
+    "claim": "Confirmed cloud-bot orders appear on the cashier's WhatsApp orders screen (real phone)",
+    "why_it_matters": "End-to-end in the mode the client uses.",
+    "mode": "real",
+    "steps": [
+      "Cloud bot ON and connected (WA-REAL-1 steps 1-7). POS PC ON this time, logged in as cashier.",
+      "From the customer phone, order 1 item, give a delivery address in a zone, and confirm when the bot asks.",
+      "Start a stopwatch at the moment you send the confirmation.",
+      "On the POS, open the WhatsApp orders list."
+    ],
+    "pass_if": "The order shows on the POS within 30 s with the right item, quantity, address and phone.",
+    "evidence_to_collect": "Photo of POS screen with time, screenshot of the chat."
+  },
+  {
+    "id": "WA-AUTO-3",
+    "claim": "Accept / reject / ready to pick up / on the way messages reach the customer through the cloud",
+    "why_it_matters": "With the PC's WhatsApp let go, any message the POS sends must route via /api/sync/wa-send, or the customer hears nothing.",
+    "mode": "auto",
+    "steps": [
+      "With an imported cloud order on POS A: accept it, mark ready (takeaway) or on the way (delivery); in another order, reject it.",
+      "Fake socket on the cloud: capture every sendMessage for A1.",
+      "Assert POS A's local socket sent nothing (it is stopped) and that /api/sync/wa-orders/:id/result and /api/sync/wa-send were called (server logs or audit)."
+    ],
+    "pass_if": "One outgoing message per action, to the right chat, sent by the cloud socket only.",
+    "evidence_to_collect": "Captured outbound messages with chat ids; POS log lines."
+  },
+  {
+    "id": "WA-REAL-3",
+    "claim": "Accept / ready / on the way reach the real customer phone in cloud mode",
+    "why_it_matters": "Real delivery through WhatsApp cannot be faked.",
+    "mode": "real",
+    "steps": [
+      "Continue from WA-REAL-2. On the POS click Accept on the order.",
+      "Send the order to the kitchen, click Start cooking, then Ready.",
+      "For a delivery order: assign a rider / mark on the way.",
+      "Place a second order from the customer phone and click Reject."
+    ],
+    "pass_if": "Customer phone receives one message for accept, one for ready/on the way, one for reject, each within 60 s, from the restaurant number.",
+    "evidence_to_collect": "Customer chat screenshots with times."
+  },
+  {
+    "id": "WA-AUTO-4",
+    "claim": "POS inbox shows the cloud's chats; staff replies, read, pause, auto-reply switch and voice notes go through the cloud",
+    "why_it_matters": "Staff must still see and answer chats while the cloud holds the connection.",
+    "mode": "auto",
+    "steps": [
+      "Bot ON for A1. Call POS A GET /api/whatsapp/status, /chats, /messages for a chat that exists only on the cloud (fake inbound).",
+      "POST a reply from POS A; check the cloud fake socket sent it.",
+      "Exercise every route in CLOUD_ROUTES (server/whatsapp/index.js) once and list which ones are forwarded and which are not.",
+      "Switch bot OFF: the same routes must hit the local store again."
+    ],
+    "pass_if": "All CLOUD_ROUTES forwarded while ON, local while OFF; reply delivered once.",
+    "evidence_to_collect": "Route-by-route table with response codes."
+  },
+  {
+    "id": "WA-REAL-4",
+    "claim": "Staff can read and reply to chats from the POS inbox while the bot runs on the cloud (real phone)",
+    "why_it_matters": "User-facing proof of phase 3.",
+    "mode": "real",
+    "steps": [
+      "Cloud bot ON, POS PC on. From the customer phone send 'hello, kisi insaan se baat karni hai'.",
+      "On the POS open WhatsApp; the chat must appear. Type 'Ji, main cashier hoon' and send.",
+      "Send a voice note from the customer phone; play it on the POS."
+    ],
+    "pass_if": "Chat appears on POS within 30 s; reply arrives on customer phone; voice note plays.",
+    "evidence_to_collect": "Screenshots of POS inbox and customer chat."
+  },
+  {
+    "id": "WA-AUTO-5",
+    "claim": "'Where is my order?' is answered from the POS's delivery status",
+    "why_it_matters": "Wrong status answers create angry customers.",
+    "mode": "auto",
+    "steps": [
+      "Accepted cloud order on POS A; move it through statuses. After each, wait for pushWaStatus (20 s loop) and check the cloud has the chat in its status map.",
+      "Fake inbound 'mera order kahan hai?' on A1; check reply matches deliveryStatus() in en/roman_ur/ur.",
+      "Restart the cloud: status is memory-only; confirm the POS re-sends within 10 min and what the bot says meanwhile."
+    ],
+    "pass_if": "Reply matches the current POS status within 40 s of each change; behaviour after cloud restart documented.",
+    "evidence_to_collect": "Status map JSON, bot replies, timings."
+  },
+  {
+    "id": "WA-AUTO-6",
+    "claim": "Switching cloud ON makes the POS let go of its own WhatsApp; switching OFF reconnects it by itself, with no new QR",
+    "why_it_matters": "Two sockets answering = double replies; none answering = dead bot.",
+    "mode": "auto",
+    "steps": [
+      "Fake socket for POS A's local connection allowed. Start with bot OFF, local connected.",
+      "Enable for A1; within 15 s (first run) / 120 s (later) wa.stop() must be called and meta cloud_mode=1.",
+      "Restart POS A while ON: local socket must not connect at start (autoConnect false).",
+      "Disable; within 120 s local connect() must be called and auth reused (no QR state).",
+      "Read connection.js stop(): confirm it does not log out / delete auth."
+    ],
+    "pass_if": "At no moment are both sockets answering; switch-over <= 135 s each way; no QR after switching back.",
+    "evidence_to_collect": "Timeline log of socket state on POS and cloud."
+  },
+  {
+    "id": "WA-REAL-5",
+    "claim": "Switching back to PC mode reconnects the POS's WhatsApp without scanning again, and nothing answers twice",
+    "why_it_matters": "Real WhatsApp may drop a linked device that stayed idle; only a real number shows it.",
+    "mode": "real",
+    "steps": [
+      "Precondition: the POS was linked on the POS screen earlier (PC mode) and then the cloud was switched on.",
+      "In Admin → branch → WhatsApp bot tab click 'Switch off'.",
+      "Wait 3 minutes. On the POS open WhatsApp.",
+      "From the customer phone send 'menu'. Count replies.",
+      "Switch on again in Admin, wait 3 minutes, send 'menu' again, count replies."
+    ],
+    "pass_if": "POS shows the inbox (not a QR) after switch-off; exactly one reply each time.",
+    "evidence_to_collect": "Screenshots, reply counts."
+  },
+  {
+    "id": "WA-AUTO-7",
+    "claim": "The owner can link the number from the POS screen while cloud mode is on (QR comes from the cloud)",
+    "why_it_matters": "If the POS link button links the PC instead of the cloud, we repeat the incident.",
+    "mode": "auto",
+    "steps": [
+      "Bot ON for A1, cloud not linked. On POS A GET /api/whatsapp/status: cloud_bot=true.",
+      "Press Link on the POS screen (POST the connect route); confirm the request is forwarded to /api/sync/wa/* and the QR returned is the cloud's (cloud /whatsapp shows status qr).",
+      "Same with bot OFF: confirm it links the LOCAL socket and record what the screen says to the owner."
+    ],
+    "pass_if": "With bot ON the QR is the cloud's; with bot OFF the screen makes clear the PC must stay on (else FAIL as a UX finding).",
+    "evidence_to_collect": "Network trace of the link call in both modes; screenshots."
+  },
+  {
+    "id": "WA-REAL-6",
+    "claim": "Linking from the POS screen in cloud mode links the cloud (survives PC off)",
+    "why_it_matters": "The exact user path that failed; must be proven with the PC switched off after linking.",
+    "mode": "real",
+    "steps": [
+      "In Admin: WhatsApp bot tab → 'Switch on' (do NOT link there). Unlink first if already linked.",
+      "Wait 2 minutes. On the POS PC open WhatsApp. The screen must say 'Your WhatsApp runs on HazelPOS Cloud…'. If it does not, STOP: the cloud bot is not on for this branch.",
+      "Click 'Link WhatsApp' on the POS and scan the QR from the restaurant phone.",
+      "Check Admin's tab shows 'Connected · <number>'.",
+      "Shut the PC down, wait 5 minutes, message from the customer phone."
+    ],
+    "pass_if": "Admin shows Connected; reply arrives with PC off.",
+    "evidence_to_collect": "Screenshots of the POS note, Admin status, customer chat."
+  },
+  {
+    "id": "WA-AUTO-8",
+    "claim": "Rider links and low-stock alerts go out through the cloud while it is on",
+    "why_it_matters": "With the local socket stopped, these would silently never send.",
+    "mode": "auto",
+    "steps": [
+      "Bot ON for A1. Trigger a rider link (assign a rider to a delivery) and a low-stock alert (drop an ingredient below its alert level by paying an order).",
+      "Capture calls to /api/sync/wa-send-phone and the cloud fake socket's sends.",
+      "Repeat with bot OFF: must use the local socket."
+    ],
+    "pass_if": "Each alert sent once, via the cloud when ON and locally when OFF.",
+    "evidence_to_collect": "Captured messages and phone numbers."
+  },
+  {
+    "id": "WA-AUTO-9",
+    "claim": "Each restaurant only sees and messages its own customers",
+    "why_it_matters": "Cross-restaurant leak is a privacy and trust disaster.",
+    "mode": "auto",
+    "steps": [
+      "Bot ON for A1 and B1 with different fake chats.",
+      "With B1's branch key call every /api/sync/wa* route asking for A1's chat ids, order ids, /wa-orders/:id/result, /wa-send to A1's chat, /wa-send-phone.",
+      "Check cloud DATA_DIR/wa/<id>/ folders are separate and that the vendor /whatsapp endpoint returns only that branch's log.",
+      "Run the vendor routes with a branch key and branch routes with no key."
+    ],
+    "pass_if": "Every cross-branch attempt returns 4xx or empty and sends nothing.",
+    "evidence_to_collect": "Table of request → status/body."
+  },
+  {
+    "id": "WA-AUTO-10",
+    "claim": "While the cloud bot is on, the POS's own bot stays quiet (no double answers), including if the POS still has a local session",
+    "why_it_matters": "Duplicate answers and duplicate orders.",
+    "mode": "auto",
+    "steps": [
+      "Fake both sockets. Bot ON. Force the local socket connected (simulate stop() race) and deliver the same inbound to both.",
+      "Count assistant replies and created orders."
+    ],
+    "pass_if": "Exactly one reply and at most one order.",
+    "evidence_to_collect": "Reply/order counts, code path that silences the local assistant."
+  },
+  {
+    "id": "PIN-1",
+    "claim": "A temporary PIN set in Admin reaches an online POS within 1 minute and must be changed at login",
+    "why_it_matters": "Locked-out owner on a busy night.",
+    "mode": "auto",
+    "steps": [
+      "POST /api/vendor/branches/A1/pin-reset for the cashier. Poll POS A login with the temp PIN every 5 s.",
+      "Log in: response must demand a new PIN; set one; old sessions of that user are signed out.",
+      "Check cloud pin_resets row: pin NULL, applied_at set (cloud never keeps it)."
+    ],
+    "pass_if": "Temp PIN works within 60 s (+15 s slack); change forced; pin column NULL after apply.",
+    "evidence_to_collect": "Timings, login responses, DB row."
+  },
+  {
+    "id": "PIN-2",
+    "claim": "Offline: temporary PIN waits up to 24 h then expires; the old PIN keeps working meanwhile",
+    "why_it_matters": "Expired resets must never apply late; old PIN must not lock staff out.",
+    "mode": "auto",
+    "steps": [
+      "Stop POS A. Create a reset. Log in with the old PIN on a restarted-offline POS A (cloud unreachable): must work.",
+      "Back-date created_at by 25 h in cloud.db, bring POS A online: reset must be marked expired and the temp PIN must NOT work.",
+      "Second reset for the same user replaces the first ('replaced by a newer reset')."
+    ],
+    "pass_if": "Old PIN works offline; expired reset never applies; newer reset replaces older.",
+    "evidence_to_collect": "pin_resets rows, login results."
+  },
+  {
+    "id": "PIN-3",
+    "claim": "Admin 'Set PIN' does NOT force a change at next login (known behaviour; confirm and document)",
+    "why_it_matters": "The human steps must not promise a forced change that does not happen.",
+    "mode": "auto",
+    "steps": [
+      "Use the Admin PIN list 'Set PIN' path; check the pin_resets row force_change value and POS login behaviour."
+    ],
+    "pass_if": "Behaviour matches the statement; documented in the report so docs/UI wording agree.",
+    "evidence_to_collect": "force_change value, login response, UI text."
+  },
+  {
+    "id": "PIN-4",
+    "claim": "Starting PINs (1234/1111/2222/3333) and easy PINs are refused on an installed app; PINs are 4-12 letters/numbers, case-insensitive; Admin setup refuses the same PINs",
+    "why_it_matters": "Shared pin-rules.js across server, setup and cloud must agree.",
+    "mode": "auto",
+    "steps": [
+      "HAZEL_LICENCE=1 POS: log in with 1234, try to change to 1111, 123456, 'abcd', 'Ab12Cd'; log in with 'ab12cd'.",
+      "Send the same PINs through Admin prepared setup and Set PIN; compare accept/reject with the POS."
+    ],
+    "pass_if": "Identical accept/reject lists on POS, setup and cloud.",
+    "evidence_to_collect": "Matrix PIN × surface."
+  },
+  {
+    "id": "LIC-1",
+    "claim": "Activation with a one-time HZ-XXXX-XXXX code; code cannot be reused; login is blocked before activation",
+    "why_it_matters": "First thing every client does.",
+    "mode": "auto",
+    "steps": [
+      "Fresh POS_DB with HAZEL_LICENCE=1: try login before activation (must be blocked).",
+      "Activate with a code; try the same code on a second fresh POS (must fail); try an expired code."
+    ],
+    "pass_if": "Blocked, then activated once, reuse and expired rejected with a clear message.",
+    "evidence_to_collect": "Responses and screenshots of Activate screen."
+  },
+  {
+    "id": "LIC-2",
+    "claim": "Unpaid licence locks only new orders; paying existing orders, reports and offline billing keep working; signed answers are verified",
+    "why_it_matters": "Lock must not stop a restaurant mid-service; forged answers must not unlock.",
+    "mode": "auto",
+    "steps": [
+      "Mark A1 unpaid in vendor API; wait for the licence check (or trigger it). Try new order, pay an open order, view reports.",
+      "Tamper the signed answer (proxy or edit) and confirm it is rejected.",
+      "Mark paid again; new orders work again."
+    ],
+    "pass_if": "Only new orders blocked; tampered answer ignored; unlock works.",
+    "evidence_to_collect": "Responses per action; licence log lines."
+  },
+  {
+    "id": "SETUP-1",
+    "claim": "A setup saved in Admin reaches the POS until its first order; logins and chosen PINs are kept; riders included; demo name/logo never stay on a real install",
+    "why_it_matters": "Prepared setups are how clients start.",
+    "mode": "auto",
+    "steps": [
+      "Prepare a setup with menu, riders, users in Admin; activate a fresh POS; check all arrived and demo identity is gone.",
+      "Change the setup; confirm it arrives. Place one order; change again; confirm it no longer overwrites.",
+      "Confirm a PIN chosen on the POS survives a setup re-apply."
+    ],
+    "pass_if": "All three behaviours hold.",
+    "evidence_to_collect": "Before/after menu and users JSON."
+  },
+  {
+    "id": "OFF-1",
+    "claim": "Billing keeps working with no internet",
+    "why_it_matters": "Core promise of a LAN POS in Pakistan.",
+    "mode": "auto",
+    "steps": [
+      "Kill the cloud (and block outbound net if possible). On POS A: create, modify, pay, print-preview, close shift, take a table-QR order from another browser on the LAN.",
+      "Check for hangs: each request < 2 s even though cloud calls time out (20 s).",
+      "Bring the cloud back: queued paid orders, expenses, shifts sync once, no duplicates."
+    ],
+    "pass_if": "No request blocked by the missing cloud; sync catches up without duplicates.",
+    "evidence_to_collect": "Request timings, cloud row counts before/after."
+  },
+  {
+    "id": "SYNC-1",
+    "claim": "POS pushes paid orders, expenses, stock, closed shifts every minute and a daily backup; cloud upserts by branch + local id",
+    "why_it_matters": "Owner dashboard numbers must match the till.",
+    "mode": "auto",
+    "steps": [
+      "Make 5 paid orders on A and 3 on B; wait 70 s; compare totals in cloud vs POS reports.",
+      "Re-push the same data (restart POS): counts unchanged."
+    ],
+    "pass_if": "Totals equal per branch; no duplicates.",
+    "evidence_to_collect": "SQL counts and sums both sides."
+  },
+  {
+    "id": "DESK-1",
+    "claim": "1.0.8 never shows a blank white window: 'HazelPOS is starting…' until the server answers (up to 90 s), crashed screens show a Reload button",
+    "why_it_matters": "The previous white window looked like a dead product.",
+    "mode": "real",
+    "steps": [
+      "On a Windows PC install the 1.0.8 installer (or newer).",
+      "Test A: rename/lock pos.db or start with antivirus full-scan running so the server is slow; open HazelPOS from the Start menu.",
+      "Test B: in Task Manager end the 'HazelPOS server' node process while the app is open.",
+      "Test C (auto part, Linux): run desktop/main.js waitForServer logic against a server that starts after 60 s and one that never starts; read the code path for > 90 s."
+    ],
+    "pass_if": "Never a plain white window: starting page, then the POS; or a clear message with Reload/retry.",
+    "evidence_to_collect": "Screenshots every 10 s during start; what shows after 90 s with no server."
+  },
+  {
+    "id": "DESK-2",
+    "claim": "Auto-update works once RELEASES_TOKEN exists; installs by itself only 3-5 AM with no open orders, after a backup; 'Update now' installs immediately",
+    "why_it_matters": "Fixes must reach restaurants without a site visit; an update mid-service would be a disaster.",
+    "mode": "real",
+    "steps": [
+      "GitHub: code repo → Settings → Secrets and variables → Actions: confirm RELEASES_TOKEN exists (name only).",
+      "Actions tab: confirm the latest desktop workflow run published a release to the public releases repo with latest.yml and the .exe.",
+      "On a Windows PC with an older version: Settings → Updates → 'Check now'. Note the state shown.",
+      "Leave one order open overnight: next morning version must be unchanged. Close all orders the next night: version must be new by 5 AM.",
+      "Auto part: unit-check the condition in desktop/main.js ~line 188 with mocked hour/open_orders."
+    ],
+    "pass_if": "Update downloads; installs only in the window with zero open orders or on 'Update now'; backup file created before install.",
+    "evidence_to_collect": "Workflow run link, release assets list, version before/after, backup file name."
+  },
+  {
+    "id": "DESK-3",
+    "claim": "Installer has the built-in cloud address and licence public key; a fresh Windows install activates and connects with no extra settings",
+    "why_it_matters": "Field installs are done by non-technical staff.",
+    "mode": "real",
+    "steps": [
+      "Fresh Windows PC: run installer, open app, enter an activation code from Admin, set new PINs.",
+      "In Admin, check the branch shows the cloud connection as online within 2 minutes."
+    ],
+    "pass_if": "Activated and online without typing any URL.",
+    "evidence_to_collect": "Screenshots of each screen; Admin branch status."
+  },
+  {
+    "id": "SEC-1",
+    "claim": "Security audit fixes still hold (cloud bodies before auth, staff-to-owner bypass, CORS/CSP, QR flood, backup caps)",
+    "why_it_matters": "Phase 1-4 added many new cloud routes after the audit.",
+    "mode": "auto",
+    "steps": [
+      "Re-run any checks listed in docs/SECURITY-AUDIT.md against the current tree.",
+      "For every route added since 5696496 (git diff 5696496^..HEAD -- cloud/index.js cloud/wa-host.js), confirm auth middleware, body size limits, and branch scoping."
+    ],
+    "pass_if": "All old checks pass; every new route authed and branch-scoped.",
+    "evidence_to_collect": "Route list with middleware; check outputs."
+  },
+  {
+    "id": "DOC-1",
+    "claim": "User-facing steps for 'bot answers when the PC is off' are unambiguous",
+    "why_it_matters": "The incident was a setup-step failure, not only code.",
+    "mode": "auto",
+    "steps": [
+      "Collect every place that tells someone how to set up WhatsApp: Admin tab text, POS LinkScreen, cloud/README.md, desktop/README.md, site/, Tour.jsx.",
+      "Check each says: (1) switch on in Admin first, (2) wait for 'Menu from the POS', (3) link (Admin or POS), (4) PC mode stops when the PC is off.",
+      "Write the gaps into the final report (do not edit product text unless asked)."
+    ],
+    "pass_if": "Every surface states the order and the PC-mode limitation, or each gap is listed.",
+    "evidence_to_collect": "Table surface → what it says → gap."
+  },
+  {
+    "id": "HUMAN-CHECKLIST",
+    "claim": "Claims that CANNOT be proven automatically",
+    "why_it_matters": "Agents can only use fake WhatsApp sockets and Linux; these need a person, a real WhatsApp number, a Windows PC or GitHub.",
+    "mode": "real",
+    "steps": [
+      "WA-REAL-1: bot answers with PC shut down (cloud mode).",
+      "WA-REAL-2/3: cloud order reaches cashier; accept/ready/on-the-way/reject reach the customer.",
+      "WA-REAL-4: POS inbox reply and voice note in cloud mode.",
+      "WA-REAL-5: switch off → POS reconnects without QR, no double replies.",
+      "WA-REAL-6: link from POS screen in cloud mode, then PC off.",
+      "Incident restaurant: open Admin → its branch → WhatsApp bot tab and write down whether it says 'Switched off' (= PC mode, explains the incident).",
+      "DESK-1: no white window on Windows.",
+      "DESK-2: RELEASES_TOKEN present, release published, overnight install rules.",
+      "DESK-3: fresh Windows install activates with no URL typed."
+    ],
+    "pass_if": "Each item ticked with a screenshot and time; any failure reported with the step number.",
+    "evidence_to_collect": "One folder of screenshots per task id."
+  }
+]

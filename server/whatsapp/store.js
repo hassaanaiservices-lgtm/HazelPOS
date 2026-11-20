@@ -175,15 +175,6 @@ module.exports = function waStore(db) {
   const ordersForPos = () => db.prepare(`SELECT o.*, c.name chat_name, c.phone FROM wa_orders o JOIN wa_chats c ON c.id=o.chat_id
     WHERE o.status='pending_cashier' AND o.pos_received_at IS NULL ORDER BY o.id LIMIT 50`).all().map(orderRow);
   const markPosReceived = id => db.prepare('UPDATE wa_orders SET pos_received_at=? WHERE id=? AND pos_received_at IS NULL').run(now(), id).changes;
-  // On the POS: an order the cloud bot took, shown to the cashier like one taken here. Taken once (by cloud_id).
-  function importCloudOrder(o) {
-    const have = db.prepare('SELECT id FROM wa_orders WHERE cloud_id=?').get(o.id);
-    if (have) return have.id;
-    upsertChat(o.chat_id, o.phone, o.chat_name);
-    return db.prepare(`INSERT INTO wa_orders (chat_id,status,items,subtotal,fulfilment,address,location,lang,created_at,confirmed_at,cloud_id)
-      VALUES (?,'pending_cashier',?,?,?,?,?,?,?,?,?)`).run(o.chat_id, JSON.stringify(o.items), o.subtotal, o.fulfilment || null, o.address || null,
-      o.location ? JSON.stringify(o.location) : null, o.lang, o.created_at || now(), o.confirmed_at || now(), o.id).lastInsertRowid;
-  }
 
   function log(row) {
     const cols = Object.keys(row);
@@ -196,6 +187,6 @@ module.exports = function waStore(db) {
     updateMeta, message,
     meta, upsertChat, chatIdByPhone, addMessage, setStatus, resolveOffline, chats, messages, markRead, counts,
     chat, setChatFlag, historyBefore, lastOutAt, botRepliesSince, latestLocation,
-    saveDraft, openDraft, openCart, cancelCart, confirmDraft, getOrder, ordersForPos, markPosReceived, importCloudOrder, ordersFor, chatForOrder, pendingOrders, finishOrder, log, spentSince, logFor,
+    saveDraft, openDraft, openCart, cancelCart, confirmDraft, getOrder, ordersForPos, markPosReceived, ordersFor, chatForOrder, pendingOrders, finishOrder, log, spentSince, logFor,
   };
 };

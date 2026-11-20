@@ -1,0 +1,74 @@
+[
+ {
+  "id": "D-01",
+  "area": "isolation",
+  "title": "Bot answers from its own restaurant's menu only",
+  "when": "Two restaurants with distinct products ('Karachi Special Tikka' vs 'Lahore Chargha'). Drive each restaurant's assistant directly (test hook like cloud/wa-host.js live map, with ask stubbed to capture the pos object it receives, or with real DeepSeek if keys exist) with 'what's on the menu?'",
+  "then": "Karachi's assistant receives/answers with Karachi's menu only; Lahore's with Lahore's only; never server/pos.db content",
+  "verify": "api"
+ },
+ {
+  "id": "D-02",
+  "area": "isolation",
+  "title": "readPos without pos throws in server mode",
+  "when": "Call the pipeline ask() without pos inside the server process (TENANCY=1)",
+  "then": "Throws a clear error; does not open server/pos.db (mtime unchanged)",
+  "verify": "code"
+ },
+ {
+  "id": "D-03",
+  "area": "routes",
+  "title": "WhatsApp routes resolve per restaurant",
+  "when": "GET /api/whatsapp/status in a restaurant with no WhatsApp; POST /api/whatsapp/connect with WHATSAPP unset in a test DATA_DIR (do NOT scan the QR)",
+  "then": "Status {state:'off'} before connect; after connect a QR/connecting state only for that restaurant; the other restaurant still 'off'; no duplicate route registration (start/stop twice, no warnings)",
+  "verify": "api"
+ },
+ {
+  "id": "D-04",
+  "area": "lifecycle",
+  "title": "Suspend stops the bot, activate restarts it",
+  "when": "Connect (QR state) in a restaurant, suspend via vendor API, then activate",
+  "then": "Instance stopped on suspend (status off/disconnected), credentials folder kept; on activate a bot that was running AND has saved creds restarts; a never-linked bot (QR stage only) stays off until the owner presses Connect",
+  "verify": "api"
+ },
+ {
+  "id": "D-05",
+  "area": "rider",
+  "title": "Rider link works for that rider and restaurant only",
+  "when": "Create rider in karachi, get link /r/karachi-grill/<token>; open in browser; dispatch a delivery order to that rider; accept and mark delivered from the rider page; try the token with lahore-bbq slug and against another rider's order",
+  "then": "Rider page shows the order and works (status out \u2192 delivered, money via deliverOrder); lahore slug \u2192 error page; other rider's order refused",
+  "verify": "playwright"
+ },
+ {
+  "id": "D-06",
+  "area": "tracking",
+  "title": "Tracking page shows only safe fields",
+  "when": "Open /track/karachi-grill/<track_token> for an 'out' order; inspect the API response",
+  "then": "Shows status and rider name/position; response has no customer phone, address, other orders; wrong slug or token \u2192 not found",
+  "verify": "playwright"
+ },
+ {
+  "id": "D-07",
+  "area": "cleanup",
+  "title": "Old modules are gone and nothing references them",
+  "when": "ls and grep for licence, cloud-sync, rider-sync, setup, restore, Activate in server/ and client/src",
+  "then": "Files deleted; no require/import of them; server boots; client builds; lint passes",
+  "verify": "code"
+ },
+ {
+  "id": "D-08",
+  "area": "demo",
+  "title": "Demo works with tenancy",
+  "when": "node demo/seed.js then npm run demo (own scratch DATA_DIR)",
+  "then": "Demo site at / and POS at /app with role picker, demo data visible; no crash",
+  "verify": "playwright"
+ },
+ {
+  "id": "D-09",
+  "area": "regression",
+  "title": "Slices A\u2013C still pass",
+  "when": "Re-run the slice A api suite, B-02/B-04, C-05/C-07/C-09",
+  "then": "All pass",
+  "verify": "api"
+ }
+]

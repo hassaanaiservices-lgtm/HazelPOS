@@ -2,7 +2,9 @@ import { useState } from 'react'
 import { api } from './lib'
 import { Logo } from './ui'
 
-export default function Login({ settings, onLogin }) {
+// The PIN box. On a till it is one person's PIN (userId, after they tapped their name on the lock screen); in the demo it is
+// the role picker.
+export default function Login({ settings, onLogin, userId, who, onBack }) {
   const [pin, setPin] = useState('')
   const [err, setErr] = useState(false)
 
@@ -12,7 +14,7 @@ export default function Login({ settings, onLogin }) {
   const submit = async e => {
     e?.preventDefault()
     if (pin.length < 4) return
-    try { onLogin(await api('/login', { pin })) }
+    try { onLogin(await api('/login', { pin, user_id: userId })) }
     catch (x) { setErr(x.message); setPin('') }
   }
   const demoLogin = async p => { try { onLogin(await api('/login', { pin: p })) } catch (x) { setErr(x.message) } }
@@ -21,7 +23,7 @@ export default function Login({ settings, onLogin }) {
     <div className="login">
       <div className="login-card">
         <div className={"brand-mark login-logo" + (settings.logo_image ? " has-img" : "")} aria-hidden="true"><Logo s={settings} /></div>
-        <h1>{settings.name}</h1>
+        <h1>{who || settings.name}</h1>
         {settings.demo ? <>
           <p className="muted">Free demo. Pick who you want to be:</p>
           <div className="demo-roles">
@@ -40,6 +42,7 @@ export default function Login({ settings, onLogin }) {
           </div>
           {err && <div className="err" role="alert">{err === 'Wrong PIN' ? 'Wrong PIN, try again' : err}</div>}
           <button className="primary" id="login-go" disabled={pin.length < 4}>Log in</button>
+          {onBack && <button type="button" className="ghost" onClick={onBack}>Back</button>}
         </form>
         </>}
       </div>

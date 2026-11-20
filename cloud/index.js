@@ -5,6 +5,7 @@ const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
 const { DatabaseSync } = require('node:sqlite');
+const { PIN_OK, isWeakPin, ROLES: PIN_ROLES } = require('../server/pin-rules'); // the same PIN rules as the POS
 
 const DATA = process.env.DATA_DIR || path.join(__dirname, 'data');
 fs.mkdirSync(path.join(DATA, 'backups'), { recursive: true });
@@ -530,7 +531,7 @@ app.post('/api/sync/pins', branchAuth, (req, res) => {
       ON CONFLICT(branch_id, user_id) DO UPDATE SET name=excluded.name, role=excluded.role, pos_changed_at=excluded.pos_changed_at, updated_at=excluded.updated_at`);
     for (const u of users) {
       const name = String(u.name || '').slice(0, 80), role = String(u.role || '').slice(0, 20), at = String(u.changed_at || '').slice(0, 40);
-      if (typeof u.pin === 'string' && /^[a-z0-9]{4,12}$/i.test(u.pin)) withPin.run(b, +u.id, name, role, vaultSeal(u.pin), at, at, now());
+      if (typeof u.pin === 'string' && PIN_OK(u.pin)) withPin.run(b, +u.id, name, role, vaultSeal(u.pin), at, at, now());
       else noPin.run(b, +u.id, name, role, at, now());
     }
   });
@@ -816,10 +817,10 @@ app.post('/api/vendor/branches/:id/setup', vendorAuth, (req, res) => {
   if (Array.isArray(body.zones)) data.zones = body.zones.slice(0, 200).map(z => ({ name: String(z.name || '').trim(), fee: +z.fee || 0, min_order: +z.min_order || 0, free_above: +z.free_above || 0, eta_min: +z.eta_min || 45 })).filter(z => z.name);
   if (Array.isArray(body.staff)) {
     const staff = body.staff.map(u => ({ name: String(u.name || '').trim(), role: u.role, pin: String(u.pin || '').trim() })).filter(u => u.name);
-    if (staff.some(u => !['admin', 'cashier', 'kitchen', 'rider'].includes(u.role))) return res.status(400).json({ error: 'Role must be admin, cashier, kitchen or rider' });
-    if (staff.some(u => !/^[a-z0-9]{4,12}$/i.test(u.pin))) return res.status(400).json({ error: 'Every PIN must be 4 to 12 letters or numbers' });
+    if (staff.some(u => !PIN_ROLES.includes(u.role))) return res.status(400).json({ error: 'Role must be admin, cashier, kitchen or rider' });
+    if (staff.some(u => !PIN_OK(u.pin))) return res.status(400).json({ error: 'Every PIN must be 4 to 12 letters or numbers' });
     if (new Set(staff.map(u => u.pin.toLowerCase())).size !== staff.length) return res.status(400).json({ error: 'Two people have the same PIN' });
-    const easy = staff.find(u => ['1234', '1111', '2222', '3333', '0000', '4321'].includes(u.pin.toLowerCase())); // the POS refuses these at login
+    const easy = staff.find(u => isWeakPin(u.pin)); // the POS refuses these at login
     if (easy) return res.status(400).json({ error: `${easy.name}'s PIN ${easy.pin} is too easy (the POS refuses it). Choose another, e.g. a name and a number` });
     if (staff.length && !staff.some(u => u.role === 'admin')) return res.status(400).json({ error: 'Add at least one admin (the owner), or they cannot open Settings' });
     data.staff = staff;
@@ -981,8 +982,8 @@ app.get('/api/vendor/branches/:id/pin-resets', vendorAuth, (req, res) => {
 app.post('/api/vendor/branches/:id/pin-reset', vendorAuth, (req, res) => {
   const b = vendorBranch(req, res); if (!b) return;
   const pin = String(req.body.pin || '').trim(), userId = +req.body.user_id;
-  if (!/^[a-z0-9]{4,12}$/i.test(pin)) return res.status(400).json({ error: 'The temporary PIN must be 4 to 12 letters or numbers' });
-  if (['1234', '1111', '2222', '3333', '0000', '4321'].includes(pin.toLowerCase())) return res.status(400).json({ error: 'Choose a less easy temporary PIN' });
+  if (!PIN_OK(pin)) return res.status(400).json({ error: 'The temporary PIN must be 4 to 12 letters or numbers' });
+  if (isWeakPin(pin)) return res.status(400).json({ error: 'Choose a less easy temporary PIN' });
   const users = [...(JSON.parse(b.health || 'null')?.users || []), ...db.prepare('SELECT user_id id, name, role FROM pin_vault WHERE branch_id=?').all(b.id)];
   const u = users.find(x => x.id === userId);
   if (!u) return res.status(400).json({ error: "That login is not on this POS's last report. Wait for the POS to report again (within 3 hours), or ask the owner to reset it in Settings → Staff & PINs" });

@@ -46,3 +46,6 @@ export const downloadCsv = (filename, rows) => {
   const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv' })), download: filename })
   a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000)
 }
+
+// A code made when a client was created, handed to the client page that opens next (shown once)
+export const freshCodes = {}

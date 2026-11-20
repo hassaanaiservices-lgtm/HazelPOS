@@ -1,88 +1,50 @@
 {
-  "name": "hazelpos-desktop",
-  "productName": "HazelPOS",
-  "version": "1.0.9",
-  "description": "HazelPOS restaurant point of sale",
+  "name": "hazelpos-printer",
+  "productName": "HazelPOS Printer",
+  "version": "1.0.8",
+  "description": "HazelPOS Printer: prints HazelPOS receipts and kitchen tickets on this PC's printers",
   "author": "HazelPOS",
   "private": true,
   "main": "main.js",
   "hazel": {
-    "cloudUrl": "https://pos2.up.railway.app",
-    "licencePublicKey": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAxkShcMNsrd+/pjQIgysIL0IDisWNLkMwLF9/bdbu9VA=\n-----END PUBLIC KEY-----"
+    "serverUrl": "https://pos2.up.railway.app"
   },
   "scripts": {
     "start": "electron .",
-    "prepare-app": "npm --prefix ../client ci && npm --prefix ../client run build && npm --prefix ../server ci --omit=dev",
     "verify": "node verify-build.js",
-    "dist": "node check-build-os.js && npm run prepare-app && node verify-build.js pre && electron-builder --win --publish never && node verify-build.js post",
-    "dist:win": "node check-build-os.js && npm run prepare-app && node verify-build.js pre && electron-builder --win --publish never && node verify-build.js post"
+    "dist": "node verify-build.js pre && electron-builder --win --publish never && node verify-build.js post"
   },
   "dependencies": {
-    "electron-updater": "^6.6.2",
-    "qrcode": "^1.5.4"
+    "electron-updater": "^6.6.2"
   },
   "devDependencies": {
     "electron": "^38.2.0",
     "electron-builder": "^26.0.12"
   },
   "build": {
-    "appId": "com.hazelpos.desktop",
-    "productName": "HazelPOS",
+    "appId": "com.hazelpos.printer",
+    "productName": "HazelPOS Printer",
     "directories": {
       "output": "dist"
     },
     "files": [
       "main.js",
-      "port.js",
-      "harden.js",
+      "preload.js",
+      "scan.js",
+      "window/**",
       "package.json"
     ],
     "extraResources": [
       {
-        "from": "../server",
-        "to": "app/server",
+        "from": "../bridge",
+        "to": "app/bridge",
         "filter": [
-          "**/*",
-          "!pos.db*",
-          "!*.db*",
-          "!whatsapp/auth/**",
-          "!whatsapp/media/**",
-          "!node_modules/**"
+          "bridge.js"
         ]
       },
       {
-        "from": "../server/node_modules",
-        "to": "app/server/node_modules",
-        "filter": [
-          "**/*",
-          "!**/*.map",
-          "!**/*.d.ts",
-          "!**/@types/**",
-          "!**/{README,CHANGELOG,HISTORY}.md",
-          "!@img/sharp-wasm32/**",
-          "!@img/sharp-linux*/**",
-          "!@img/sharp-darwin*/**",
-          "!@img/sharp-libvips-linux*/**",
-          "!@img/sharp-libvips-darwin*/**"
-        ]
-      },
-      {
-        "from": "../client/dist",
-        "to": "app/client/dist"
-      },
-      {
-        "from": "../rag",
-        "to": "app/rag",
-        "filter": [
-          "**/*",
-          "!eval/**",
-          "!data/index/**",
-          "!scripts/**",
-          "!**/*.map",
-          "!**/*.d.ts",
-          "!**/@types/**",
-          "!**/{README,CHANGELOG,HISTORY}.md"
-        ]
+        "from": "../server/printer.js",
+        "to": "app/server/printer.js"
       },
       {
         "from": "../brand/hazelpos-logo/hazelpos-logo.png",
@@ -96,10 +58,10 @@
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
-      "createDesktopShortcut": "always",
+      "createDesktopShortcut": false,
       "createStartMenuShortcut": true,
-      "shortcutName": "HazelPOS",
-      "artifactName": "HazelPOS-Setup-${version}.${ext}",
+      "shortcutName": "HazelPOS Printer",
+      "artifactName": "HazelPOS-Printer-Setup-${version}.${ext}",
       "deleteAppDataOnUninstall": false,
       "differentialPackage": true
     },

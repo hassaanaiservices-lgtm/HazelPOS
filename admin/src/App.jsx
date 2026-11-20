@@ -1,18 +1,15 @@
 import { useEffect, useState } from 'react'
 import { api } from './lib'
 import { Notifier } from './notify'
-import Clients from './Clients'
-import Client from './Client'
-import Branch from './Branch'
-import Usage from './Usage'
+import Restaurants from './Restaurants'
+import Restaurant from './Restaurant'
 import Unpaid from './Unpaid'
-import Updates from './Updates'
-import Team from './Team'
+import Settings from './Settings'
 import Activity from './Activity'
 
-// Pages live in the address (#/clients, #/client/3, #/branch/5, #/usage), so Back and refresh work.
+// Pages live in the address (#/restaurants, #/restaurant/3, #/unpaid), so Back and refresh work.
 const parse = () => {
-  const [, page = 'clients', id] = location.hash.replace(/^#\/?/, '#/').split('/')
+  const [, page = 'restaurants', id] = location.hash.replace(/^#\/?/, '#/').split('/')
   return { page, id: +id || null }
 }
 export const go = path => { location.hash = '#/' + path }
@@ -21,7 +18,7 @@ export default function App() {
   const [auth, setAuth] = useState(null) // null = checking, false = logged out, { cloud } = in
   const [route, setRoute] = useState(parse)
   useEffect(() => {
-    api('/me').then(setAuth, () => setAuth(false))
+    api('/me').then(d => setAuth(d.ok ? d : false), () => setAuth(false))
     const onHash = () => { setRoute(parse()); scrollTo(0, 0) }
     const onLogout = () => setAuth(false)
     window.addEventListener('hashchange', onHash); window.addEventListener('admin-logout', onLogout)
@@ -29,11 +26,11 @@ export default function App() {
   }, [])
 
   if (auth === null) return <Notifier />
-  if (!auth) return <><Login onIn={() => api('/me').then(setAuth)} /><Notifier /></>
+  if (!auth) return <><Login onIn={() => api('/me').then(d => setAuth(d.ok ? d : false))} /><Notifier /></>
 
-  const nav = [['clients', 'Clients', '🏪'], ['unpaid', 'Unpaid', '⏰'], ['updates', 'Updates', '⬆️'], ['usage', 'AI usage', '📊'], ['activity', 'Activity', '🕑'],
-    ...(auth.user?.role === 'owner' ? [['team', 'Team', '👥']] : [])]
-  const section = ['usage', 'unpaid', 'updates', 'activity', 'team'].includes(route.page) ? route.page : 'clients'
+  // shortcut: the Team page (Team.jsx, a person each with their own login) is hidden until there is a team; ADMIN_PASSWORD is the one login.
+  const nav = [['restaurants', 'Restaurants', '🏪'], ['unpaid', 'Unpaid', '💳'], ['activity', 'Activity', '🕑'], ['settings', 'Settings', '⚙️']]
+  const section = route.page === 'restaurant' ? 'restaurants' : nav.some(n => n[0] === route.page) ? route.page : 'restaurants'
   return (
     <div className="shell">
       <aside className="side">
@@ -46,14 +43,11 @@ export default function App() {
         <button className="link" onClick={() => api('/logout', {}).finally(() => setAuth(false))}>Log out</button>
       </aside>
       <main className="content">
-        {route.page === 'client' && route.id ? <Client id={route.id} />
-          : route.page === 'branch' && route.id ? <Branch id={route.id} />
-          : route.page === 'usage' ? <Usage />
+        {route.page === 'restaurant' && route.id ? <Restaurant id={route.id} />
           : route.page === 'unpaid' ? <Unpaid />
-          : route.page === 'updates' ? <Updates />
           : route.page === 'activity' ? <Activity />
-          : route.page === 'team' && auth.user?.role === 'owner' ? <Team me={auth.user} />
-          : <Clients />}
+          : route.page === 'settings' ? <Settings />
+          : <Restaurants />}
       </main>
       <Notifier />
     </div>
@@ -61,20 +55,18 @@ export default function App() {
 }
 
 function Login({ onIn }) {
-  const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
   const submit = async e => {
     e.preventDefault(); setBusy(true); setErr('')
-    try { await api('/login', { email, password }); onIn() } catch (e2) { setErr(e2.message); setBusy(false) }
+    try { await api('/login', { password }); onIn() } catch (e2) { setErr(e2.message); setBusy(false) }
   }
   return (
     <div className="login">
       <form className="card" onSubmit={submit}>
         <h1>HazelPOS Admin</h1>
-        <p className="muted">Clients, onboarding, memberships, health and AI usage.</p>
-        <label>Email (team members; the main owner leaves it empty)<input type="email" value={email} onChange={e => setEmail(e.target.value)} autoComplete="username" /></label>
+        <p className="muted">Restaurants, invoices and the HazelPOS WhatsApp number.</p>
         <label>Password<input type="password" value={password} onChange={e => setPassword(e.target.value)} autoComplete="current-password" required /></label>
         {err && <div className="err" role="alert">{err}</div>}
         <button className="primary" disabled={busy}>{busy ? 'Logging in…' : 'Log in'}</button>

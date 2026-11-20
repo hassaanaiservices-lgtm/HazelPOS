@@ -1,47 +1,141 @@
 import { useEffect, useState } from 'react'
-import { api, rs, parseModifiers, downloadCsv, dealItems } from './lib'
+import { api, rs, parseModifiers, downloadCsv, dealItems, lsSet, lsDel } from './lib'
 import { Icon } from './ui'
 import Integrations from './Integrations'
 import { QrCodesModal } from './QrOrders'
 import BotFaq from './BotFaq'
 import { toastError, confirmBox, promptBox } from './notify'
 
-const TABS = ['Restaurant', 'Staff & PINs', 'Alerts', 'Updates', 'WhatsApp bot', 'Integrations', 'Cloud', 'Activity Log']
+const TABS = ['Restaurant', 'Staff & PINs', 'WhatsApp', 'Payments & tax', 'Printers', 'Devices', 'Activity log']
 
-export default function Admin({ onChanged, notify, updateNew, onUpdateSeen }) {
+export default function Admin({ onChanged, notify }) {
   const [tab, setTab] = useState('Restaurant')
-  useEffect(() => { if (tab === 'Updates' && updateNew) onUpdateSeen() }, [tab, updateNew]) // opened = seen: stop blinking
   return (
     <section className="admin">
       <div className="row-head"><h2>Settings</h2>
-        <div className="tabs">{TABS.map(t => <button key={t} id={'tab-' + t} className={(tab === t ? 'active' : '') + (t === 'Updates' && updateNew ? ' attention' : '')} onClick={() => setTab(t)}>{t}</button>)}</div>
+        <div className="tabs">{TABS.map(t => <button key={t} id={'tab-' + t} className={(tab === t ? 'active' : '')} onClick={() => setTab(t)}>{t}</button>)}</div>
       </div>
       {tab === 'Restaurant' && <RestaurantSettings onChanged={onChanged} notify={notify} />}
       {tab === 'Staff & PINs' && <LoginPins notify={notify} />}
-      {tab === 'Alerts' && <StockAlerts notify={notify} />}
-      {tab === 'Updates' && <Updates notify={notify} />}
-      {tab === 'WhatsApp bot' && <><BotBehaviour notify={notify} /><BotFaq notify={notify} /></>}
-      {tab === 'Integrations' && <Integrations onChanged={onChanged} notify={notify} />}
-      {tab === 'Cloud' && <CloudSettings notify={notify} />}
-      {tab === 'Activity Log' && <ActivityLog />}
+      {tab === 'WhatsApp' && <><BotBehaviour notify={notify} /><BotFaq notify={notify} /><StockAlerts notify={notify} /></>}
+      {tab === 'Payments & tax' && <Integrations onChanged={onChanged} notify={notify} />}
+      {tab === 'Printers' && <Printers notify={notify} />}
+      {tab === 'Devices' && <Devices notify={notify} />}
+      {tab === 'Activity log' && <ActivityLog />}
     </section>
   )
 }
 
+// Settings -> Printers: the printer helper (HazelPOS Bridge) on the shop PC prints the tickets the server queues.
+function Printers({ notify }) {
+  const [st, setSt] = useState(null)
+  const [key, setKey] = useState('') // shown once, only when "Show key instead" is used
+  const [pair, setPair] = useState(null) // { code, expires_at }: the 6-digit pairing code
+  const [, tick] = useState(0)
+  const load = () => api('/print/status').then(setSt).catch(e => toastError(e.message))
+  useEffect(() => { load(); const t = setInterval(load, 10_000); return () => clearInterval(t) }, [])
+  useEffect(() => { if (!pair) return; const t = setInterval(() => tick(n => n + 1), 1000); return () => clearInterval(t) }, [pair])
+  const setup = async () => {
+    try { setKey(''); setPair(await api('/print/pairing', {})) } catch (e) { toastError(e.message) }
+  }
+  const showKey = async () => {
+    try { const d = await api('/devices', { name: 'Printer helper', kind: 'bridge' }); setPair(null); setKey(d.device_key); load() } catch (e) { toastError(e.message) }
+  }
+  const left = pair ? Math.max(0, Math.round((Date.parse(pair.expires_at) - Date.now()) / 1000)) : 0
+  const copy = async text => { try { await navigator.clipboard.writeText(text); notify('Copied') } catch { toastError('Could not copy. Select the text and copy it') } }
+  const reprint = async j => { try { await api(`/print/jobs/${j.id}/retry`, {}); notify('Sent to printer'); load() } catch (e) { toastError(e.message) } }
+  const test = async () => { try { await api('/print/test', {}); notify('Test page sent') } catch (e) { toastError(e.message) } }
+  if (!st) return null
+  const cmd = 'node bridge/index.js --config bridge/config.json'
+  return (
+    <div className="card settings-card">
+      <h3>Printer helper</h3>
+      <p className={st.bridge_online ? 'ok-t' : 'warn-t'} role="status">{st.bridge_online ? 'Online: tickets print as they are sent.' : st.bridge_set_up ? 'Offline: tickets wait here until it is running again.' : 'Not set up yet.'}
+        {st.waiting > 0 && <> {st.waiting} {st.waiting === 1 ? 'ticket' : 'tickets'} waiting.</>}</p>
+      <p className="muted" style={{ fontSize: 13 }}>A small app (HazelPOS Printer) on one PC in the shop prints your receipts and kitchen tickets. Printer addresses are set in that app.</p>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        <button className="primary" style={{ minHeight: 44 }} onClick={setup}>Set up printer helper</button>
+        <button className="ghost" style={{ minHeight: 44 }} disabled={!st.bridge_set_up} onClick={test}>Send test page</button>
+      </div>
+      {pair && <div className="card" style={{ marginTop: 12 }}>
+        <p>On the shop PC, open <b>HazelPOS Printer</b> and type this code:</p>
+        <div style={{ fontSize: 36, fontWeight: 700, letterSpacing: 6 }} aria-label={'Pairing code ' + pair.code.split('').join(' ')}>{pair.code}</div>
+        <p className="muted" style={{ fontSize: 13 }}>{left > 0 ? `Works once, for ${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')} more minutes.` : 'This code has expired. Press "Set up printer helper" for a new one.'}</p>
+        <button className="ghost" style={{ minHeight: 44 }} onClick={showKey}>Show key instead</button>
+      </div>}
+      {key && <div className="card" style={{ marginTop: 12 }}>
+        <p><b>Copy this key now.</b> It is shown only once.</p>
+        <code style={{ wordBreak: 'break-all' }}>{key}</code>
+        <div style={{ margin: '8px 0' }}><button className="ghost" style={{ minHeight: 44 }} onClick={() => copy(key)}>Copy key</button></div>
+        <p className="muted" style={{ fontSize: 13 }}>On the shop PC, put it in <code>bridge/config.json</code> as <code>"key"</code>, then start the helper:</p>
+        <code style={{ wordBreak: 'break-all' }}>{cmd}</code>
+        <div style={{ marginTop: 8 }}><button className="ghost" style={{ minHeight: 44 }} onClick={() => copy(cmd)}>Copy command</button></div>
+      </div>}
+      <h3 style={{ marginTop: 18 }}>Tickets that did not print</h3>
+      {st.failed_today.map(j => (
+        <div key={j.id} className="device-row">
+          <div><b>{j.label}</b><br /><small className="err">{j.error}</small></div>
+          <button className="ghost" style={{ minHeight: 44 }} onClick={() => reprint(j)}>Reprint</button>
+        </div>
+      ))}
+      {!st.failed_today.length && <p className="muted">Nothing failed in the last 24 hours.</p>}
+    </div>
+  )
+}
+
+// Tills and tablets (Settings -> Devices). "Use this device as a till" gives this browser a long-lived key for this restaurant,
+// signs the owner out here and shows the lock screen (client/src/TillLock.jsx). Revoke removes a lost tablet.
+function Devices({ notify }) {
+  const [list, setList] = useState([])
+  const load = () => api('/devices').then(l => setList(l.filter(d => d.kind !== 'bridge'))).catch(e => toastError(e.message))
+  useEffect(() => { load() }, [])
+  const setup = async () => {
+    const name = await promptBox('What should this till be called?', { title: 'Use this device as a till', placeholder: 'Till 1', confirmLabel: 'Set up', required: true })
+    if (!name?.trim()) return
+    try {
+      const d = await api('/devices', { name: name.trim() })
+      await api('/logout', {}).catch(() => {})
+      ;['pos_token', 'pos_user', 'hz_tenant'].forEach(lsDel)
+      lsSet('hz_device', d.device_key)
+      window.dispatchEvent(new Event('pos-restart')) // shows the lock screen
+    } catch (e) { toastError(e.message) }
+  }
+  const revoke = async d => {
+    if (!await confirmBox(`Remove ${d.name}? It will stop working until you set it up again.`, { title: 'Remove this till', confirmLabel: 'Remove', danger: true })) return
+    try { await api(`/devices/${d.id}/revoke`, {}); notify(`${d.name} removed`); load() } catch (e) { toastError(e.message) }
+  }
+  const when = t => t ? new Date(t).toLocaleString() : 'never'
+  return (
+    <div className="card settings-card">
+      <h3>Devices</h3>
+      <p className="muted" style={{ fontSize: 13 }}>A till remembers this restaurant. Staff open it by tapping their name and entering their PIN, so PINs only work on your tills.</p>
+      <button className="primary" style={{ minHeight: 44 }} onClick={setup}>Use this device as a till</button>
+      {list.map(d => (
+        <div key={d.id} className="device-row">
+          <div><b>{d.name}</b> {d.revoked_at && <span className="pill sm">Removed</span>}<br /><small className="muted">Last used {when(d.last_seen)}</small></div>
+          {!d.revoked_at && <button className="ghost" style={{ minHeight: 44 }} onClick={() => revoke(d)}>Revoke</button>}
+        </div>
+      ))}
+      {!list.length && <p className="muted">No tills set up yet.</p>}
+    </div>
+  )
+}
+
 // Its own section in the sidebar (not under Settings): floors, tables and delivery zones
-const PLACE_TABS = [['floors', 'Floors'], ['tables', 'Tables'], ['zones', 'Delivery zones']]
+const PLACE_TABS = [['tables', 'Tables & floors'], ['zones', 'Delivery zones']]
 export function PlacesSection({ onChanged, notify }) {
   const [tab, setTab] = useState('tables')
   const [floors, setFloors] = useState([])
   const [qr, setQr] = useState(null) // 'all' or a table id: the printable QR sheet
-  useEffect(() => { if (tab === 'tables') api('/floors').then(f => setFloors(f.map(x => x.name))).catch(() => {}) }, [tab])
+  const loadFloors = () => api('/floors').then(f => setFloors(f.map(x => x.name))).catch(() => {})
+  useEffect(() => { if (tab === 'tables') loadFloors() }, [tab])
   return (
     <section className="admin">
       {qr && <QrCodesModal only={qr === 'all' ? null : qr} onClose={() => setQr(null)} />}
       <div className="row-head"><h2>Tables & delivery</h2>
         <div className="tabs" role="tablist">{PLACE_TABS.map(([id, label]) => <button key={id} role="tab" aria-selected={tab === id} className={tab === id ? 'active' : ''} onClick={() => setTab(id)}>{label}</button>)}</div>
       </div>
-      {tab === 'floors' && <SimpleAdmin route="floors" listUrl="/floors" onChanged={onChanged} notify={notify}
+      {tab === 'tables' && <SimpleAdmin route="floors" title="Floors" listUrl="/floors" onChanged={() => { loadFloors(); onChanged?.() }} notify={notify}
         fields={[
           ['name', 'Floor Name (e.g. Main Dining, Terrace)'],
           ['icon', 'Icon (Emoji)'],
@@ -56,7 +150,7 @@ export function PlacesSection({ onChanged, notify }) {
             <span className="muted">{f.total || 0} tables</span>
           </>
         )} />}
-      {tab === 'tables' && <SimpleAdmin route="tables" listUrl="/tables" onChanged={onChanged} notify={notify}
+      {tab === 'tables' && <SimpleAdmin route="tables" title="Tables" listUrl="/tables" onChanged={onChanged} notify={notify}
         headExtra={<button className="ghost" onClick={() => setQr('all')}><Icon name="qr" size={16} />Print all QR codes</button>}
         rowExtra={t => <button className="ghost" onClick={() => setQr(t.id)}><Icon name="qr" size={16} />QR code</button>}
         fields={[
@@ -365,7 +459,7 @@ function ModifierEditor({ groups, onChange }) {
   )
 }
 
-function SimpleAdmin({ route, listUrl, pick = d => d, fields, blank, show, onChanged = () => {}, notify, rowExtra = null, headExtra = null }) {
+function SimpleAdmin({ route, listUrl, pick = d => d, fields, blank, show, onChanged = () => {}, notify, rowExtra = null, headExtra = null, title = '' }) {
   const [list, setList] = useState([])
   const [edit, setEdit] = useState(null)
   const load = () => api(listUrl).then(d => setList(pick(d)))
@@ -377,6 +471,7 @@ function SimpleAdmin({ route, listUrl, pick = d => d, fields, blank, show, onCha
   const del = async x => { if (await confirmBox('Delete?')) { await api(`/${route}/${x.id}/delete`, {}); load(); onChanged() } }
   return (
     <>
+      {title && <h3 style={{ margin: '14px 0 6px' }}>{title}</h3>}
       <div className="row add"><button className="primary" onClick={() => setEdit({ ...blank })}>+ Add</button>{headExtra}</div>
       <div className="admin-list">
         {list.map(x => (
@@ -423,9 +518,6 @@ function RestaurantSettings({ onChanged, notify }) {
   useEffect(() => { api('/settings').then(setS) }, [])
   if (!s) return null
   const f = (k, l, type) => <label>{l}<input type={type || 'text'} value={s[k] ?? ''} onChange={e => setS({ ...s, [k]: e.target.value })} /></label>
-  const test = async target => {
-    try { await api('/print/test', { target }); notify('Test page sent') } catch (e) { toastError(e.message) }
-  }
   return (
     <div className="card settings-card">
       {f('name', 'Restaurant name')}
@@ -448,16 +540,8 @@ function RestaurantSettings({ onChanged, notify }) {
       {f('footer', 'Receipt footer message')}
       <div className="two">{f('loyalty_earn', 'Loyalty: points per Rs 100 spent (0 = off)', 'number')}{f('loyalty_value', 'Loyalty: Rs off per point', 'number')}</div>
 
-      <h3 style={{ marginTop: 18 }}>Thermal printers</h3>
-      <p className="muted" style={{ fontSize: 13 }}>Network printer: <code>192.168.1.50:9100</code> · USB on Linux: <code>/dev/usb/lp0</code> · Leave empty to use the browser print dialog.</p>
-      <div className="two">
-        <label>Receipt printer<div style={{ display: 'flex', gap: 6 }}>
-          <input value={s.receipt_printer ?? ''} placeholder="192.168.1.50:9100" onChange={e => setS({ ...s, receipt_printer: e.target.value })} />
-          <button className="ghost" disabled={!s.receipt_printer} onClick={() => test(s.receipt_printer)}>Test</button></div></label>
-        <label>Kitchen printer<div style={{ display: 'flex', gap: 6 }}>
-          <input value={s.kitchen_printer ?? ''} placeholder="192.168.1.51:9100" onChange={e => setS({ ...s, kitchen_printer: e.target.value })} />
-          <button className="ghost" disabled={!s.kitchen_printer} onClick={() => test(s.kitchen_printer)}>Test</button></div></label>
-      </div>
+      <h3 style={{ marginTop: 18 }}>Receipt paper</h3>
+      <p className="muted" style={{ fontSize: 13 }}>Printer addresses are set on the shop PC (Settings → Printers).</p>
       <div className="two">
         <label>Paper width
           <select value={s.paper_width || '80'} onChange={e => setS({ ...s, paper_width: e.target.value })}>
@@ -472,39 +556,6 @@ function RestaurantSettings({ onChanged, notify }) {
           <option value="refuse">Refuse — the cashier must open the Cash Drawer first</option>
         </select></label>
       <button className="primary" onClick={async () => { await api('/settings', s); onChanged(); notify('Settings saved') }}>Save settings</button>
-    </div>
-  )
-}
-
-// App updates (desktop app): status, check now, update now. Installs at night by itself when no orders are open.
-const UPDATE_TEXT = {
-  idle: 'Waiting for the first check.', checking: 'Checking for an update…', none: 'You have the newest version.',
-  downloading: 'Downloading the update in the background. You can keep working.', ready: 'An update is downloaded and ready to install.',
-  installing: 'Installing: HazelPOS restarts in about a minute.', error: 'The last check failed (no internet?). It tries again by itself.',
-  unavailable: 'Updates come with the installed HazelPOS app.',
-}
-function Updates({ notify }) {
-  const [u, setU] = useState(null)
-  const load = () => api('/update').then(setU).catch(() => {})
-  useEffect(() => { load(); const t = setInterval(load, 5000); return () => clearInterval(t) }, [])
-  if (!u) return null
-  const install = async () => {
-    const warn = u.open_orders ? ` ${u.open_orders} order(s) are still open; they stay open and come back after the update.` : ''
-    if (!await confirmBox(`Install the update now? HazelPOS closes for about a minute and opens again by itself. A backup is made first.${warn}`, { title: 'Update HazelPOS', confirmLabel: 'Update now' })) return
-    try { await api('/update/install', {}); notify('Updating: HazelPOS restarts in about a minute') } catch (e) { toastError(e.message) }
-  }
-  return (
-    <div className="admin-form">
-      <h3>App updates</h3>
-      <p>Version <b>{u.current}</b>{u.version && u.version !== u.current ? <> · new version <b>{u.version}</b></> : null}</p>
-      <p className={u.state === 'error' ? 'err' : 'muted'}>{UPDATE_TEXT[u.state] || u.state}{u.state === 'downloading' && u.percent ? ` ${u.percent}%` : ''}{u.state === 'error' && u.error ? ` (${u.error})` : ''}</p>
-      {u.vendor_requested_at && <p className="notice-inline">HazelPOS asked all restaurants to update ({new Date(u.vendor_requested_at).toLocaleDateString()}).</p>}
-      {u.desktop && <div className="row">
-        {u.state === 'ready' && u.allowed && <button className="primary" onClick={install}>Update now</button>}
-        {u.state === 'ready' && !u.allowed && <span className="muted">HazelPOS is testing this version with a few restaurants first. It installs as soon as it's released to everyone.</span>}
-        <button className="ghost" disabled={['checking', 'downloading', 'installing'].includes(u.state)} onClick={async () => { await api('/update/check', {}).catch(e => toastError(e.message)); notify('Checking for updates…'); setTimeout(load, 2000) }}>Check for updates</button>
-      </div>}
-      <p className="muted" style={{ fontSize: 13 }}>How updates work: they download by themselves in the background. If you don't press "Update now", HazelPOS installs the update at night (3–5 AM) when no orders are open. Before every update, your data is backed up to HazelPOS Cloud and copied on this PC, and the update never changes your menu, orders or settings.</p>
     </div>
   )
 }
@@ -554,28 +605,58 @@ function StockAlerts({ notify }) {
   )
 }
 
-// The three logins (Admin, Cashier, Kitchen) are fixed; only their PINs change
+// Staff logins: add, edit (name, role, PIN) and remove. PINs are only stored scrambled, so nobody can read one back;
+// they are unique inside the restaurant and only work on this restaurant's tills.
+const ROLE_LABEL = { admin: 'Owner', cashier: 'Cashier', kitchen: 'Kitchen' }
+const blankStaff = { id: null, name: '', role: 'cashier', pin: '' }
 function LoginPins({ notify }) {
   const [users, setUsers] = useState([])
-  const [pins, setPins] = useState({})
-  useEffect(() => { api('/users').then(setUsers) }, [])
-  const change = async u => {
-    try { await api('/users', { id: u.id, name: u.name, role: u.role, pin: pins[u.id] }); setPins({ ...pins, [u.id]: '' }); notify(`${u.name} PIN changed`) }
-    catch (e) { toastError(e.message) }
+  const [form, setForm] = useState(null) // null = closed; blankStaff = adding; a user = editing
+  const [busy, setBusy] = useState(false)
+  const me = (() => { try { return JSON.parse(localStorage.getItem('pos_user') || '{}') } catch { return {} } })()
+  const load = () => api('/users').then(list => setUsers(list.filter(u => u.role !== 'rider')))
+  useEffect(() => { load() }, [])
+  const save = async e => {
+    e.preventDefault(); setBusy(true)
+    try {
+      await api('/users', { id: form.id || undefined, name: form.name.trim(), role: form.role, pin: form.pin || undefined })
+      notify(form.id ? `${form.name} saved` : `${form.name} added. They can sign in on a till now`)
+      setForm(null); load()
+    } catch (x) { toastError(x.message) } finally { setBusy(false) }
   }
+  const remove = async u => {
+    if (!await confirmBox(`Remove ${u.name}? They are signed out now and can't use a till any more.`, { confirmLabel: 'Remove', danger: true })) return
+    try { await api(`/users/${u.id}/delete`, {}); notify(`${u.name} removed`); load() } catch (x) { toastError(x.message) }
+  }
+  const when = iso => iso ? new Date(iso).toLocaleString() : 'Never'
   return (
-    <>
-      <h3>Staff & PINs</h3>
-      <p className="muted" style={{ fontSize: 13 }}>Only the owner (admin) sees this. Type a new PIN (4 to 12 letters or numbers; capital or small letters don't matter) to change or reset anyone's PIN, e.g. when a cashier forgets theirs or leaves. They are signed out on every screen and must use the new PIN. If you still use the default PINs (1234, 1111, 2222), change them now. Riders get their PIN in the Riders section.</p>
+    <div className="card settings-card">
+      <div className="row-head"><h3>Staff & PINs</h3>
+        <button className="primary" id="staff-add" onClick={() => setForm({ ...blankStaff })}><Icon name="plus" size={16} />Add staff</button></div>
+      <p className="muted" style={{ fontSize: 13 }}>Everyone here signs in on your tills by tapping their name and typing their PIN (4 to 12 letters or numbers). Each PIN must be different inside this restaurant. Riders get theirs in the Riders section.</p>
+      {form && <form className="staff-form" onSubmit={save}>
+        <div className="two">
+          <label>Name<input id="staff-name" autoFocus required value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} /></label>
+          <label>Role<select id="staff-role" value={form.role} onChange={e => setForm({ ...form, role: e.target.value })}>
+            <option value="cashier">Cashier</option><option value="kitchen">Kitchen</option><option value="admin">Owner</option></select></label>
+        </div>
+        <label>{form.id ? 'New PIN (leave empty to keep the current one)' : 'PIN'}
+          <input id="staff-pin" type="password" autoCapitalize="none" autoComplete="new-password" maxLength={12} required={!form.id} value={form.pin}
+            onChange={e => setForm({ ...form, pin: e.target.value.replace(/[^a-z0-9]/gi, '') })} /></label>
+        <div className="actions" style={{ justifyContent: 'flex-start' }}>
+          <button className="primary" id="staff-save" disabled={busy || !form.name.trim() || (!form.id && form.pin.length < 4) || (form.pin && form.pin.length < 4)}>{form.id ? 'Save' : 'Add staff'}</button>
+          <button type="button" className="ghost" onClick={() => setForm(null)}>Cancel</button>
+        </div>
+      </form>}
       {users.map(u => (
-        <div key={u.id} className="two" style={{ alignItems: 'end' }}>
-          <label>{u.name} <span className="pill sm">{u.role}</span>
-            <input type="password" autoCapitalize="none" autoComplete="new-password" maxLength={12} placeholder="New PIN (4+ letters or numbers)" value={pins[u.id] || ''}
-              onChange={e => setPins({ ...pins, [u.id]: e.target.value.replace(/[^a-z0-9]/gi, '') })} /></label>
-          <button className="ghost" disabled={(pins[u.id] || '').length < 4} onClick={() => change(u)}>Change PIN</button>
+        <div key={u.id} className="admin-row staff-row" data-staff={u.name}>
+          <div className="staff-who"><b>{u.name}</b> <span className="pill sm">{ROLE_LABEL[u.role] || u.role}</span><br />
+            <small className="muted">Last sign-in: {when(u.last_login)}</small></div>
+          <button className="ghost" aria-label={`Edit ${u.name}`} onClick={() => setForm({ id: u.id, name: u.name, role: u.role, pin: '' })}>Edit</button>
+          <button className="ghost danger" aria-label={`Remove ${u.name}`} disabled={u.id === me.id} title={u.id === me.id ? "You can't remove your own login" : undefined} onClick={() => remove(u)}>Remove</button>
         </div>
       ))}
-    </>
+    </div>
   )
 }
 
@@ -594,7 +675,7 @@ function BotBehaviour({ notify }) {
   return (
     <div className="card settings-card">
       <h3>How the bot writes</h3>
-      <p className="muted" style={{ fontSize: 13 }}>Tell the WhatsApp assistant how to talk: length, tone, language, what to ask. One instruction per line works best.
+      <p className="muted" style={{ fontSize: 13 }}>Tell the WhatsApp bot how to talk: length, tone, language, what to ask. One instruction per line works best.
         The menu, prices, sizes and your address always come from the POS, and the safety rules (no made-up prices, no discounts, no other customers' details) can't be changed here.</p>
       <label>Behaviour
         <textarea rows={10} value={text} maxLength={MAX} onChange={e => setText(e.target.value)}
@@ -632,59 +713,6 @@ function ActivityLog() {
   )
 }
 
-// Connect this branch to HazelPOS Cloud (owner dashboard + daily backups); the POS keeps working offline either way
-function CloudSettings({ notify }) {
-  const [st, setSt] = useState(null)
-  const [form, setForm] = useState({ url: '', key: '' })
-  const [busy, setBusy] = useState('')
-  const load = () => api('/cloud/status').then(s => { setSt(s); setForm(f => ({ ...f, url: f.url || s.url })) })
-  useEffect(() => { load(); const t = setInterval(load, 10000); return () => clearInterval(t) }, [])
-  const act = (name, fn) => async () => { setBusy(name); try { await fn() } catch (e) { toastError(e.message) } setBusy(''); load() }
-  const when = iso => iso ? new Date(iso).toLocaleString() : 'never'
-  if (!st) return null
-  return (
-    <div className="card settings-card">
-      {st.connected ? <>
-        <h3>Connected as <b>{st.branch}</b></h3>
-        <p className="muted" style={{ fontSize: 13 }}>{st.url}</p>
-        <table className="tbl"><tbody>
-          <tr><td>Last sync</td><td>{when(st.last_sync)}</td></tr>
-          <tr><td>Orders waiting to upload</td><td>{st.pending_orders}</td></tr>
-          <tr><td>Last backup</td><td>{when(st.last_backup)}</td></tr>
-          {st.last_error && <tr><td>Problem</td><td className="err">{st.last_error} — will retry every minute</td></tr>}
-        </tbody></table>
-        <div className="actions" style={{ justifyContent: 'flex-start' }}>
-          <button className="primary" disabled={!!busy} onClick={act('sync', async () => { await api('/cloud/sync', {}); notify('Synced') })}>{busy === 'sync' ? 'Syncing…' : 'Sync now'}</button>
-          <button className="ghost" disabled={!!busy} onClick={act('backup', async () => { await api('/cloud/backup', {}); notify('Backup uploaded') })}>{busy === 'backup' ? 'Uploading…' : 'Backup now'}</button>
-          <button className="ghost danger" onClick={act('off', async () => { if (await confirmBox('Stop syncing this branch?')) await api('/cloud/disconnect', {}) })}>Disconnect</button>
-        </div>
-        <h3 style={{ marginTop: 22 }}>Restore from cloud backup</h3>
-        <p className="muted" style={{ fontSize: 13 }}>For a new or repaired PC: brings back this branch's newest backup from the cloud (orders, menu, staff and PINs, customers, stock, settings). Everything on this PC now is replaced. A new PC activated with a code does this by itself.</p>
-        <div className="actions" style={{ justifyContent: 'flex-start' }}>
-          <button className="ghost danger" disabled={!!busy} onClick={act('restore', async () => {
-            const typed = await promptBox('Everything on this PC (orders, menu, staff, settings) will be replaced by the cloud backup. Type RESTORE to continue.', { title: 'Restore from cloud backup?', placeholder: 'RESTORE', confirmLabel: 'Restore', required: true })
-            if (typed === null) return
-            const r = await api('/cloud/restore', { confirm: typed.trim().toUpperCase() })
-            notify(`Restored the backup from ${new Date(r.at).toLocaleString()}: ${r.orders} orders, ${r.products} menu items`)
-            setTimeout(() => window.dispatchEvent(new Event('pos-logout')), 1500) // logins were cleared: PIN screen
-          })}>{busy === 'restore' ? 'Restoring…' : 'Restore from cloud backup'}</button>
-        </div>
-      </> : <>
-        <h3>Connect to HazelPOS Cloud</h3>
-        <p className="muted" style={{ fontSize: 13 }}>The owner sees every branch's sales, cash shortages and low stock from their phone, and this branch's data is backed up daily.
-          Create the branch in the cloud dashboard, then paste its address and key here. Billing keeps working without internet; data uploads when the connection is back.</p>
-        <label>Cloud address<input placeholder="https://cloud.example.com" value={form.url} onChange={e => setForm({ ...form, url: e.target.value })} /></label>
-        <label>Branch key<input type="password" placeholder="hz_…" value={form.key} onChange={e => setForm({ ...form, key: e.target.value })} /></label>
-        <button className="primary" disabled={!!busy || !form.url || !form.key}
-          onClick={act('connect', async () => { const r = await api('/cloud/connect', form); setForm({ url: form.url, key: '' }); notify(`Connected as ${r.branch}`) })}>
-          {busy === 'connect' ? 'Connecting…' : 'Connect'}</button>
-      </>}
-    </div>
-  )
-}
-
-// Photos of the menu card. The WhatsApp assistant sends them when a customer asks "menu bhejo".
-// Pictures are shrunk in the browser first (max 1600 px, JPEG), so a phone photo of 5 MB becomes ~300 KB.
 const shrink = (file, max = 1600, type = 'image/jpeg') => new Promise((resolve, reject) => {
   const img = new Image()
   img.onload = () => {
@@ -718,12 +746,12 @@ function MenuPictures({ notify }) {
 
   return (
     <>
-      <p className="muted">Photos of your menu card. When a customer on WhatsApp asks to see the menu, the assistant sends these pictures instead of typing out the whole list. Up to 6 pictures.</p>
+      <p className="muted">Photos of your menu card. When a customer on WhatsApp asks to see the menu, the bot sends these pictures instead of typing out the whole list. Up to 6 pictures.</p>
       <label className={'primary add file-btn' + (busy || pics.length >= 6 ? ' disabled' : '')}>
         <Icon name="plus" size={16} />{busy ? 'Adding…' : 'Add pictures'}
         <input type="file" accept="image/jpeg,image/png,image/webp" multiple hidden disabled={busy || pics.length >= 6} onChange={upload} />
       </label>
-      {!pics.length && <div className="muted menu-pics-empty">No menu pictures yet. The assistant will describe the menu in text.</div>}
+      {!pics.length && <div className="muted menu-pics-empty">No menu pictures yet. The bot will describe the menu in text.</div>}
       <div className="menu-pics">
         {pics.map((p, i) => (
           <figure key={p.id} className="menu-pic card">

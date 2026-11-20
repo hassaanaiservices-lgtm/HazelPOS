@@ -68,7 +68,7 @@ label.check input { width: 20px; min-height: 20px; }
 .page-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 20px; }
 .page-head .sp { flex: 1; }
 .crumb { color: var(--text-2); font-size: var(--fs-sm); margin-bottom: 4px; }
-.crumb a { color: var(--text-2); }
+.crumb a { color: var(--text-2); display: inline-flex; align-items: center; min-height: 44px; }
 @media (max-width: 800px) {
   .shell { grid-template-columns: 1fr; }
   .side { position: static; height: auto; flex-direction: row; align-items: center; padding: 8px 16px; border-right: 0; border-bottom: 1px solid var(--line); }
@@ -99,7 +99,7 @@ label.check input { width: 20px; min-height: 20px; }
 table { width: 100%; border-collapse: collapse; }
 th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--line); vertical-align: middle; }
 th { color: var(--text-2); font-size: var(--fs-sm); font-weight: 600; white-space: nowrap; }
-td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+td.num, th.num { white-space: nowrap; text-align: right; font-variant-numeric: tabular-nums; }
 tr.click { cursor: pointer; } tr.click:hover td { background: var(--surface-2); }
 .tabs { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 16px; border-bottom: 1px solid var(--line); }
 .tabs button { border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: none; color: var(--text-2); }

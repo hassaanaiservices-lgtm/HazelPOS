@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<meta name="referrer" content="no-referrer">
+<meta name="theme-color" content="#f6f7f9" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#14161a" media="(prefers-color-scheme: dark)">
+<title>Where is my order?</title>
+<link rel="stylesheet" href="/p/vendor/leaflet.css">
+<style>
+  /* The customer's tracking page: sent by WhatsApp when the order leaves. Order status, and the rider on a map while on the way. */
+  :root { color-scheme: light dark; --bg: #f6f7f9; --surface: #fff; --outline: #c9cdd6; --text: #16181d; --muted: #565d6b; --accent: #c25200; --ok: #12703a; --warn: #8a5300; --map-bg: #e4e7ec; --ink: #fff; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #14161a; --surface: #1e2127; --outline: #3a3f49; --text: #f2f3f5; --muted: #a1a7b3; --accent: #ff7a1a; --ok: #3ddc84; --warn: #ffb020; --map-bg: #22262d; --ink: #14161a; } }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  body { max-width: 640px; margin: 0 auto; padding: 16px; }
+  h1 { font-size: 20px; margin: 0 0 4px; } .muted { color: var(--muted); } .small { font-size: 13px; }
+  .card { background: var(--surface); border: 1px solid var(--outline); border-radius: 14px; padding: 16px; margin-top: 12px; }
+  .status { font-size: 20px; font-weight: 700; display: flex; gap: 10px; align-items: center; }
+  .status.out { color: var(--accent); } .status.delivered { color: var(--ok); } .status.cooking, .status.ready { color: var(--warn); }
+  #map { height: 360px; border-radius: 14px; border: 1px solid var(--outline); margin-top: 12px; display: none; background: var(--map-bg); }
+  .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-top: 12px; }
+  .step { font-size: 12px; color: var(--muted); text-align: center; padding-top: 8px; border-top: 3px solid var(--outline); }
+  .step.done { border-color: var(--ok); color: var(--text); } .step.now { border-color: var(--accent); color: var(--text); font-weight: 700; }
+  .rider-marker { background: var(--accent); color: var(--ink); border-radius: 50%; width: 36px; height: 36px; display: grid; place-items: center; font-size: 20px; border: 2px solid #fff; box-shadow: 0 2px 8px rgba(0,0,0,.5); }
+  .home-marker { background: var(--ok); color: var(--ink); border-radius: 50%; width: 30px; height: 30px; display: grid; place-items: center; font-size: 16px; border: 2px solid #fff; }
+  .leaflet-container { font: inherit; }
+  .leaflet-bar a { width: 44px !important; height: 44px !important; line-height: 44px !important; }
+  .leaflet-control-attribution a { display: inline-block; padding: 12px 4px; }
+  .fatal { margin: 40px 0; text-align: center; font-size: 18px; font-weight: 600; }
+  body.invalid > :not(.fatal) { display: none; }
+</style>
+</head>
+<body>
+  <p class="fatal" id="fatal" role="alert" hidden></p>
+  <h1 id="title">Your order</h1>
+  <div class="muted small" id="restaurant"></div>
+  <div class="card">
+    <div class="status" id="status">Loading…</div>
+    <div class="muted" id="detail"></div>
+    <div class="steps"><div class="step" id="s1">Preparing</div><div class="step" id="s2">On the way</div><div class="step" id="s3">Delivered</div></div>
+  </div>
+  <div id="map"></div>
+  <p class="muted small">Powered by HazelPOS. The rider's location is shown only while your order is on the way.</p>
+<script src="/p/vendor/leaflet.js"></script>
+<script src="/p/track.js"></script>
+</body>
+</html>

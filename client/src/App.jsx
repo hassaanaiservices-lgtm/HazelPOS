@@ -2,7 +2,6 @@ import { createContext, useContext, useEffect, useMemo, useState } from 'react'
 import './App.css'
 import { api, rs, TYPES, parseModifiers, modsText, promoPreview, run, isDeal, dealIncludes, includesText, combosOf } from './lib'
 import Login from './Login'
-import Activate from './Activate'
 import Kitchen from './Kitchen'
 import Dashboard from './Dashboard'
 import Tour, { tourDone } from './Tour'
@@ -19,12 +18,12 @@ import Payroll from './Payroll'
 import WhatsApp from './WhatsApp'
 import { QrOrderAlerts, beep } from './QrOrders'
 import ReadyAlerts from './ReadyAlerts'
-import QRCode from 'qrcode'
+import { Bill, printOrder } from './Bill'
 import { Icon, Logo } from './ui'
 import { toast, toastError, confirmBox, promptBox } from './notify'
 
 const Ctx = createContext({})
-const THEMES = [['dark', 'Dark', 'moon'], ['light', 'Light', 'sun']]
+const THEMES = [['auto', 'Auto', 'moon'], ['dark', 'Dark', 'moon'], ['light', 'Light', 'sun']]
 // [view, label, icon]
 const NAV = {
   admin: [
@@ -37,7 +36,7 @@ const NAV = {
     ['register_session', 'Cash drawer', 'wallet'],
     ['inventory', 'Inventory', 'box'],
     ['customers', 'Customers', 'users'],
-    ['staff', 'Staff', 'badge'],
+    ['staff', 'Salaries', 'badge'],
     ['admin', 'Settings', 'settings'],
   ],
   cashier: [
@@ -70,12 +69,24 @@ export default function App() {
   const [lowList, setLowList] = useState([]) // ingredients running low (owner)
   const lowStock = lowList.length
   // "Seen" marks for the slow blink on the menu: the low ingredients the owner has already looked at, and the app update
-  // they've already seen in Settings → Updates. Something new (another ingredient low, a newer update) blinks again.
+  // they've already seen in Settings → HazelPOS account. Something new (another ingredient low, a newer update) blinks again.
   const [seen, setSeenState] = useState(() => { try { return { low: [], update: '', ...JSON.parse(localStorage.getItem('pos_seen') || '{}') } } catch { return { low: [], update: '' } } })
   const setSeen = fn => setSeenState(s => { const n = { ...s, ...fn(s) }; try { localStorage.setItem('pos_seen', JSON.stringify(n)) } catch { /* private window */ } return n })
+  const [printSt, setPrintSt] = useState(null) // printer helper (Bridge) status: offline banner
+  useEffect(() => {
+    if (!user || !['admin', 'cashier'].includes(user.role)) return
+    const poll = () => api('/print/status').then(setPrintSt).catch(() => {})
+    poll(); const t = setInterval(poll, 30_000); return () => clearInterval(t)
+  }, [user?.id])
+  const [billing, setBilling] = useState(null) // HazelPOS subscription: past_due shows the owner a banner
+  useEffect(() => {
+    if (user?.role !== 'admin') return
+    const poll = () => api('/billing').then(setBilling).catch(() => {})
+    poll(); const t = setInterval(poll, 10 * 60_000); return () => clearInterval(t)
+  }, [user?.id])
   const [wa, setWa] = useState(null) // WhatsApp unread / missed-while-offline counts for the nav badge
   const [navOpen, setNavOpen] = useState(false) // drawer on narrow screens
-  const [theme, setTheme] = useState(() => { try { return localStorage.getItem('pos_theme') === 'light' ? 'light' : 'dark' } catch { return 'dark' } }) // per screen: dark | light
+  const [theme, setTheme] = useState(() => { try { const t = localStorage.getItem('pos_theme'); return t === 'light' || t === 'dark' ? t : 'auto' } catch { return 'auto' } }) // per screen: auto (the device's setting) | dark | light
   useEffect(() => {
     document.documentElement.dataset.theme = theme
     try { localStorage.setItem('pos_theme', theme) } catch { /* private window: theme just isn't remembered */ }
@@ -89,14 +100,8 @@ export default function App() {
   const reloadAll = () => { api('/settings').then(setSettings); if (user) { api('/menu').then(setMenu); refresh() } }
   useEffect(reloadAll, [user?.id])
   useEffect(() => { if (view === 'inventory') setSeen(() => ({ low: lowList.map(i => i.id) })) }, [view, lowList]) // opened Inventory = seen: stop blinking
-  const [updateReady, setUpdateReady] = useState('') // version of a downloaded app update (owner banner)
   const [tour, setTour] = useState(false) // first-run guided tour (Tour.jsx); Help plays it again
   useEffect(() => { if (user && settings.demo !== undefined && !tourDone(user.role)) setTour(true) }, [user?.role, settings.demo])
-  useEffect(() => {
-    if (user?.role !== 'admin') return
-    const poll = () => api('/update').then(u => setUpdateReady(u.state === 'ready' ? u.version || 'An update' : '')).catch(() => {})
-    poll(); const t = setInterval(poll, 5 * 60 * 1000); return () => clearInterval(t)
-  }, [user?.role])
   useEffect(() => { // the POS stays open for days: keep the membership banner current
     const t = setInterval(() => api('/settings').then(setSettings).catch(() => {}), 30 * 60 * 1000)
     return () => clearInterval(t)
@@ -113,7 +118,7 @@ export default function App() {
   }, [user?.id])
 
   const login = ({ token, user: u }) => { localStorage.setItem('pos_token', token); setUser(u); localStorage.setItem('pos_user', JSON.stringify(u)); setView(homeView(u.role)) }
-  const clearSession = () => { setUser(null); localStorage.removeItem('pos_user'); localStorage.removeItem('pos_token'); setOrder(null) }
+  const clearSession = () => { setUser(null); localStorage.removeItem('pos_user'); localStorage.removeItem('pos_token'); setOrder(null); window.dispatchEvent(new Event('pos-restart')) } // main.jsx shows the sign-in or lock screen
   const logout = () => { api('/logout', {}).catch(() => {}).finally(clearSession) }
   useEffect(() => {
     window.addEventListener('pos-logout', clearSession)
@@ -124,11 +129,10 @@ export default function App() {
 
   // Wait for /settings so the demo role picker doesn't flash the PIN box first.
   if (settings.demo === undefined) return <div className="login" />
-  if (settings.licence?.state === 'activate') return <Activate settings={settings} onDone={reloadAll} />
   if (!user) return <Login settings={settings} onLogin={login} />
   if (user.must_change_pin) return <ChoosePin user={user} settings={settings} onLogout={logout}
     onDone={() => { const u = { ...user, must_change_pin: false }; setUser(u); localStorage.setItem('pos_user', JSON.stringify(u)); toast('Your PIN is saved. Next: give your cashier and kitchen their own PINs in Settings → Staff & PINs.', 'info') }} />
-  const nav = NAV[user.role] || NAV.cashier
+  const nav = (NAV[user.role] || NAV.cashier).filter(n => !(n[0] === 'whatsapp' && wa?.state === 'off')) // WhatsApp is off online for now
   const newOrder = (type, table) => { setOrder({ type, table_id: table?.id, tableName: table?.name, items: [], discount: 0, user_name: user.name }); setView('register') }
   const openExisting = async id => {
     const o = await api('/orders/' + id)
@@ -138,8 +142,7 @@ export default function App() {
   const goHome = () => { setOrder(null); refresh(); setView('home') }
   const go = v => { setNavOpen(false); v === 'home' ? goHome() : (setOrder(null), refresh(), setView(v)) }
   const lowNew = lowList.some(i => !seen.low.includes(i.id))
-  const updateNew = !!updateReady && seen.update !== updateReady
-  const attention = v => (v === 'inventory' && lowNew) || (v === 'admin' && updateNew)
+  const attention = v => v === 'inventory' && lowNew
   const isActive = v => v === view || (v === 'home' && ['tables', 'register'].includes(view))
   const solo = nav.length === 1 // kitchen: one screen, no sidebar
   const brand = <div className="brand" onClick={() => go(nav[0][0])}><span className={"brand-mark" + (settings.logo_image ? " has-img" : "")} aria-hidden="true"><Logo s={settings} /></span><span>{settings.name}</span></div>
@@ -186,10 +189,10 @@ export default function App() {
       <div className="drawer-bg" onClick={() => setNavOpen(false)} />
 
       <main>
-        {updateReady && user.role === 'admin' && view !== 'admin' && <div className="licence-banner due_soon no-print" role="status">
-          HazelPOS {updateReady} is ready to install. <button className="link" onClick={() => go('admin')}>Settings → Updates</button> (or it installs tonight by itself).</div>}
-        {['due_soon', 'warning', 'locked'].includes(settings.licence?.state) && user.role !== 'kitchen' &&
-          <div className={'licence-banner no-print ' + settings.licence.state} role={settings.licence.state === 'due_soon' ? 'status' : 'alert'}>{settings.licence.message}</div>}
+        {billing?.status === 'past_due' && user.role === 'admin' && <div className="licence-banner warning no-print billing-banner" id="billing-banner" role="alert">
+          Your HazelPOS payment is overdue. Please pay by {billing.pay_by} to avoid interruption.</div>}
+        {printSt && !printSt.bridge_online && printSt.waiting > 0 && user.role !== 'kitchen' &&
+          <div className="licence-banner warning no-print" role="alert">Printer helper is offline — {printSt.waiting} {printSt.waiting === 1 ? 'ticket' : 'tickets'} waiting</div>}
         {view === 'home' && <Home onPick={t => t === 'dine-in' ? (refresh(), setView('tables')) : newOrder(t)} />}
         {view === 'tables' && <TablesFloor tables={tables} onBack={goHome} onRefresh={refresh} canEditFloors={user.role === 'admin'}
           onPick={t => t.order_id ? openExisting(t.order_id) : newOrder('dine-in', t)} />}
@@ -201,7 +204,7 @@ export default function App() {
         {view === 'dashboard' && user.role === 'admin' && <Dashboard user={user} notify={notify} />}
         {view === 'inventory' && user.role === 'admin' && <Inventory notify={notify} />}
         {view === 'customers' && user.role === 'admin' && <Customers notify={notify} />}
-        {view === 'staff' && user.role === 'admin' && <section className="admin"><div className="row-head"><h2>Staff</h2>
+        {view === 'staff' && user.role === 'admin' && <section className="admin"><div className="row-head"><h2>Salaries</h2>
           <span className="muted">Salaries and advances are added to Expenses automatically.</span></div><Payroll notify={notify} /></section>}
         {view === 'delivery' && user.role === 'cashier' && <Delivery notify={notify} />}
         {view === 'riders' && user.role === 'admin' && <Riders notify={notify} />}
@@ -209,7 +212,7 @@ export default function App() {
         {view === 'whatsapp' && user.role !== 'kitchen' && <WhatsApp notify={notify} />}
         {view === 'menu' && user.role === 'admin' && <MenuSection onChanged={reloadAll} notify={notify} />}
         {view === 'places' && user.role === 'admin' && <PlacesSection onChanged={reloadAll} notify={notify} />}
-        {view === 'admin' && user.role === 'admin' && <Admin onChanged={reloadAll} notify={notify} updateNew={updateNew} onUpdateSeen={() => setSeen(() => ({ update: updateReady }))} />}
+        {view === 'admin' && user.role === 'admin' && <Admin onChanged={reloadAll} notify={notify} />}
       </main>
       {tour && <Tour role={user.role} onClose={() => setTour(false)} />}
       {user.role === 'cashier' && <QrOrderAlerts user={user} notify={notify} onAccepted={refresh} />}
@@ -492,7 +495,7 @@ function Register({ menu, order, setOrder, notify, onDone, onBack }) {
       }
     }
     setOrder(o => ({ ...o, id: s.id, items: s.items, discount: s.discount, customer_id: s.customer_id, promo_code: s.promo_code, promo: s.promo, points_used: s.points_used, zone_id: s.zone_id }))
-    if (s.kitchen_print && s.kitchen_print !== 'ok') toastError('Kitchen printer: ' + s.kitchen_print)
+    if (s.kitchen_print && s.kitchen_print !== 'ok') toastError('Kitchen ticket: ' + s.kitchen_print)
     return s
   }
   const tryIt = run
@@ -771,50 +774,16 @@ function SplitModal({ order, onSplit, onClose }) {
 
 function Receipt({ order, onClose, notify, closeLabel = 'New Order' }) {
   const { settings: s } = useContext(Ctx)
-  const [fiscalQr, setFiscalQr] = useState('')
-  useEffect(() => { if (order.fiscal_no) QRCode.toDataURL(order.fiscal_no, { margin: 1, width: 120 }).then(setFiscalQr) }, [order.fiscal_no])
   const print = async () => {
-    if (!s.receipt_printer) return window.print()
-    try { await api(`/print/receipt/${order.id}`, {}); notify('Printed') } catch (e) { toastError(e.message) }
+    if (!s.printing) return printOrder(order, s)
+    try { await api(`/print/receipt/${order.id}`, {}); notify('Sent to printer') } catch (e) { toastError(e.message) }
   }
   return (
     <div className="modal-bg">
       <div className="modal receipt-wrap">
-        <div className="receipt" id="receipt">
-          {s.logo_image ? <><img className="receipt-logo" src={s.logo_image} alt="" /><h3>{s.name}</h3></> : <h3>{s.logo} {s.name}</h3>}
-          {s.address && <p>{s.address}</p>}
-          {s.phone && <p>Tel: {s.phone}</p>}
-          {s.ntn && <p>NTN: {s.ntn}</p>}
-          {s.strn && <p>STRN: {s.strn}</p>}
-          {s.pos_id && <p>POS ID: {s.pos_id}</p>}
-          <p><b>{order.tax > 0 ? 'SALES TAX INVOICE' : 'RECEIPT'}</b> · {order.invoice_no}</p>
-          <p>Order #{order.id} · {order.type}{order.tableName ? ' · ' + order.tableName : ''}{order.customer ? ' · ' + order.customer : ''}</p>
-          {order.address && <p>{order.address}</p>}
-          <p>{new Date(order.paid_at).toLocaleString()}{order.user_name ? ' · ' + order.user_name : ''}</p>
-          <hr />
-          {order.items.map(i => <div key={i.id}>
-            <div className="r-line"><span>{i.qty} × {i.name}</span><span>{rs(i.qty * i.price)}</span></div>
-            {i.mods?.length > 0 && <div className="r-sub">+ {modsText(i.mods)}</div>}
-            {i.includes?.length > 0 && <div className="r-sub">{includesText(i.includes)}</div>}
-          </div>)}
-          <hr />
-          <div className="r-line"><span>Subtotal</span><span>{rs(order.subtotal)}</span></div>
-          {order.discount > 0 && <div className="r-line"><span>Discount</span><span>-{rs(order.discount)}</span></div>}
-          {order.promo_amount > 0 && <div className="r-line"><span>Promo {order.promo_code}</span><span>-{rs(order.promo_amount)}</span></div>}
-          {order.points_amount > 0 && <div className="r-line"><span>Points used ({order.points_used})</span><span>-{rs(order.points_amount)}</span></div>}
-          <div className="r-line"><span>Sales tax{s.tax_rate ? ` ${s.tax_rate}%` : ''}</span><span>{rs(order.tax)}</span></div>
-          {order.delivery_fee > 0 && <div className="r-line"><span>Delivery{order.zone ? ` (${order.zone})` : ''}</span><span>{rs(order.delivery_fee)}</span></div>}
-          <div className="r-line big"><span>TOTAL</span><span>{rs(order.total)}</span></div>
-          <div className="r-line"><span>Paid ({order.payment_method})</span><span>{rs(order.paid)}</span></div>
-          {order.change_ > 0 && <div className="r-line"><span>Change</span><span>{rs(order.change_)}</span></div>}
-          {order.status === 'refunded' && <p><b>REFUNDED</b> · {new Date(order.refunded_at).toLocaleString()}{order.refund_reason ? ' · ' + order.refund_reason : ''}</p>}
-          {order.fiscal_no && <div className="fiscal"><p><b>{(s.fiscal_mode || '').toUpperCase()} Invoice No.</b><br />{order.fiscal_no}</p>{fiscalQr && <img src={fiscalQr} alt="" />}</div>}
-          {!order.fiscal_no && order.fiscal_status === 'pending' && <p className="muted">Tax invoice no. pending — will be reported automatically</p>}
-          {order.points_earned > 0 && <p>Points earned: {order.points_earned}, balance {order.customer_points}</p>}
-          <p className="thanks">{s.footer}</p>
-        </div>
+        <Bill order={order} s={s} idAttr="receipt" />
         <div className="actions no-print">
-          <button className="ghost" onClick={print}><Icon name="print" size={16} />{s.receipt_printer ? 'Reprint' : 'Print'}</button>
+          <button className="ghost" onClick={print}><Icon name="print" size={16} />{s.printing ? 'Reprint' : 'Print'}</button>
           <button id="new-order" className="primary" onClick={onClose}>{closeLabel}</button>
         </div>
       </div>
@@ -836,7 +805,7 @@ function Orders({ onOpen, notify }) {
   return (
     <section className="orders">
       <div className="row-head"><h2>Orders</h2>
-        <div className="tabs">{['open', 'paid', 'refunded', 'cancelled'].map(t => <button key={t} className={tab === t ? 'active' : ''} onClick={() => setTab(t)}>{t}</button>)}</div>
+        <div className="tabs">{[['open', 'Open'], ['paid', 'Paid'], ['refunded', 'Refunded'], ['cancelled', 'Cancelled']].map(([t, label]) => <button key={t} className={tab === t ? 'active' : ''} onClick={() => setTab(t)}>{label}</button>)}</div>
       </div>
       <div className="order-list">
         {!list.length && <div className="empty">No {tab} orders</div>}

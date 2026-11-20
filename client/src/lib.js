@@ -1,10 +1,24 @@
 import { toast, toastError, infoBox } from './notify.jsx'
-export const api = async (url, body) => {
-  const headers = { Authorization: 'Bearer ' + (localStorage.getItem('pos_token') || '') }
+// Browser storage can be blocked (private window): every read and write is guarded
+export const lsGet = k => { try { return localStorage.getItem(k) } catch { return null } }
+export const lsSet = (k, v) => { try { localStorage.setItem(k, v) } catch { /* private window */ } }
+export const lsDel = k => { try { localStorage.removeItem(k) } catch { /* private window */ } }
+// Which restaurant a request is for: a till sends its device key (hz_device); a browser the owner signed in on sends the
+// restaurant code (hz_tenant). A signed-in owner on a till uses the code (forceTenant), because their token belongs to the code.
+let forceTenant = false
+export const setForceTenant = v => { forceTenant = v }
+export const restaurantHeaders = tenant => {
+  const device = tenant || forceTenant ? null : lsGet('hz_device'), slug = tenant || lsGet('hz_tenant')
+  return device ? { 'X-Device': device } : slug ? { 'X-Tenant': slug } : {}
+}
+export const api = async (url, body, { tenant } = {}) => {
+  const headers = { Authorization: 'Bearer ' + (lsGet('pos_token') || ''), ...restaurantHeaders(tenant) }
   const r = await fetch('/api' + url, body ? { method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : { headers })
   const data = await r.json()
+  // A removed till or a restaurant that is gone: start again from the sign-in or lock screen
+  if (data.code === 'device_revoked') { lsDel('hz_device'); window.dispatchEvent(new Event('pos-restart')) }
   // Expired or revoked session: send the terminal back to the PIN screen
-  if (r.status === 401 && url !== '/login') window.dispatchEvent(new Event('pos-logout'))
+  else if (r.status === 401 && url !== '/login' && !tenant) window.dispatchEvent(new Event('pos-logout'))
   // Blocked in the public demo: a popup explaining the real feature. The error has no message, so no red toast as well.
   if (data.code === 'demo') { infoBox(data.error, { title: 'Not in the demo' }); throw Object.assign(new Error(''), { code: 'demo' }) }
   // Logged in with a starting PIN (1234…): the app shows the "Choose your own PIN" screen (ChoosePin.jsx)

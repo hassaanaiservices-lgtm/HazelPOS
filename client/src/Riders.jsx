@@ -86,7 +86,7 @@ function RiderList({ notify }) {
             <span style={{ flex: 1 }} /><button className="ghost" onClick={() => setLink(null)}>Close</button>
           </div>
         </> : <>
-          <p>The rider screen runs on the cloud, so riders can use it on the road. Connect the cloud first: <b>Settings → Cloud</b>.</p>
+          <p>The rider screen runs on the cloud, so riders can use it on the road. Connect the cloud first: <b>Settings → HazelPOS account</b>.</p>
           <div className="row"><span style={{ flex: 1 }} /><button className="ghost" onClick={() => setLink(null)}>Close</button></div>
         </>}
       </div></div>}
