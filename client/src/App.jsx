@@ -30,6 +30,7 @@ const NAV = {
     ['dashboard', 'Dashboard', 'chart'],
     ['orders', 'Orders', 'list'],
     ['kitchen', 'Kitchen', 'flame'],
+    ['whatsapp', 'WhatsApp', 'chat'],
     ['riders', 'Riders', 'bike'],
     ['menu', 'Menu', 'book'],
     ['places', 'Tables & delivery', 'table'],
@@ -132,7 +133,7 @@ export default function App() {
   if (!user) return <Login settings={settings} onLogin={login} />
   if (user.must_change_pin) return <ChoosePin user={user} settings={settings} onLogout={logout}
     onDone={() => { const u = { ...user, must_change_pin: false }; setUser(u); localStorage.setItem('pos_user', JSON.stringify(u)); toast('Your PIN is saved. Next: give your cashier and kitchen their own PINs in Settings → Staff & PINs.', 'info') }} />
-  const nav = (NAV[user.role] || NAV.cashier).filter(n => !(n[0] === 'whatsapp' && wa?.state === 'off')) // WhatsApp is off online for now
+  const nav = (NAV[user.role] || NAV.cashier).filter(n => !(n[0] === 'whatsapp' && wa?.state === 'off')) // hidden only when the server has WhatsApp turned off (WHATSAPP=off)
   const newOrder = (type, table) => { setOrder({ type, table_id: table?.id, tableName: table?.name, items: [], discount: 0, user_name: user.name }); setView('register') }
   const openExisting = async id => {
     const o = await api('/orders/' + id)

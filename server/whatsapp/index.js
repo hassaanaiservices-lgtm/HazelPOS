@@ -111,13 +111,19 @@ module.exports = function whatsappManager({ tenancy, pos, askImpl = rag.ask }) {
   const cur = () => live.get(tenancy.current()?.tenant.id);
   const statusBody = h => ({ ...h.wa.status(), state: h.wa.status().status, ...h.store.counts(), assistant: h.assistant.enabled(), assistant_paused_unpaid: false, business_hours: config.assistant.business_hours, stt: h.stt.status() });
 
-  router.get('/status', (req, res) => { const h = cur(); res.json(h ? statusBody(h) : { state: 'off', status: 'off' }); });
+  // Not linked yet: 'disconnected', so the WhatsApp screen shows and the owner can press Connect. 'off' only when the server turns WhatsApp off.
+  router.get('/status', (req, res) => { const h = cur(); res.json(h ? statusBody(h) : OFF ? { state: 'off', status: 'off' }
+    : { state: 'disconnected', status: 'disconnected', unread: 0, offline_chats: 0, needs_attention: 0, orders_pending: 0, assistant: false, business_hours: config.assistant.business_hours }); });
   router.post('/connect', async (req, res) => {
     if (OFF) return res.status(400).json({ error: 'WhatsApp is turned off on this server (WHATSAPP=off).' });
     try { const h = start(tenancy.current().tenant.id); await h.wa.connect(); res.json(statusBody(h)); } catch (e) { fail(res, e); }
   });
   // Everything below needs an instance
-  router.use((req, res, next) => { const h = cur(); if (!h) return res.status(409).json({ error: 'Connect WhatsApp first' }); req.wa = h; next(); });
+  router.use((req, res, next) => {
+    const h = cur();
+    if (!h) return req.method === 'GET' && !/\/audio$/.test(req.path) ? res.json([]) : res.status(409).json({ error: 'Connect WhatsApp first' }); // lists are just empty until linked
+    req.wa = h; next();
+  });
   const chatId = req => req.params.id;
   router.post('/logout', async (req, res) => { await req.wa.wa.logout(); res.json(statusBody(req.wa)); });
   router.post('/assistant', (req, res) => { req.wa.assistant.setEnabled(!!req.body.enabled); res.json({ assistant: req.wa.assistant.enabled() }); });
