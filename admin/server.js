@@ -35,6 +35,7 @@ app.use((req, res, next) => {
   if (req.secure) res.set('Strict-Transport-Security', 'max-age=15552000');
   next();
 });
+app.get('/api/health', (req, res) => res.json({ ok: true, app: 'admin' })); // Railway's health check
 app.use(express.json({ limit: '4mb' })); // menu Excel files and menu pictures travel as base64
 
 const cookie = req => Object.fromEntries((req.get('cookie') || '').split(';').map(c => c.trim().split('=')).filter(([k]) => k).map(([k, ...v]) => [k, v.join('=')]));

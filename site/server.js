@@ -13,7 +13,7 @@ const HIDDEN = new Set(['/server.js', '/README.md', '/Dockerfile', '/railway.jso
 
 http.createServer((req, res) => {
   const url = decodeURIComponent((req.url || '/').split('?')[0]);
-  if (url === '/health') { res.writeHead(200, { 'Content-Type': 'application/json' }); return res.end('{"ok":true}'); }
+  if (url === '/health' || url === '/api/health') { res.writeHead(200, { 'Content-Type': 'application/json' }); return res.end('{"ok":true}'); }
   if (url === '/signin' || url === '/login') { // the restaurant's sign-in screen lives on the POS
     if (!POS_URL) { res.writeHead(503, { 'Content-Type': 'text/plain; charset=utf-8' }); return res.end('Sign in is not set up yet (POS_URL is missing).'); }
     res.writeHead(302, { Location: POS_URL + '/' }); return res.end();
