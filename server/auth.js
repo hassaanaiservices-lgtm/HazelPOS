@@ -72,7 +72,9 @@ r.post('/owner/login', (req, res) => {
     return bad(res, 401, 'Wrong phone number or password');
   }
   const trusted = control.prepare('SELECT 1 FROM owner_devices WHERE owner_id=? AND device_hash=?').get(owner.id, sha256(device));
-  if (trusted || process.env.OTP_OFF === '1') return res.json(newOwnerSession(owner.id));
+  // The code goes out on HazelPOS's WhatsApp. While that number isn't linked, the password alone signs in.
+  // shortcut: link the HazelPOS WhatsApp number in the admin panel to switch the 6-digit code on.
+  if (trusted || process.env.OTP_OFF === '1' || vendorWa.status().state !== 'connected') return res.json(newOwnerSession(owner.id));
   if (limited('otp', phone, req.ip, MAX_CODES, MAX_CODES_PER_IP)) return bad(res, 429, 'Too many codes sent. Please wait a few minutes');
   countHit('otp', phone, req.ip);
   const code = String(crypto.randomInt(0, 1000000)).padStart(6, '0');

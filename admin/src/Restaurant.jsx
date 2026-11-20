@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api, ago } from './lib'
-import { run, toast, confirmBox } from './notify'
+import { run, toast, confirmBox, inputBox } from './notify'
 import { StatusChip, STATUSES, PayDialog, rs, dateOf } from './ui'
 
 // One restaurant: status and plan, Suspend / Activate / Cancel (each asks first), links for the owner, and its invoices.
@@ -27,6 +27,11 @@ export default function Restaurant({ id }) {
   const sendLink = (path, kind) => run(async () => {
     const r = await api(`/tenants/${id}/${path}`, {})
     setLink({ kind, ...r }); toast(r.sent ? 'Sent on WhatsApp' : "WhatsApp isn't linked: copy the link below")
+  })
+  const setPassword = run(async () => {
+    const pw = await inputBox(`New password for ${t.owner?.name || 'the owner'} (8+ characters). They sign in with their phone number and this password.`, { title: 'Set owner password', confirmLabel: 'Set password' })
+    if (pw == null) return
+    await api(`/tenants/${id}/owner-password`, { password: pw }); toast('Password set. Give it to the owner')
   })
   const copyLink = run(async () => { await navigator.clipboard.writeText(link.link); toast('Link copied') })
 
@@ -64,7 +69,8 @@ export default function Restaurant({ id }) {
         <p className="muted" style={{ marginBottom: 12 }}>Sends a link from HazelPOS's WhatsApp number. A welcome link lasts 7 days, a reset link 1 hour, and each works once.</p>
         <div className="row">
           <button id="btn-resend" onClick={sendLink('resend-welcome', 'Welcome link')}>Resend welcome</button>
-          <button id="btn-reset" onClick={sendLink('owner-reset', 'Reset link')}>Reset owner password</button>
+          <button className="primary" id="btn-setpw" onClick={setPassword}>Set password</button>
+          <button id="btn-reset" onClick={sendLink('owner-reset', 'Reset link')}>Send reset link</button>
         </div>
         {link && <div className="notice" style={{ marginTop: 12 }}>
           <b>{link.kind}</b>: <a href={link.link} target="_blank" rel="noreferrer" id="made-link">{link.link}</a>

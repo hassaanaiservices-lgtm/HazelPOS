@@ -7,7 +7,7 @@ const tenancy = require('./tenancy');
 const vendorWa = require('./vendor-wa');
 const { hashPin } = require('./tenant-init');
 const { isWeakPin } = require('./pin-rules');
-const { normPhone, createOwnerLink, BASE_URL } = require('./auth');
+const { normPhone, createOwnerLink, BASE_URL, hashPassword } = require('./auth');
 
 const { control } = tenancy;
 // Why a restaurant is in its status: 'manual' (set by hand in the admin panel: the lifecycle never undoes it), 'billing', 'trial'.
@@ -130,6 +130,8 @@ router.post('/tenants', wrap(async (req, res) => {
   if (!ownerName) return fail(res, 400, "Enter the owner's name");
   if (!vendorWa.normalise(phone)) return fail(res, 400, "Enter the owner's mobile number, like 03001234567");
   if (!Number.isFinite(fee) || fee < 0) return fail(res, 400, 'The monthly fee must be a number');
+  const ownerPassword = req.body.owner_password ? String(req.body.owner_password) : '';
+  if (ownerPassword && ownerPassword.length < 8) return fail(res, 400, 'The owner password needs at least 8 characters');
   let slug = String(req.body.slug || '').trim().toLowerCase();
   if (slug) { if (!tenancy.SLUG.test(slug)) return fail(res, 400, 'The restaurant code must be 3 to 40 lowercase letters, numbers or dashes'); if (tenancy.bySlug(slug)) return fail(res, 400, 'That restaurant code is already used'); }
   else slug = uniqueSlug(slugify(name));
@@ -142,11 +144,17 @@ router.post('/tenants', wrap(async (req, res) => {
     const oid = Number(control.prepare('INSERT INTO owners (phone,name,pass_hash,created_at) VALUES (?,?,NULL,?)').run(phone, ownerName, now()).lastInsertRowid);
     owner = control.prepare('SELECT * FROM owners WHERE id=?').get(oid);
   }
+  // A password set here by HazelPOS: the owner signs in with it straight away (no welcome link needed)
+  if (ownerPassword && !owner.pass_hash) {
+    control.prepare('UPDATE owners SET pass_hash=? WHERE id=?').run(hashPassword(ownerPassword), owner.id);
+    owner = control.prepare('SELECT * FROM owners WHERE id=?').get(owner.id);
+  }
   const pin = randomPin();
   const userId = tenancy.run(id, () => Number(tenancy.db.prepare('INSERT INTO users (name,pin,role) VALUES (?,?,?)').run(owner.name || ownerName, hashPin(pin), 'admin').lastInsertRowid));
   control.prepare('INSERT INTO owner_tenants (owner_id, tenant_id, user_id) VALUES (?,?,?)').run(owner.id, id, userId);
   let link = null, text;
-  if (!owner.pass_hash) { link = createOwnerLink(owner.id, 'welcome').url; text = `Welcome to HazelPOS, ${owner.name}! Set your password: ${link}. Your till PIN is ${pin}.`; }
+  if (ownerPassword) text = `Welcome to HazelPOS, ${owner.name}! Sign in at ${BASE_URL()} with your phone number ${owner.phone} and password ${ownerPassword}. Your till PIN is ${pin}.`;
+  else if (!owner.pass_hash) { link = createOwnerLink(owner.id, 'welcome').url; text = `Welcome to HazelPOS, ${owner.name}! Set your password: ${link}. Your till PIN is ${pin}.`; }
   else text = `${name} is now on your HazelPOS account. Sign in at ${BASE_URL()} with your usual password. Your till PIN for ${name} is ${pin}.`;
   const r = await vendorWa.sendText(owner.phone, text);
   audit(req.who, 'tenant.create', { id, slug, name, owner_phone: phone, monthly_fee: fee });
@@ -192,6 +200,19 @@ router.post('/tenants/:id/restore', (req, res) => { // this restaurant only; the
   if (!file || !require('fs').existsSync(file)) return fail(res, 400, 'Choose one of the backups in the list');
   try { tenancy.restoreTenant(t.id, file); } catch (e) { return fail(res, 400, e.message); }
   audit(req.who, 'tenant.restore', { id: t.id, slug: t.slug, backup: req.body.backup });
+  res.json({ ok: true });
+});
+// HazelPOS sets (or resets) the owner's password by hand; all their sessions end
+router.post('/tenants/:id/owner-password', (req, res) => {
+  const t = tenancy.tenantRow(+req.params.id);
+  if (!t) return fail(res, 404, 'Restaurant not found');
+  const pw = String(req.body.password || '');
+  if (pw.length < 8) return fail(res, 400, 'The password needs at least 8 characters');
+  const ot = control.prepare('SELECT owner_id FROM owner_tenants WHERE tenant_id=? LIMIT 1').get(t.id);
+  if (!ot) return fail(res, 400, 'This restaurant has no owner');
+  control.prepare('UPDATE owners SET pass_hash=? WHERE id=?').run(hashPassword(pw), ot.owner_id);
+  control.prepare('DELETE FROM owner_sessions WHERE owner_id=?').run(ot.owner_id);
+  audit(req.who, 'tenant.owner-password', { id: t.id, slug: t.slug });
   res.json({ ok: true });
 });
 router.post('/tenants/:id/resend-welcome', wrap((req, res) => sendLink(req, res, 'welcome')));

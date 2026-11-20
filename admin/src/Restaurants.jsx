@@ -55,7 +55,9 @@ export default function Restaurants() {
 }
 
 function NewRestaurant({ onCancel, onCreated }) {
-  const [f, setF] = useState({ name: '', owner_name: '', owner_phone: '', monthly_fee: '' })
+  const [f, setF] = useState({ name: '', owner_name: '', owner_phone: '', monthly_fee: '', owner_password: '' })
+  const [showPw, setShowPw] = useState(true)
+  const genPw = () => setF(x => ({ ...x, owner_password: Array.from(crypto.getRandomValues(new Uint32Array(10)), n => 'abcdefghjkmnpqrstuvwxyz23456789'[n % 31]).join('') }))
   const [busy, setBusy] = useState(false)
   const set = k => e => setF({ ...f, [k]: e.target.value })
   const submit = run(async e => {
@@ -65,8 +67,8 @@ function NewRestaurant({ onCancel, onCreated }) {
       const o = await api('/owners/lookup?phone=' + encodeURIComponent(f.owner_phone))
       if (o.exists) {
         if (await confirmBox(`This phone already belongs to ${o.name}. Add the restaurant to their account?`, { confirmLabel: 'Add restaurant' }))
-          onCreated(await api('/tenants', { ...body, confirm_existing_owner: true }))
-      } else onCreated(await api('/tenants', body))
+          onCreated({ ...(await api('/tenants', { ...body, confirm_existing_owner: true })), owner_password: '' })
+      } else onCreated({ ...(await api('/tenants', body)), owner_password: f.owner_password })
     } finally { setBusy(false) }
   })
   return (
@@ -77,6 +79,11 @@ function NewRestaurant({ onCancel, onCreated }) {
         <label>Owner name<input id="nr-owner" value={f.owner_name} onChange={set('owner_name')} required /></label>
         <label>Owner phone<input id="nr-phone" type="tel" inputMode="tel" placeholder="03001234567" value={f.owner_phone} onChange={set('owner_phone')} required /></label>
         <label>Monthly fee (Rs)<input id="nr-fee" type="number" min="0" step="1" value={f.monthly_fee} onChange={set('monthly_fee')} /></label>
+        <label>Owner password (8+ characters)<input id="nr-password" type={showPw ? 'text' : 'password'} autoComplete="new-password" minLength={8} placeholder="Leave empty to send a welcome link instead" value={f.owner_password} onChange={set('owner_password')} /></label>
+        <div className="row" style={{ alignItems: 'flex-end' }}>
+          <button type="button" id="nr-genpw" onClick={genPw}>Make a password</button>
+          <button type="button" onClick={() => setShowPw(v => !v)}>{showPw ? 'Hide' : 'Show'}</button>
+        </div>
       </div>
       <div className="row" style={{ marginTop: 12 }}>
         <button className="primary" id="nr-create" disabled={busy}>{busy ? 'Creating…' : 'Create restaurant'}</button>
@@ -97,6 +104,7 @@ function Created({ c, onClose }) {
       <h3>{c.tenant.name} is ready</h3>
       <p className="muted">{c.welcome_sent ? "The welcome message was sent from HazelPOS's WhatsApp." : "HazelPOS's WhatsApp isn't linked, so nothing was sent. Copy the message and send it to the owner yourself."}</p>
       {link && <p>Welcome link: <a href={link} id="welcome-link" target="_blank" rel="noreferrer">{link}</a></p>}
+      {c.owner_password && <p>Owner signs in with phone <b>{c.tenant.owner?.phone}</b> and password <b id="owner-password">{c.owner_password}</b></p>}
       <p>Till PIN for the owner: <b id="till-pin">{c.till_pin}</b></p>
       <textarea id="welcome-message" readOnly rows={3} value={message} />
       <div className="row" style={{ marginTop: 12 }}>
