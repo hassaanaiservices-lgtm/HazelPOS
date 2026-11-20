@@ -55,7 +55,7 @@ function hedged(cfg, messages) {
 }
 
 async function chatJson(cfg, messages) {
-  if (!process.env.DEEPSEEK_API_KEY && !cloudLink()) throw new Error('No DeepSeek key: set DEEPSEEK_API_KEY in the server's variables (Railway → Variables)');
+  if (!process.env.DEEPSEEK_API_KEY && !cloudLink()) throw new Error('No DeepSeek key: set DEEPSEEK_API_KEY in the server variables (Railway → Variables)');
   let lastErr;
   for (let attempt = 0; attempt <= cfg.max_retries; attempt++) {
     try { return { ...(await hedged(cfg, messages)), attempts: attempt + 1 }; }
