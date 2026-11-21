@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { lsGet, lsSet } from './lib'
+import { lsGet, lsSet, lsDel } from './lib'
 
 // Owner sign-in: phone + password, a code on a new device, then "Choose a restaurant" when the owner has more than one.
 // Talks to /api/auth/* directly: these routes need no restaurant. onDone({ token, user, restaurant }) opens the app.
@@ -33,6 +33,8 @@ export default function SignIn({ onDone, onBack, start }) {
   const enter = async (o, slug) => onDone(await post('/owner/enter', { owner_token: o.owner_token, slug }))
   const signedIn = async o => {
     setOwner(o)
+    // Remembered: this browser skips the password next time (App's Sign out forgets it). Never on a till: staff use it too.
+    if (lsGet('hz_device')) lsDel('hz_owner_token'); else lsSet('hz_owner_token', o.owner_token)
     if (o.restaurants.length === 1) await enter(o, o.restaurants[0].slug)
     else if (o.restaurants.length === 0) throw new Error('No restaurant is linked to this account yet. Please contact HazelPOS.')
     else setStep('pick')
@@ -42,7 +44,14 @@ export default function SignIn({ onDone, onBack, start }) {
     if (r.otp_required) { setStep('code'); return }
     await signedIn(r)
   })
-  useEffect(() => { if (start) go(() => signedIn(start))() }, []) // eslint-disable-line react-hooks/exhaustive-deps -- once: a password was just set from a link
+  // Once: a password was just set from a link, or this browser still has the owner's token (no password needed)
+  const [resuming, setResuming] = useState(() => !start && !lsGet('hz_device') && !!lsGet('hz_owner_token'))
+  useEffect(() => {
+    if (start) return void go(() => signedIn(start))()
+    if (!resuming) return
+    post('/owner/me', { owner_token: lsGet('hz_owner_token') }).then(signedIn)
+      .catch(() => lsDel('hz_owner_token')).finally(() => setResuming(false))
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
   const forgot = go(async () => { await post('/owner/forgot', { phone }); setSent(true) })
   const verify = go(async () => signedIn(await post('/owner/otp', { phone, code: code.trim(), device_id: deviceId() })))
 
@@ -50,7 +59,8 @@ export default function SignIn({ onDone, onBack, start }) {
     <div className="login">
       <div className="login-card">
         <h1>HazelPOS</h1>
-        {step === 'login' && <form className="login-form" onSubmit={login}>
+        {resuming && <p className="muted" role="status">Signing you in…</p>}
+        {step === 'login' && !resuming && <form className="login-form" onSubmit={login}>
           <p className="muted">Sign in to your restaurant</p>
           <label>Phone number<input id="owner-phone" type="tel" inputMode="tel" autoComplete="username" autoFocus value={phone} onChange={e => setPhone(e.target.value)} placeholder="03001234567" /></label>
           <label>Password<input id="owner-password" type="password" autoComplete="current-password" value={password} onChange={e => setPassword(e.target.value)} /></label>

@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useState } from 'react'
 import './App.css'
-import { api, rs, TYPES, parseModifiers, modsText, promoPreview, run, isDeal, dealIncludes, includesText, combosOf } from './lib'
+import { api, lsGet, lsDel, rs, TYPES, parseModifiers, modsText, promoPreview, run, isDeal, dealIncludes, includesText, combosOf } from './lib'
 import Login from './Login'
 import Kitchen from './Kitchen'
 import Dashboard from './Dashboard'
@@ -120,7 +120,12 @@ export default function App() {
 
   const login = ({ token, user: u }) => { localStorage.setItem('pos_token', token); setUser(u); localStorage.setItem('pos_user', JSON.stringify(u)); setView(homeView(u.role)) }
   const clearSession = () => { setUser(null); localStorage.removeItem('pos_user'); localStorage.removeItem('pos_token'); setOrder(null); window.dispatchEvent(new Event('pos-restart')) } // main.jsx shows the sign-in or lock screen
-  const logout = () => { api('/logout', {}).catch(() => {}).finally(clearSession) }
+  // Sign out on purpose: the owner's remembered token is forgotten too, so this browser asks for the password next time
+  const logout = () => {
+    const ot = lsGet('hz_owner_token')
+    if (ot && user?.role === 'admin') { lsDel('hz_owner_token'); fetch('/api/auth/owner/logout', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ owner_token: ot }) }).catch(() => {}) }
+    api('/logout', {}).catch(() => {}).finally(clearSession)
+  }
   useEffect(() => {
     window.addEventListener('pos-logout', clearSession)
     const mustChange = () => setUser(u => u && !u.must_change_pin ? { ...u, must_change_pin: true } : u) // the server says: choose your own PIN first

@@ -15,18 +15,22 @@ import { PrintHost } from './Bill.jsx'
 const linkMatch = window.location.pathname.match(/^\/(?:welcome|reset)\/([a-f0-9]+)\/?$/i)
 const qrMatch = window.location.pathname.match(/^\/t\/([a-z0-9-]+)\/([a-z0-9]+)/i)
 
+// sessionStorage: kept through a refresh, gone when the tab closes. ss(k) reads, ss(k, v) writes, ss(k, null) removes.
+const ss = (k, v) => { try { if (v === undefined) return sessionStorage.getItem(k); v === null ? sessionStorage.removeItem(k) : sessionStorage.setItem(k, v) } catch { return null } }
+
 // Which screen first: a till that was set up shows the lock screen; a browser the owner signed in on opens the app; otherwise
 // the sign-in screen. (The public demo has no sign-in: the server answers /settings for its demo restaurant.)
 function Root() {
   const [, bump] = useState(0)
-  const [unlocked, setUnlocked] = useState(false) // a till is unlocked for this page load only: a reload locks it again
+  // A till stays unlocked through a refresh (sessionStorage); closing the browser tab locks it again
+  const [unlocked, setUnlocked] = useState(() => ss('hz_till_unlocked') === '1' && !!lsGet('pos_token'))
   const [ownerMode, setOwnerMode] = useState(false) // "Owner sign-in" pressed on a till: the sign-in screen, device key kept
-  const [ownerOnTill, setOwnerOnTill] = useState(false) // the owner signed in that way
+  const [ownerOnTill, setOwnerOnTill] = useState(() => { const on = ss('hz_till_owner') === '1' && !!lsGet('pos_token'); if (on) setForceTenant(true); return on }) // the owner signed in that way
   const [demo, setDemo] = useState(null)
   const [linkToken, setLinkToken] = useState(linkMatch?.[1] || null) // /welcome/<token> or /reset/<token>, until the password is set
   const [linkSession, setLinkSession] = useState(null) // a password was just set from a welcome or reset link
   useEffect(() => {
-    const restart = () => { setUnlocked(false); setOwnerMode(false); setOwnerOnTill(false); setForceTenant(false); bump(n => n + 1) }
+    const restart = () => { ss('hz_till_unlocked', null); ss('hz_till_owner', null); setUnlocked(false); setOwnerMode(false); setOwnerOnTill(false); setForceTenant(false); bump(n => n + 1) }
     window.addEventListener('pos-restart', restart)
     return () => window.removeEventListener('pos-restart', restart)
   }, [])
@@ -41,7 +45,7 @@ function Root() {
   const open = ({ token, user, restaurant }) => { // the owner entered a restaurant
     setLinkSession(null)
     lsSet('pos_token', token); lsSet('pos_user', JSON.stringify(user)); lsSet('hz_tenant', restaurant.slug)
-    if (device) { setForceTenant(true); setOwnerOnTill(true) }
+    if (device) { setForceTenant(true); setOwnerOnTill(true); ss('hz_till_owner', '1') }
     bump(n => n + 1)
   }
   if (linkToken) return <OwnerLink token={linkToken} onDone={o => { history.replaceState(null, '', '/'); lsDel('hz_tenant'); lsDel('pos_token'); setLinkToken(null); setLinkSession(o) }} />
@@ -49,7 +53,7 @@ function Root() {
   if (device && !ownerOnTill) {
     if (unlocked) return <App />
     if (ownerMode) return <SignIn onDone={open} onBack={() => setOwnerMode(false)} />
-    return <TillLock onLogin={({ token, user }) => { lsSet('pos_token', token); lsSet('pos_user', JSON.stringify(user)); setUnlocked(true) }} onOwner={() => setOwnerMode(true)} />
+    return <TillLock onLogin={({ token, user }) => { lsSet('pos_token', token); lsSet('pos_user', JSON.stringify(user)); ss('hz_till_unlocked', '1'); setUnlocked(true) }} onOwner={() => setOwnerMode(true)} />
   }
   if (lsGet('hz_tenant') && lsGet('pos_token')) return <App />
   return <SignIn onDone={open} />

@@ -120,6 +120,14 @@ r.post('/owner/enter', (req, res) => {
   out ? res.json(out) : bad(res, 403, 'Your login in that restaurant no longer exists');
 });
 
+// A browser that kept its owner token (30 days from last use) comes back in without the password. A new device has no
+// token, so it gets the password (and the code). A password change or sign-out ends these tokens.
+r.post('/owner/me', (req, res) => {
+  const owner = ownerOfToken(req.body.owner_token);
+  if (!owner) return bad(res, 401, 'Please sign in again');
+  res.json({ owner_token: String(req.body.owner_token), restaurants: restaurantsOf(owner.id) });
+});
+
 r.post('/owner/logout', (req, res) => {
   control.prepare('DELETE FROM owner_sessions WHERE token=?').run(String(req.body.owner_token || ''));
   res.json({ ok: true });
