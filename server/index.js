@@ -1034,13 +1034,15 @@ app.post('/api/r/:token/duty', linkRoute((req, res) => {
 }));
 // The customer's page: this one order's status, the rider's name and last position. No phone, address, items or other orders.
 app.get('/api/track/:token', linkRoute((req, res) => {
-  const o = db.prepare("SELECT id, status, delivery_status, kitchen_status, rider_id, dispatched_at, delivered_at FROM orders WHERE track_token=? AND type='delivery'").get(req.params.token);
+  const o = db.prepare("SELECT id, status, delivery_status, kitchen_status, rider_id, dispatched_at, delivered_at, address FROM orders WHERE track_token=? AND type='delivery'").get(req.params.token);
   if (!o) badLink(req, 'This tracking link is not valid.');
   const status = o.status === 'cancelled' ? 'cancelled' : o.delivery_status || (['ready', 'done'].includes(o.kitchen_status) ? 'ready' : 'cooking');
   const r = o.rider_id && status === 'out' ? db.prepare('SELECT name FROM employees WHERE id=?').get(o.rider_id) : null, p = r && riderPos.get(o.rider_id);
   res.json({ order: o.id, restaurant: getSettings().name || req.tenant.name, status, dispatched_at: o.dispatched_at, delivered_at: o.delivered_at,
-    rider: r ? { name: r.name, lat: p?.lat ?? null, lng: p?.lng ?? null, at: p?.at ?? null } : null });
+    rider: r ? { name: r.name, lat: p?.lat ?? null, lng: p?.lng ?? null, at: p?.at ?? null } : null, dest: r ? pinOf(o.address) : null });
 }));
+// The customer's own location pin, when the address came with one (a WhatsApp location: "...q=lat,lng")
+const pinOf = address => { const m = /q=(-?\d+\.?\d*),(-?\d+\.?\d*)/.exec(address || ''); return m ? { lat: +m[1], lng: +m[2] } : null; };
 
 // Board: everything not yet delivered, plus today's delivered orders
 app.get('/api/deliveries', (req, res) => {

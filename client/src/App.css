@@ -903,7 +903,18 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px
 .rider-map-foot { font-size: var(--fs-sm); padding: 6px 2px; }
 .delivery-map { padding: 0 16px; }
 .rider-pin { display: inline-flex; align-items: center; gap: 4px; background: var(--surface); color: var(--text); border: 2px solid var(--ok); border-radius: var(--r-pill); padding: 2px 10px 2px 4px; white-space: nowrap; box-shadow: 0 2px 8px rgba(0,0,0,.4); font-size: var(--fs-sm); }
-.rider-pin span { font-size: 18px; } .rider-pin.busy { border-color: var(--accent); } .rider-pin.stale { opacity: .55; border-color: var(--outline); }
+.rider-pin span { font-size: 18px; }
+/* The moving rider (owner's map). The rider and customer pages have the same in server/public/move.js. */
+.hz-rider { position: relative; width: 44px; height: 44px; --hz: var(--accent); }
+.hz-rider.free { --hz: var(--ok); }
+.hz-rider .hz-bike { position: absolute; inset: 4px; border-radius: 50%; background: var(--hz); border: 3px solid var(--paper); display: grid; place-items: center; font-size: 19px; box-shadow: var(--shadow-sm); }
+.hz-rider .hz-arrow { position: absolute; inset: 0; opacity: 0; transition: transform .6s var(--ease), opacity .3s; }
+.hz-rider .hz-arrow::before { content: ''; position: absolute; left: 50%; top: -9px; transform: translateX(-50%); border: 8px solid transparent; border-top: 0; border-bottom: 12px solid var(--hz); }
+.hz-rider .hz-pulse { position: absolute; inset: 4px; border-radius: 50%; background: var(--hz); opacity: .35; animation: hz-pulse 2s ease-out infinite; }
+.hz-rider .hz-name { position: absolute; top: 46px; left: 50%; transform: translateX(-50%); white-space: nowrap; background: var(--surface); color: var(--text); border: 1px solid var(--outline); border-radius: var(--r-pill); padding: 1px 8px; font-size: var(--fs-xs); box-shadow: var(--shadow-sm); }
+.hz-rider.stale { opacity: .6; } .hz-rider.stale .hz-pulse { display: none; } .hz-rider.stale .hz-bike { filter: grayscale(1); }
+@keyframes hz-pulse { from { transform: scale(1); opacity: .45; } to { transform: scale(2.4); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .hz-rider .hz-pulse { animation: none; } } .rider-pin.busy { border-color: var(--accent); } .rider-pin.stale { opacity: .55; border-color: var(--outline); }
 .riders-tbl tr.inactive, .acct-tbl tr.inactive { opacity: .6; }
 .ok-t { color: var(--ok); } .warn-t { color: var(--warn); } .err-t { color: var(--danger); }
 .link-modal { max-width: 440px; } .link-modal .link-qr { display: block; margin: 12px auto; width: 220px; height: 220px; border-radius: var(--r-md); background: #fff; padding: 6px; }

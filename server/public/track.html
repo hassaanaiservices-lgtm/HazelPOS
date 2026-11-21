@@ -24,8 +24,6 @@
   .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-top: 12px; }
   .step { font-size: 12px; color: var(--muted); text-align: center; padding-top: 8px; border-top: 3px solid var(--outline); }
   .step.done { border-color: var(--ok); color: var(--text); } .step.now { border-color: var(--accent); color: var(--text); font-weight: 700; }
-  .rider-marker { background: var(--accent); color: var(--ink); border-radius: 50%; width: 36px; height: 36px; display: grid; place-items: center; font-size: 20px; border: 2px solid #fff; box-shadow: 0 2px 8px rgba(0,0,0,.5); }
-  .home-marker { background: var(--ok); color: var(--ink); border-radius: 50%; width: 30px; height: 30px; display: grid; place-items: center; font-size: 16px; border: 2px solid #fff; }
   .leaflet-container { font: inherit; }
   .leaflet-bar a { width: 44px !important; height: 44px !important; line-height: 44px !important; }
   .leaflet-control-attribution a { display: inline-block; padding: 12px 4px; }
@@ -45,6 +43,7 @@
   <div id="map"></div>
   <p class="muted small">Powered by HazelPOS. The rider's location is shown only while your order is on the way.</p>
 <script src="/p/vendor/leaflet.js"></script>
-<script src="/p/track.js"></script>
+<script src="/p/move.js?v=2"></script>
+<script src="/p/track.js?v=2"></script>
 </body>
 </html>

@@ -5,19 +5,17 @@
   const mins = iso => iso ? Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 60000)) : 0;
   const km = (a, b) => { const R = 6371, dLat = (b.lat - a.lat) * Math.PI / 180, dLng = (b.lng - a.lng) * Math.PI / 180;
     const x = Math.sin(dLat / 2) ** 2 + Math.cos(a.lat * Math.PI / 180) * Math.cos(b.lat * Math.PI / 180) * Math.sin(dLng / 2) ** 2; return 2 * R * Math.asin(Math.sqrt(x)); };
-  let map, rider, home, trail = [], line;
-  const showMap = (r, c) => {
+  let map, rider, home, fitted = false;
+  const showMap = (r, c, stale) => {
     const el = $('map'); el.style.display = 'block';
     if (!map) {
-      map = L.map('map', { zoomControl: true }).setView([r.lat, r.lng], 15);
+      map = L.map('map', { zoomControl: true }).setView([r.lat, r.lng], 16);
       L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, referrerPolicy: 'strict-origin', attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>' }).addTo(map);
-      rider = L.marker([r.lat, r.lng], { icon: L.divIcon({ className: '', html: '<div class="rider-marker">🛵</div>', iconSize: [36, 36], iconAnchor: [18, 18] }) }).addTo(map);
-      if (c) home = L.marker([c.lat, c.lng], { icon: L.divIcon({ className: '', html: '<div class="home-marker">🏠</div>', iconSize: [30, 30], iconAnchor: [15, 15] }) }).addTo(map);
-      line = L.polyline([], { color: '#ff7a1a', weight: 3, opacity: .6 }).addTo(map);
-      if (c) map.fitBounds([[r.lat, r.lng], [c.lat, c.lng]], { padding: [40, 40] });
-    } else rider.setLatLng([r.lat, r.lng]);
-    const last = trail[trail.length - 1];
-    if (!last || last[0] !== r.lat || last[1] !== r.lng) { trail.push([r.lat, r.lng]); line.setLatLngs(trail); }
+      rider = L.marker([r.lat, r.lng], { icon: HzMove.riderIcon(), zIndexOffset: 1000 }).addTo(map);
+    } else HzMove.move(rider, r.lat, r.lng, 5000); // glides until the next update, 5 s later
+    HzMove.stale(rider, stale);
+    if (c && !home) home = L.marker([c.lat, c.lng], { icon: HzMove.homeIcon() }).addTo(map);
+    if (c && !fitted) { map.fitBounds([[r.lat, r.lng], [c.lat, c.lng]], { padding: [50, 50], maxZoom: 17 }); fitted = true; }
   };
   async function load() {
     let d;
@@ -37,7 +35,8 @@
       if (d.rider && d.rider.lat != null) {
         const age = Math.round((Date.now() - Date.parse(d.rider.at)) / 1000);
         detail += age > 120 ? ` Rider's location is ${Math.round(age / 60)} min old.` : '';
-        showMap(d.rider);
+        if (d.dest && d.rider.lat != null) detail += ` About ${km(d.rider, d.dest).toFixed(1)} km away.`;
+        showMap(d.rider, d.dest, age > 120);
       } else detail += " The rider's location isn't available right now.";
       $('detail').textContent = detail; return;
     }
@@ -45,5 +44,5 @@
     st.textContent = d.status === 'ready' ? '👨‍🍳 Packed, rider leaving soon' : '👨‍🍳 Being prepared';
     $('detail').textContent = 'This page updates by itself.';
   }
-  load(); setInterval(load, 10000);
+  load(); setInterval(load, 5000);
 })();

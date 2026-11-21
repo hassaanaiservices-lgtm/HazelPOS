@@ -2,8 +2,10 @@ import { useEffect, useRef, useState } from 'react'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { api } from './lib'
+import { riderIcon, moveMarker, turn } from './riderMove'
 
-// Riders on a map. Their phones send positions to the server (rider page /r/<slug>/<token>); the POS asks every 10 s.
+// Riders on a map. Their phones send positions to the server (rider page /r/<slug>/<token>); the POS asks every 5 s
+// and each 🛵 glides to its new spot in those 5 s, pointing the way it is going.
 // Map tiles come from OpenStreetMap, so the map needs internet; the rest of the POS does not.
 const ago = iso => { const s = Math.round((Date.now() - Date.parse(iso)) / 1000); return s < 60 ? `${s} s ago` : s < 3600 ? `${Math.round(s / 60)} min ago` : `${Math.round(s / 3600)} h ago` }
 const esc = s => String(s).replace(/[<>&"']/g, '')
@@ -13,7 +15,7 @@ export default function RiderMap({ height = 340 }) {
   const [d, setD] = useState(null)
   useEffect(() => {
     const load = () => api('/riders/positions').then(setD).catch(() => {})
-    load(); const t = setInterval(load, 10000); return () => clearInterval(t)
+    load(); const t = setInterval(load, 5000); return () => clearInterval(t)
   }, [])
   const riders = (d?.riders || []).filter(r => r.lat != null)
   useEffect(() => {
@@ -26,10 +28,13 @@ export default function RiderMap({ height = 340 }) {
     for (const r of riders) {
       seen.add(r.id)
       const stale = Date.now() - Date.parse(r.at) > 3 * 60e3
-      const icon = L.divIcon({ className: '', iconSize: [160, 36], iconAnchor: [18, 18],
-        html: `<div class="rider-pin${r.on_road ? ' busy' : ''}${stale || !r.on_duty ? ' stale' : ''}"><span>🛵</span><b>${esc(r.name)}</b></div>` })
+      const cls = (r.on_road ? 'busy' : 'free') + (stale || !r.on_duty ? ' stale' : '')
       let m = markers.current.get(r.id)
-      if (!m) { m = L.marker([r.lat, r.lng], { icon }).addTo(map.current); markers.current.set(r.id, m) } else { m.setLatLng([r.lat, r.lng]); m.setIcon(icon) }
+      if (!m) { m = L.marker([r.lat, r.lng], { icon: riderIcon(esc(r.name), cls) }).addTo(map.current); m._hzCls = cls; markers.current.set(r.id, m) }
+      else {
+        if (m._hzCls !== cls) { m.setIcon(riderIcon(esc(r.name), cls)); m._hzCls = cls; turn(m) }
+        moveMarker(m, r.lat, r.lng, 5000)
+      }
       m.bindTooltip(`${esc(r.name)}: ${r.on_road ? `${r.on_road} order(s) out` : r.on_duty ? 'free' : 'off duty'}, seen ${ago(r.at)}`)
     }
     for (const [id, m] of markers.current) if (!seen.has(id)) { m.remove(); markers.current.delete(id) }

@@ -20,10 +20,31 @@
   // --- Duty and location ---
   let onDuty = false, watchId = null, lastSent = 0, lastPos = null, wakeLock = null, locState = '';
   const setLoc = (text, cls) => { $('loc').textContent = text; $('loc').className = cls || ''; };
+  // The map: you (moving 🛵) and the customers of your deliveries that sent a location pin (🏠)
+  let map, me, homes = new Map(), fitted = false;
+  const pinOf = a => { const m = /q=(-?\d+\.?\d*),(-?\d+\.?\d*)/.exec(a || ''); return m ? [+m[1], +m[2]] : null; };
+  const showMe = (lat, lng) => {
+    const wasHidden = $('map').style.display !== 'block'; $('map').style.display = 'block';
+    if (map && wasHidden) map.invalidateSize();
+    if (!map) {
+      map = L.map('map').setView([lat, lng], 16);
+      L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, referrerPolicy: 'strict-origin', attribution: '&copy; OpenStreetMap' }).addTo(map);
+      me = L.marker([lat, lng], { icon: HzMove.riderIcon(), zIndexOffset: 1000 }).addTo(map);
+    } else HzMove.move(me, lat, lng, 1000);
+    if (!fitted && homes.size) { map.fitBounds([[lat, lng], ...[...homes.values()].map(h => h.getLatLng())], { padding: [40, 40], maxZoom: 17 }); fitted = true; }
+  };
+  const showHomes = list => {
+    if (!map) return;
+    const keep = new Set();
+    for (const o of list) { const p = pinOf(o.address); if (!p) continue; keep.add(o.local_id);
+      if (!homes.has(o.local_id)) { homes.set(o.local_id, L.marker(p, { icon: HzMove.homeIcon() }).bindTooltip('#' + o.local_id + ' ' + (o.customer || '')).addTo(map)); fitted = false; } }
+    for (const [id, m] of homes) if (!keep.has(id)) { m.remove(); homes.delete(id); }
+  };
   const sendPos = async (p, force) => {
     if (!onDuty) return;
+    showMe(p.coords.latitude, p.coords.longitude);
     const moved = !lastPos || Math.abs(p.coords.latitude - lastPos.lat) + Math.abs(p.coords.longitude - lastPos.lng) > 0.0002;
-    if (!force && Date.now() - lastSent < (moved ? 8000 : 30000)) return;
+    if (!force && Date.now() - lastSent < (moved ? 4000 : 30000)) return;
     lastSent = Date.now(); lastPos = { lat: p.coords.latitude, lng: p.coords.longitude };
     try { await post('/location', { lat: p.coords.latitude, lng: p.coords.longitude, acc: p.coords.accuracy }); setLoc('Location on · sent ' + ago(new Date(lastSent).toISOString()), 'good'); }
     catch (e) { setLoc('Location not sent: ' + e.message, 'bad'); }
@@ -35,7 +56,7 @@
     watchId = navigator.geolocation.watchPosition(p => sendPos(p), e => setLoc(why(e), 'bad'),
       { enableHighAccuracy: true, maximumAge: 5000, timeout: 20000 });
   };
-  const stopLoc = () => { if (watchId != null) navigator.geolocation.clearWatch(watchId); watchId = null; setLoc(''); };
+  const stopLoc = () => { if (watchId != null) navigator.geolocation.clearWatch(watchId); watchId = null; setLoc(''); $('map').style.display = 'none'; };
   const keepAwake = async on => {
     try { if (on && 'wakeLock' in navigator && !wakeLock) { wakeLock = await navigator.wakeLock.request('screen'); wakeLock.addEventListener('release', () => { wakeLock = null; }); }
       if (!on && wakeLock) { await wakeLock.release(); wakeLock = null; } } catch { /* not supported */ }
@@ -97,7 +118,7 @@
     $('restaurant').textContent = d.restaurant; $('rider').textContent = d.rider.name;
     $('pos').textContent = ''; $('pos').className = '';
     if (d.rider.on_duty !== onDuty && !watchId) setDuty(d.rider.on_duty);
-    fill('mine', d.mine, true, 'Nothing with you right now'); $('mineCount').textContent = d.mine.length || '';
+    fill('mine', d.mine, true, 'Nothing with you right now'); showHomes(d.mine); $('mineCount').textContent = d.mine.length || '';
     fill('ready', d.ready, false, 'No order waiting. New delivery orders appear here when the kitchen marks them ready.'); $('readyCount').textContent = d.ready.length || '';
     $('doneCount').textContent = d.today.delivered; $('doneCash').textContent = rs(d.today.cash);
     $('others').textContent = d.others_out ? `${d.others_out} other delivery${d.others_out > 1 ? 'ies' : ''} out with other riders` : '';

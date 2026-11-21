@@ -10,6 +10,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <title>HazelPOS rider</title>
+<link rel="stylesheet" href="/p/vendor/leaflet.css">
 <style>
   /* The rider's phone screen. One file, no build: big buttons, dark, works with one thumb on a cheap Android phone. */
   :root { color-scheme: light dark; --bg: #f6f7f9; --surface: #fff; --surface-2: #eceef2; --outline: #c9cdd6; --text: #16181d; --muted: #565d6b;
@@ -52,6 +53,8 @@
   .fatal { margin: 40px 0; text-align: center; font-size: 18px; font-weight: 600; }
   body.invalid > :not(.fatal) { display: none; }
   .toast.show { display: block; }
+  #map { height: 260px; border-radius: var(--r); border: 1px solid var(--outline); margin-top: 10px; display: none; }
+  .leaflet-container { font: inherit; } .leaflet-bar a { width: 44px !important; height: 44px !important; line-height: 44px !important; }
   .note { background: var(--note-bg); border: 1px solid var(--note-line); color: var(--warn); border-radius: var(--r); padding: 10px 12px; font-size: 13px; margin-top: 10px; }
 </style>
 </head>
@@ -63,6 +66,7 @@
   </div>
   <div class="status"><span id="pos"></span><span id="loc"></span></div>
   <div class="note" id="note" hidden>Keep this screen open while you are delivering, so the restaurant and the customer can see where you are. Phone band karne par location ruk jati hai.</div>
+  <div id="map" aria-label="Map: you and your deliveries"></div>
 
   <h2>My deliveries <span id="mineCount" class="pill"></span></h2>
   <div id="mine"></div>
@@ -78,6 +82,8 @@
   <p class="muted small" id="others"></p>
   <div class="toast" id="toast"></div>
 
-<script src="/p/rider.js"></script>
+<script src="/p/vendor/leaflet.js"></script>
+<script src="/p/move.js?v=2"></script>
+<script src="/p/rider.js?v=2"></script>
 </body>
 </html>
