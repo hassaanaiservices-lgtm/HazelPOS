@@ -15,7 +15,7 @@ import Riders from './Riders'
 import RiderHome from './RiderHome'
 import ChoosePin from './ChoosePin'
 import Payroll from './Payroll'
-import WhatsApp from './WhatsApp'
+import WhatsApp, { AcceptOrder } from './WhatsApp'
 import { QrOrderAlerts, beep } from './QrOrders'
 import ReadyAlerts from './ReadyAlerts'
 import { Bill, printOrder } from './Bill'
@@ -108,11 +108,17 @@ export default function App() {
     return () => clearInterval(t)
   }, [])
   const notify = (m, kind) => toast(m, kind)
+  const [counts, setCounts] = useState(null) // sidebar numbers: open orders, kitchen tickets not done
   useEffect(() => {
-    if (user?.role !== 'cashier') return
+    if (!user || user.role === 'rider') return
+    const poll = () => api('/counts').then(setCounts).catch(() => {})
+    poll(); const t = setInterval(poll, 10000); return () => clearInterval(t)
+  }, [user?.id])
+  useEffect(() => {
+    if (!['cashier', 'admin'].includes(user?.role)) return // the owner hears new WhatsApp orders too
     let prevOrders = null
     const poll = () => api('/whatsapp/status').then(st => {
-      if (prevOrders !== null && st.orders_pending > prevOrders) { beep(); notify('New WhatsApp order: open WhatsApp to accept it', 'info') }
+      if (prevOrders !== null && st.orders_pending > prevOrders) { beep(); notify('New WhatsApp order: accept it in Orders or WhatsApp', 'info') }
       prevOrders = st.orders_pending; setWa(st)
     }).catch(() => {})
     poll(); const t = setInterval(poll, 5000); return () => clearInterval(t)
@@ -158,6 +164,8 @@ export default function App() {
     : <button className="ghost sm" id="logout" onClick={logout}><Icon name="logout" size={16} />Sign out</button>
   const badge = v => {
     if (v === 'inventory' && lowStock > 0) return <span className="nav-badge" title="Ingredients running low">{lowStock}</span>
+    if (v === 'orders' && counts?.orders_open + (wa?.orders_pending || 0) > 0) return <span className="nav-badge count-badge" title="Open orders, plus WhatsApp orders waiting to be accepted">{counts.orders_open + (wa?.orders_pending || 0)}</span>
+    if (v === 'kitchen' && counts?.kitchen > 0) return <span className="nav-badge count-badge" title="Kitchen orders not ready yet">{counts.kitchen}</span>
     if (v !== 'whatsapp' || !wa) return null
     if (wa.orders_pending > 0) return <span className="nav-badge" title="WhatsApp orders waiting for you to accept">{wa.orders_pending}</span>
     if (wa.unread > 0 || wa.offline_chats > 0) return <span className={'nav-badge ' + (wa.offline_chats ? 'wa-offline' : 'wa')}
@@ -204,7 +212,7 @@ export default function App() {
           onPick={t => t.order_id ? openExisting(t.order_id) : newOrder('dine-in', t)} />}
         {view === 'register' && order && <Register menu={menu} order={order} setOrder={setOrder} notify={notify} onDone={goHome}
           onBack={() => order.type === 'dine-in' ? (setOrder(null), refresh(), setView('tables')) : goHome()} />}
-        {view === 'orders' && <Orders onOpen={user.role === 'admin' ? null : openExisting} notify={notify} />}
+        {view === 'orders' && <Orders onOpen={user.role === 'admin' ? null : openExisting} notify={notify} waOn={!!wa && wa.state !== 'off'} />}
         {view === 'kitchen' && <Kitchen readOnly={user.role === 'admin'} />}
         {view === 'register_session' && <RegisterSession user={user} notify={notify} />}
         {view === 'dashboard' && user.role === 'admin' && <Dashboard user={user} notify={notify} />}
@@ -797,12 +805,23 @@ function Receipt({ order, onClose, notify, closeLabel = 'New Order' }) {
   )
 }
 
-function Orders({ onOpen, notify }) {
+function Orders({ onOpen, notify, waOn }) {
   const [list, setList] = useState([])
   const [tab, setTab] = useState('open')
   const [receipt, setReceipt] = useState(null)
-  const load = () => api('/orders?status=' + tab).then(setList)
-  useEffect(() => { load() }, [tab])
+  const [waOrders, setWaOrders] = useState([]) // WhatsApp orders the customer confirmed, waiting for Accept
+  const [accepting, setAccepting] = useState(null)
+  const load = () => {
+    api('/orders?status=' + tab).then(setList)
+    if (tab === 'open' && waOn) api('/whatsapp/orders').then(setWaOrders).catch(() => {})
+  }
+  useEffect(() => { load(); if (tab !== 'open') return; const t = setInterval(load, 5000); return () => clearInterval(t) }, [tab, waOn]) // eslint-disable-line react-hooks/exhaustive-deps
+  const rejectWa = run(async o => {
+    const reason = await promptBox('The customer gets this reason on WhatsApp. Leave it empty to send no reason.', { title: 'Reject this order?', placeholder: 'e.g. kitchen is closing', confirmLabel: 'Reject order' })
+    if (reason === null) return
+    const r = await api(`/whatsapp/orders/${o.id}/reject`, { reason })
+    notify(r.message_sent ? 'Order rejected, customer informed' : 'Order rejected, but WhatsApp is offline so the customer was not told', r.message_sent ? 'success' : 'info'); load()
+  })
   const refund = run(async o => {
     const reason = await promptBox(`${rs(o.total)} paid by ${o.payment_method}.${o.payment_method === 'cash' ? ' The cash comes out of this shift\'s drawer.' : ''} Loyalty points and stock are not changed.`, { title: `Refund order #${o.id}?`, placeholder: 'Reason, e.g. wrong item', confirmLabel: 'Refund', required: true })
     if (reason === null) return
@@ -813,8 +832,23 @@ function Orders({ onOpen, notify }) {
       <div className="row-head"><h2>Orders</h2>
         <div className="tabs">{[['open', 'Open'], ['paid', 'Paid'], ['refunded', 'Refunded'], ['cancelled', 'Cancelled']].map(([t, label]) => <button key={t} className={tab === t ? 'active' : ''} onClick={() => setTab(t)}>{label}</button>)}</div>
       </div>
+      {tab === 'open' && waOrders.length > 0 && <div className="wa-wait">
+        <h3><Icon name="chat" size={18} />WhatsApp orders waiting ({waOrders.length})</h3>
+        {waOrders.map(o => (
+          <div key={o.id} className="wa-wait-row">
+            <div className="wa-wait-who"><b>{o.chat_name || o.phone || 'Customer'}</b>{o.fulfilment && <span className="pill sm">{o.fulfilment}</span>}
+              <div className="muted">{o.items.map(i => `${i.qty}× ${i.name}`).join(', ')}</div>
+              {o.address && <div className="muted"><Icon name="pin" size={14} /> {o.address}</div>}</div>
+            <b className="amt">{rs(o.subtotal)}</b>
+            <button className="ghost danger" onClick={() => rejectWa(o)}>Reject</button>
+            <button className="primary" onClick={() => setAccepting(o)}>Accept…</button>
+          </div>
+        ))}
+      </div>}
+      {accepting && <AcceptOrder order={accepting} chat={{ name: accepting.chat_name, phone: accepting.phone }} notify={notify}
+        onClose={() => setAccepting(null)} onDone={() => { setAccepting(null); load() }} />}
       <div className="order-list">
-        {!list.length && <div className="empty">No {tab} orders</div>}
+        {!list.length && !(tab === 'open' && waOrders.length) && <div className="empty">No {tab} orders</div>}
         {list.map(o => (
           <div key={o.id} className="order-row" onClick={() => tab === 'open' && onOpen && onOpen(o.id)}>
             <b>#{o.id}</b>

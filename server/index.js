@@ -133,7 +133,8 @@ const ACCESS = [
   [/^POST \/logout$/, ROLES],
   [/^POST \/me\/pin$/, ROLES], // choosing one's own PIN (first login with a starting PIN)
   [/^(GET|POST) \/rider(\/|$)/, RIDER], // the rider's own screen (client/src/RiderHome.jsx)
-  [/^GET \/(menu|tables|summary|kitchen)$/, ALL],
+  [/^GET \/(menu|tables|summary|kitchen|counts)$/, ALL],
+  [/^POST \/join\/[0-9a-f]{32}$/, null], // a staff login link: the secret in the link, checked in the route
   [/^POST \/kitchen\/\d+$/, ALL],
   [/^(GET|POST) \/(orders|register|qr-requests)(\/|$)/, STAFF],
   [/^GET \/floors$/, STAFF], // floors are edited by admin only
@@ -1380,6 +1381,10 @@ app.get('/api/invoicing/summary', (req, res) => {
 });
 
 // ---------- Reports ----------
+// Sidebar numbers: open orders and kitchen tickets not started or still cooking
+app.get('/api/counts', (req, res) => res.json(db.prepare(`SELECT
+  (SELECT COUNT(*) FROM orders WHERE status='open') orders_open,
+  (SELECT COUNT(*) FROM orders WHERE kitchen_status IN ('new','preparing') AND status NOT IN ('cancelled','merged')) kitchen`).get()));
 app.get('/api/summary', (req, res) => {
   const today = localDay();
   res.json(db.prepare(`SELECT COUNT(*) orders, COALESCE(SUM(total),0) revenue FROM orders
@@ -1754,15 +1759,39 @@ app.post('/api/qr-requests/:id/reject', (req, res) => {
 });
 
 // ---------- Tills: "Use this device as a till" (owner) ----------
+function newDevice(name, kind, tenantId) {
+  const key = crypto.randomBytes(24).toString('hex'), hash = tenancy.sha256(key);
+  const id = db.prepare('INSERT INTO devices (name, key_hash, kind, created_at) VALUES (?,?,?,?)').run(name, hash, kind, now()).lastInsertRowid;
+  tenancy.control.prepare('INSERT INTO device_index (hash, tenant_id) VALUES (?,?)').run(hash, tenantId);
+  return { id, key };
+}
+// A staff member's login link (owner): sent on WhatsApp; opened once, it makes that phone a till of this restaurant.
+// After that the person taps their name and types their PIN, as on any till. The link alone opens nothing.
+app.post('/api/users/:id/login-link', (req, res) => {
+  const u = db.prepare("SELECT id, name FROM users WHERE id=? AND role IN ('admin','cashier','kitchen','rider')").get(req.params.id);
+  if (!u) return res.status(404).json({ error: 'Staff member not found' });
+  const token = crypto.randomBytes(16).toString('hex');
+  db.prepare('INSERT INTO join_links (token_hash, user_id, created_at, expires_at) VALUES (?,?,?,?)').run(tenancy.sha256(token), u.id, now(), new Date(Date.now() + 7 * 86400e3).toISOString());
+  res.json({ link: siteLink('join', token), name: u.name, days: 7 });
+});
+app.post('/api/join/:token', linkRoute((req, res) => {
+  const l = db.prepare('SELECT * FROM join_links WHERE token_hash=?').get(tenancy.sha256(req.params.token));
+  if (!l) badLink(req, 'This login link is not valid. Ask the owner for a new one.');
+  if (l.used_at) throw new UserError('This login link was already used. Ask the owner for a new one.', { status: 410 });
+  if (Date.parse(l.expires_at) < Date.now()) throw new UserError('This login link has expired. Ask the owner for a new one.', { status: 410 });
+  const u = db.prepare('SELECT id, name, role FROM users WHERE id=?').get(l.user_id);
+  if (!u) throw new UserError('This person is no longer on the staff list.', { status: 410 });
+  db.prepare('UPDATE join_links SET used_at=? WHERE token_hash=?').run(now(), l.token_hash);
+  const { key } = newDevice(`${u.name}'s phone`.slice(0, 60), 'till', req.tenant.id);
+  res.json({ device_key: key, name: u.name, restaurant: getSettings().name || req.tenant.name });
+}));
 // The key is shown once; only its sha256 is stored (here and in control.db, so a request can find its restaurant).
 app.get('/api/devices', (req, res) => res.json(db.prepare('SELECT id, name, kind, created_at, last_seen, revoked_at FROM devices ORDER BY id').all()));
 app.post('/api/devices', (req, res) => {
   const name = String(req.body.name || '').trim().slice(0, 60);
   if (!name) return res.status(400).json({ error: 'Give this till a name, for example Till 1' });
   const kind = req.body.kind === 'bridge' ? 'bridge' : 'till';
-  const key = crypto.randomBytes(24).toString('hex'), hash = tenancy.sha256(key);
-  const id = db.prepare('INSERT INTO devices (name, key_hash, kind, created_at) VALUES (?,?,?,?)').run(name, hash, kind, now()).lastInsertRowid;
-  tenancy.control.prepare('INSERT INTO device_index (hash, tenant_id) VALUES (?,?)').run(hash, req.tenant.id);
+  const { id, key } = newDevice(name, kind, req.tenant.id);
   res.json({ id: Number(id), name, kind, device_key: key });
 });
 app.post('/api/devices/:id/revoke', (req, res) => {
@@ -1787,6 +1816,7 @@ if (DEMO) {
 }
 app.use(express.static(path.join(__dirname, '../client/dist'), { setHeaders: (res, file) => { if (file.endsWith('.html')) res.set('Content-Security-Policy', CSP); } }));
 app.get(['/welcome/:token', '/reset/:token'], (req, res) => res.set('Content-Security-Policy', CSP).sendFile(path.join(__dirname, '../client/dist/index.html')));
+app.get('/join/:slug/:token', (req, res) => res.set({ 'Content-Security-Policy': CSP, 'Cache-Control': 'no-store' }).sendFile(path.join(__dirname, '../client/dist/index.html')));
 app.get('/t/:slug/:token', (req, res) => res.set('Content-Security-Policy', CSP).sendFile(path.join(__dirname, '../client/dist/index.html')));
 // Rider and tracking pages: plain files in server/public (no build), opened from a link sent by WhatsApp
 app.get('/r/:slug/:token', (req, res) => res.set({ 'Content-Security-Policy': CSP, 'Cache-Control': 'no-store' }).sendFile(path.join(__dirname, 'public/rider.html')));

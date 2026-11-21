@@ -291,6 +291,8 @@ CREATE TABLE IF NOT EXISTS print_jobs (id INTEGER PRIMARY KEY, kind TEXT, label 
 CREATE TABLE IF NOT EXISTS devices (id INTEGER PRIMARY KEY, name TEXT, key_hash TEXT UNIQUE, created_at TEXT, last_seen TEXT, revoked_at TEXT);
 -- Each rider's last spot, so a server restart (a deploy) does not empty the map
 CREATE TABLE IF NOT EXISTS rider_spots (rider_id INTEGER PRIMARY KEY, lat REAL, lng REAL, acc REAL, on_duty INTEGER, at TEXT);
+-- A staff member's login link (Settings -> Staff & PINs): opening it once makes their phone a till for this restaurant. 7 days, single use.
+CREATE TABLE IF NOT EXISTS join_links (token_hash TEXT PRIMARY KEY, user_id INTEGER, created_at TEXT, expires_at TEXT, used_at TEXT);
 `);
 
 // Migrations for columns

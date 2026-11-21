@@ -620,7 +620,7 @@ function LoginPins({ notify }) {
     e.preventDefault(); setBusy(true)
     try {
       await api('/users', { id: form.id || undefined, name: form.name.trim(), role: form.role, pin: form.pin || undefined })
-      notify(form.id ? `${form.name} saved` : `${form.name} added. They can sign in on a till now`)
+      notify(form.id ? `${form.name} saved` : `${form.name} added. Now tap Login link and send it to them on WhatsApp`)
       setForm(null); load()
     } catch (x) { toastError(x.message) } finally { setBusy(false) }
   }
@@ -629,11 +629,17 @@ function LoginPins({ notify }) {
     try { await api(`/users/${u.id}/delete`, {}); notify(`${u.name} removed`); load() } catch (x) { toastError(x.message) }
   }
   const when = iso => iso ? new Date(iso).toLocaleString() : 'Never'
+  const [link, setLink] = useState(null) // { id, name, link }: a login link to send
+  const makeLink = async u => {
+    try { const r = await api(`/users/${u.id}/login-link`, {}); setLink({ id: u.id, ...r }) } catch (x) { toastError(x.message) }
+  }
+  const waText = l => `Assalam o alaikum ${l.name}! Open this link on your phone to use our POS (it works once, for ${l.days} days):\n${l.link}\nThen tap your name and type your PIN.`
+  const copy = l => navigator.clipboard?.writeText(l.link).then(() => notify('Link copied'), () => toastError('Could not copy. Press and hold the link to copy it.'))
   return (
     <div className="card settings-card">
       <div className="row-head"><h3>Staff & PINs</h3>
         <button className="primary" id="staff-add" onClick={() => setForm({ ...blankStaff })}><Icon name="plus" size={16} />Add staff</button></div>
-      <p className="muted" style={{ fontSize: 13 }}>Everyone here signs in on your tills by tapping their name and typing their PIN (4 to 12 letters or numbers). Each PIN must be different inside this restaurant. Riders get theirs in the Riders section.</p>
+      <p className="muted" style={{ fontSize: 13 }}>Each person uses their own phone: tap <b>Login link</b> and send it to them on WhatsApp. They open it once, then sign in by tapping their name and typing their PIN (4 to 12 letters or numbers). Each PIN must be different inside this restaurant. Riders get their link in the Riders section.</p>
       {form && <form className="staff-form" onSubmit={save}>
         <div className="two">
           <label>Name<input id="staff-name" autoFocus required value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} /></label>
@@ -652,8 +658,18 @@ function LoginPins({ notify }) {
         <div key={u.id} className="admin-row staff-row" data-staff={u.name}>
           <div className="staff-who"><b>{u.name}</b> <span className="pill sm">{ROLE_LABEL[u.role] || u.role}</span><br />
             <small className="muted">Last sign-in: {when(u.last_login)}</small></div>
+          <button className="ghost" aria-label={`Login link for ${u.name}`} onClick={() => makeLink(u)}><Icon name="link" size={16} />Login link</button>
           <button className="ghost" aria-label={`Edit ${u.name}`} onClick={() => setForm({ id: u.id, name: u.name, role: u.role, pin: '' })}>Edit</button>
           <button className="ghost danger" aria-label={`Remove ${u.name}`} disabled={u.id === me.id} title={u.id === me.id ? "You can't remove your own login" : undefined} onClick={() => remove(u)}>Remove</button>
+          {link?.id === u.id && <div className="staff-link">
+            <p>Send this to <b>{u.name}</b>. They open it on their phone once (it works for {link.days} days), then tap their name and type their PIN.</p>
+            <code>{link.link}</code>
+            <div className="actions" style={{ justifyContent: 'flex-start' }}>
+              <a className="btn primary" href={`https://wa.me/?text=${encodeURIComponent(waText(link))}`} target="_blank" rel="noreferrer">Send on WhatsApp</a>
+              <button className="ghost" onClick={() => copy(link)}>Copy link</button>
+              <button className="ghost" onClick={() => setLink(null)}>Close</button>
+            </div>
+          </div>}
         </div>
       ))}
     </div>

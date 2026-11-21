@@ -163,6 +163,7 @@ label.check input { width: 18px; }
   background: var(--danger); color: var(--on-state); font-size: var(--fs-xs); font-weight: 800; }
 .nav-badge.wa { background: var(--ok); }
 .nav-badge.wa-offline { background: var(--warn); }
+.nav-badge.count-badge { background: var(--surface-3); color: var(--text); animation: none; }
 .dot { display: none; } /* status is always written in words */
 .amt, .price { color: var(--text); font-weight: 700; }
 .swatch { width: 18px; height: 18px; border-radius: 5px; display: inline-block; flex: none; }
@@ -1004,5 +1005,15 @@ button, .primary, .ghost, .danger-btn, button.sm, .primary.sm, .ghost.sm, .admin
 /* chips and labels next to names are not buttons: never a touch-sized round blob */
 .pill, .count, .cod-tag, .ok-tag, .low-pill { min-height: 0; }
 .staff-row .staff-who { flex: 1; min-width: 160px; }
+.staff-row { flex-wrap: wrap; }
+.staff-link { flex-basis: 100%; background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--r-md); padding: 12px; margin-top: 4px; }
+.staff-link p { margin: 0 0 8px; }
+.staff-link code { display: block; font-family: var(--mono); font-size: var(--fs-sm); word-break: break-all; user-select: all; padding: 8px; background: var(--surface); border-radius: var(--r-sm); margin-bottom: 8px; }
 .staff-form { display: flex; flex-direction: column; gap: 12px; padding: 12px 16px; background: var(--surface-2); border-radius: var(--r-sm); }
 .billing-banner { margin: 0; }
+/* Orders: WhatsApp orders the customer confirmed, waiting for Accept */
+.wa-wait { border: 2px solid var(--ok); border-radius: var(--r-lg); padding: 12px 16px; margin-bottom: 16px; background: var(--ok-soft); }
+.wa-wait h3 { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; font-size: var(--fs-md); }
+.wa-wait-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 10px 0; border-top: 1px solid var(--line); }
+.wa-wait-who { flex: 1; min-width: 200px; display: flex; flex-direction: column; gap: 2px; }
+.wa-wait-who .pill { align-self: flex-start; }

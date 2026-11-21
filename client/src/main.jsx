@@ -13,6 +13,7 @@ import { PrintHost } from './Bill.jsx'
 
 // Customers scanning a table QR land on /t/<restaurant>/<token>
 const linkMatch = window.location.pathname.match(/^\/(?:welcome|reset)\/([a-f0-9]+)\/?$/i)
+const joinMatch = window.location.pathname.match(/^\/join\/([a-z0-9-]+)\/([a-f0-9]{32})\/?$/i) // a staff login link from the owner
 const qrMatch = window.location.pathname.match(/^\/t\/([a-z0-9-]+)\/([a-z0-9]+)/i)
 
 // sessionStorage: kept through a refresh, gone when the tab closes. ss(k) reads, ss(k, v) writes, ss(k, null) removes.
@@ -39,6 +40,7 @@ function Root() {
     if (lsGet('hz_device') || lsGet('hz_tenant')) { setDemo(false); return }
     fetch('/api/health').then(r => r.json()).then(h => setDemo(!!h.demo)).catch(() => setDemo(false))
   }, [])
+  if (joinMatch) return <JoinLink slug={joinMatch[1]} token={joinMatch[2]} />
   if (demo === null) return <div className="login" />
   if (demo) return <App />
   const device = lsGet('hz_device')
@@ -57,6 +59,25 @@ function Root() {
   }
   if (lsGet('hz_tenant') && lsGet('pos_token')) return <App />
   return <SignIn onDone={open} />
+}
+
+// A staff member opened the login link the owner sent: this phone becomes a till of that restaurant, then name + PIN
+function JoinLink({ slug, token }) {
+  const [err, setErr] = useState('')
+  useEffect(() => {
+    fetch('/api/join/' + token, { method: 'POST', headers: { 'X-Tenant': slug } })
+      .then(async r => { const d = await r.json().catch(() => ({})); if (!r.ok) throw new Error(d.error || 'This login link does not work. Ask the owner for a new one.'); return d })
+      .then(d => {
+        lsSet('hz_device', d.device_key); lsDel('pos_token'); lsDel('pos_user'); lsDel('hz_tenant'); lsDel('hz_owner_token')
+        window.location.replace('/') // the lock screen: tap your name, type your PIN
+      })
+      .catch(e => setErr(e.message))
+  }, [slug, token])
+  return (
+    <div className="login"><div className="login-card"><h1>HazelPOS</h1>
+      {err ? <p className="err" role="alert">{err}</p> : <p className="muted" role="status">Setting up this phone…</p>}
+    </div></div>
+  )
 }
 
 // Any screen that crashes shows a message and a reload button, never a blank page

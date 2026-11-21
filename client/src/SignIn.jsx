@@ -68,6 +68,7 @@ export default function SignIn({ onDone, onBack, start }) {
           <button className="primary" id="owner-go" disabled={busy || !phone.trim() || !password}>Sign in</button>
           <button type="button" className="link" onClick={() => { setErr(''); setStep('forgot') }}>Forgot password?</button>
           {onBack && <button type="button" className="ghost" onClick={onBack}>Back to the till</button>}
+          {!onBack && <p className="muted" style={{ fontSize: 'var(--fs-sm)', margin: 0 }}>Cashier, kitchen or rider? You don't sign in here. Open the login link the owner sent you on WhatsApp.</p>}
         </form>}
         {step === 'forgot' && <form className="login-form" onSubmit={forgot}>
           <h2 style={{ margin: 0 }}>Forgot password?</h2>

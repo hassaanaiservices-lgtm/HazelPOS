@@ -228,7 +228,7 @@ function Thread({ chat, connected, assistantOn, notify, onBack }) {
 }
 
 // Cashier turns a confirmed WhatsApp order into a real POS order (same prices, delivery areas and kitchen ticket as the counter)
-function AcceptOrder({ order, chat, notify, onClose, onDone }) {
+export function AcceptOrder({ order, chat, notify, onClose, onDone }) {
   const pin = order.location ? `Location pin: https://maps.google.com/?q=${order.location.lat},${order.location.lng}` : ''
   const [f, setF] = useState({ type: order.fulfilment || 'delivery', customer: chat.name || '', phone: chat.phone || '', address: order.address || pin, zone_id: '' })
   const [zones, setZones] = useState([])
