@@ -198,7 +198,7 @@ const loginFails = new Map(); // `${tenant}:${deviceId}` -> { n, until }
 app.get('/api/till', (req, res) => {
   if (!req.device) return res.status(403).json({ error: 'This device is not set up as a till', code: 'no_device' });
   res.json({ restaurant: { slug: req.tenant.slug, name: req.tenant.name }, device: { name: req.device.name },
-    staff: db.prepare("SELECT id, name, role FROM users WHERE role IN ('admin','cashier','kitchen') ORDER BY id").all() });
+    staff: db.prepare("SELECT id, name, role FROM users WHERE role IN ('admin','cashier','kitchen','rider') ORDER BY id").all() }); // a rider with a login PIN can also use a till
 });
 app.post('/api/login', (req, res) => {
   // PINs only work on a till of this restaurant, so nobody on the internet can try them. The demo keeps its role picker (PIN only).
