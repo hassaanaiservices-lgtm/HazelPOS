@@ -13,7 +13,11 @@ const TEMPLATE = path.join(__dirname, 'template');
 const RUN = process.env.DEMO_DATA_DIR || path.join(__dirname, 'run-data');
 const PORT = process.env.DEMO_PORT || process.env.PORT || 4300;
 
-if (!fs.existsSync(TEMPLATE)) { console.error('No demo/template yet. Build it first: node demo/seed.js'); process.exit(1); }
+if (process.env.NODE_ENV === 'production') process.env.NODE_ENV = 'demo'; // sample data only: the production checks are for the real POS
+if (!fs.existsSync(TEMPLATE)) { // e.g. a fresh server: build the sample restaurant first (3 s, through the real API)
+  const r = require('child_process').spawnSync(process.execPath, [path.join(__dirname, 'seed.js')], { stdio: 'inherit', env: { ...process.env, PORT: '' } });
+  if (!r || r.status !== 0 || !fs.existsSync(TEMPLATE)) { console.error('Could not build the demo restaurant (node demo/seed.js)'); process.exit(1); }
+}
 if (!fs.existsSync(path.join(ROOT, 'client', 'dist', 'index.html'))) { console.error('Build the screens first: npm --prefix client run build'); process.exit(1); }
 fs.rmSync(RUN, { recursive: true, force: true });
 fs.cpSync(TEMPLATE, RUN, { recursive: true });
