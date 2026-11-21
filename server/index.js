@@ -870,11 +870,19 @@ const newToken = () => crypto.randomBytes(16).toString('hex');
 const siteLink = (kind, token) => `${require('./auth').BASE_URL()}/${kind}/${tenancy.current().tenant.slug}/${token}`;
 const riderLink = e => e.rider_token ? siteLink('r', e.rider_token) : null;
 const trackUrl = o => o.track_token ? siteLink('track', o.track_token) : null;
-// Where each rider is (from their phone page or their own POS login). Memory only: restaurant id + rider id -> position.
+// Where each rider is (from their phone page or their own POS login): restaurant id + rider id -> position, in memory,
+// and also saved (rider_spots) so a restart or deploy keeps the last spot on the map.
 const riderSpots = new Map();
 const riderPos = {
-  get(id) { const p = riderSpots.get(`${tenancy.current().tenant.id}:${id}`); return p && Date.now() - Date.parse(p.at) < 12 * 3600e3 ? p : undefined; },
-  set(id, p) { riderSpots.set(`${tenancy.current().tenant.id}:${id}`, { ...p, at: now() }); },
+  get(id) {
+    const k = `${tenancy.current().tenant.id}:${id}`;
+    if (!riderSpots.has(k)) { const r = db.prepare('SELECT lat, lng, acc, on_duty, at FROM rider_spots WHERE rider_id=?').get(id); riderSpots.set(k, r ? { ...r, on_duty: !!r.on_duty } : null); }
+    const p = riderSpots.get(k); return p && Date.now() - Date.parse(p.at) < 12 * 3600e3 ? p : undefined;
+  },
+  set(id, p) {
+    const spot = { ...p, at: now() }; riderSpots.set(`${tenancy.current().tenant.id}:${id}`, spot);
+    db.prepare('INSERT OR REPLACE INTO rider_spots (rider_id, lat, lng, acc, on_duty, at) VALUES (?,?,?,?,?,?)').run(id, spot.lat ?? null, spot.lng ?? null, spot.acc ?? null, spot.on_duty ? 1 : 0, spot.at);
+  },
 };
 const RIDER_COLS = `e.id, e.name, e.phone, e.active, COALESCE(e.delivery_fee,0) delivery_fee, e.rider_token,
       (SELECT COUNT(*) FROM orders o WHERE o.rider_id=e.id AND o.delivery_status='out') on_road,

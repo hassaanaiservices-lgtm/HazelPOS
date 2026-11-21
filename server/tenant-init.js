@@ -289,6 +289,8 @@ CREATE TABLE IF NOT EXISTS menu_images (id INTEGER PRIMARY KEY, caption TEXT, mi
 -- Tills and tablets the owner set up ("Use this device as a till"); only the sha256 of the key is kept
 CREATE TABLE IF NOT EXISTS print_jobs (id INTEGER PRIMARY KEY, kind TEXT, label TEXT, data TEXT, status TEXT DEFAULT 'queued', error TEXT, created_at TEXT, sent_at TEXT, done_at TEXT, tries INTEGER DEFAULT 0, retried INTEGER DEFAULT 0); -- the server only queues bytes; the Bridge prints them
 CREATE TABLE IF NOT EXISTS devices (id INTEGER PRIMARY KEY, name TEXT, key_hash TEXT UNIQUE, created_at TEXT, last_seen TEXT, revoked_at TEXT);
+-- Each rider's last spot, so a server restart (a deploy) does not empty the map
+CREATE TABLE IF NOT EXISTS rider_spots (rider_id INTEGER PRIMARY KEY, lat REAL, lng REAL, acc REAL, on_duty INTEGER, at TEXT);
 `);
 
 // Migrations for columns
