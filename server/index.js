@@ -1768,6 +1768,8 @@ app.use('/api', (req, res) => res.status(404).json({ error: `Unknown address: ${
 // The public demo is one service: the landing page (site/) at /, the POS at /app. The POS still loads its own files from
 // /assets, /favicon.svg and /icons.svg (no clash with site/, whose index.html wins at /).
 if (DEMO) {
+  // "Sign in" on the landing page: the real POS where restaurants sign in (POS_URL), or this demo when it isn't set
+  app.get(['/signin', '/login'], (req, res) => { const u = String(process.env.POS_URL || '').replace(/\/+$/, ''); res.redirect(302, u ? u + '/' : '/app'); });
   app.get('/README.md', (req, res) => res.status(404).end()); // site/README.md is notes for us, not for visitors
   app.get(['/app', '/app/'], (req, res) => res.set('Content-Security-Policy', CSP).sendFile(path.join(__dirname, '../client/dist/index.html')));
   app.use('/images', express.static(path.join(__dirname, '../site/images'), { maxAge: '7d' })); // screenshots change rarely: let browsers keep them

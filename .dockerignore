@@ -12,7 +12,8 @@ server/whatsapp/media
 desktop
 bridge
 cloud
-demo
+demo/template
+demo/run-data
 graphify-out
 docs
 grafana

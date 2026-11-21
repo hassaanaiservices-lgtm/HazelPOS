@@ -228,6 +228,8 @@
     // The demo's address. Empty until the demo server is live: the buttons then lead to the closing section.
     const DEMO_URL = '' // set this to the hosted demo URL when the demo service is live
     if (DEMO_URL) for (const a of document.querySelectorAll('[data-demo-link]')) a.href = DEMO_URL
+    // Served by the demo server (APP=demo): the demo POS is right here at /app
+    else fetch('/api/health').then(r => r.json()).then(h => { if (h.demo) for (const a of document.querySelectorAll('[data-demo-link]')) a.href = '/app' }).catch(() => {})
 
     // The bot chat: while the visitor scrolls through the stage, messages appear one by one (a reply shows "typing" first).
     // Scrolling back hides them again. Without the script, or with reduced motion, the whole chat is simply shown.

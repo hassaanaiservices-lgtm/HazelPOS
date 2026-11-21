@@ -112,7 +112,7 @@ module.exports = function whatsappManager({ tenancy, pos, askImpl = rag.ask }) {
   const statusBody = h => ({ ...h.wa.status(), state: h.wa.status().status, ...h.store.counts(), assistant: h.assistant.enabled(), assistant_paused_unpaid: false, business_hours: config.assistant.business_hours, stt: h.stt.status() });
 
   // Not linked yet: 'disconnected', so the WhatsApp screen shows and the owner can press Connect. 'off' only when the server turns WhatsApp off.
-  router.get('/status', (req, res) => { const h = cur(); res.json(h ? statusBody(h) : OFF ? { state: 'off', status: 'off' }
+  router.get('/status', (req, res) => { const h = cur(); res.json(h ? statusBody(h) : OFF && process.env.DEMO !== '1' ? { state: 'off', status: 'off' } // the demo shows the screen; Connect explains
     : { state: 'disconnected', status: 'disconnected', unread: 0, offline_chats: 0, needs_attention: 0, orders_pending: 0, assistant: false, business_hours: config.assistant.business_hours }); });
   router.post('/connect', async (req, res) => {
     if (OFF) return res.status(400).json({ error: 'WhatsApp is turned off on this server (WHATSAPP=off).' });

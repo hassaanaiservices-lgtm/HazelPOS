@@ -23,6 +23,7 @@ COPY rag rag
 COPY site site
 COPY admin/server.js admin/
 COPY run-app.js ./
+COPY demo/seed.js demo/start.js demo/
 COPY --from=build /app/client/dist client/dist
 COPY --from=build /app/admin/dist admin/dist
 RUN mkdir -p /data && chown -R node:node /data /app
