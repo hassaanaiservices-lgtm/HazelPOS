@@ -10,7 +10,7 @@
     const el = $('map'); el.style.display = 'block';
     if (!map) {
       map = L.map('map', { zoomControl: true }).setView([r.lat, r.lng], 15);
-      L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>' }).addTo(map);
+      L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, referrerPolicy: 'strict-origin', attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>' }).addTo(map);
       rider = L.marker([r.lat, r.lng], { icon: L.divIcon({ className: '', html: '<div class="rider-marker">🛵</div>', iconSize: [36, 36], iconAnchor: [18, 18] }) }).addTo(map);
       if (c) home = L.marker([c.lat, c.lng], { icon: L.divIcon({ className: '', html: '<div class="home-marker">🏠</div>', iconSize: [30, 30], iconAnchor: [15, 15] }) }).addTo(map);
       line = L.polyline([], { color: '#ff7a1a', weight: 3, opacity: .6 }).addTo(map);

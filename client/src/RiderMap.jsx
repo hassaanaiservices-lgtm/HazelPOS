@@ -20,7 +20,7 @@ export default function RiderMap({ height = 340 }) {
     if (!box.current) return
     if (!map.current) {
       map.current = L.map(box.current).setView([31.52, 74.35], 12) // Lahore until a rider shows up
-      L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(map.current)
+      L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, referrerPolicy: 'strict-origin', attribution: '© OpenStreetMap' }).addTo(map.current)
     }
     const seen = new Set()
     for (const r of riders) {
